@@ -1,51 +1,44 @@
 (function() {
     'use strict';
     
-    const PLUGIN_ID = 'smart-filters';
-    const PLUGIN_VERSION = '1.0.0';
+    console.log('[SmartFilters] Loader started');
     
     function start() {
-        // Определяем версию Lampa
+        console.log('[SmartFilters] Start function called');
+        
         let version = 'v3';
         if (Lampa.Manifest.app_digital && Lampa.Manifest.app_digital < 3.0) {
             version = 'v2';
         }
         
-        // Загружаем стили (опционально)
-        const cssUrl = `https://YuriKuv.github.io/lampa-smart-filters/styles.css`;
-        if (!document.querySelector(`link[href="${cssUrl}"]`)) {
-            const link = document.createElement('link');
-            link.rel = 'stylesheet';
-            link.href = cssUrl;
-            document.head.appendChild(link);
-        }
-        
-        // Загружаем основной файл плагина
         let scriptUrl = `https://YuriKuv.github.io/lampa-smart-filters/${version}/smart-filters.js`;
+        console.log('[SmartFilters] Loading script from:', scriptUrl);
         
         Lampa.Utils.putScriptAsync(scriptUrl, function() {
-            console.log(`[${PLUGIN_ID}] v${PLUGIN_VERSION} loaded successfully`);
+            console.log('[SmartFilters] Script loaded successfully');
             
-            // Ждём немного, чтобы плагин успел инициализироваться
+            // Проверяем, что плагин появился
             setTimeout(function() {
-                if (window.SmartFiltersPlugin && typeof window.SmartFiltersPlugin.init === 'function') {
-                    window.SmartFiltersPlugin.init();
+                if (window.SmartFiltersPlugin) {
+                    console.log('[SmartFilters] Plugin object found');
+                    if (typeof window.SmartFiltersPlugin.init === 'function') {
+                        console.log('[SmartFilters] Calling init()');
+                        window.SmartFiltersPlugin.init();
+                    } else {
+                        console.error('[SmartFilters] init is not a function');
+                    }
                 } else {
-                    console.log(`[${PLUGIN_ID}] Waiting for plugin to initialize...`);
-                    // Пробуем ещё раз через секунду
-                    setTimeout(function() {
-                        if (window.SmartFiltersPlugin && typeof window.SmartFiltersPlugin.init === 'function') {
-                            window.SmartFiltersPlugin.init();
-                        }
-                    }, 1000);
+                    console.error('[SmartFilters] SmartFiltersPlugin not found on window');
                 }
             }, 500);
         });
     }
     
     if (window.appready) {
+        console.log('[SmartFilters] App already ready');
         start();
     } else {
+        console.log('[SmartFilters] Waiting for app');
         Lampa.Listener.follow('app', start);
     }
 })();
