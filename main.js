@@ -1,21 +1,20 @@
 (function() {
     'use strict';
     
-    console.log('[SmartFilters] Loader started');
+    console.log('FINAL: Loader started');
     
     function start() {
-        console.log('[SmartFilters] Start called');
-        var url = 'https://YuriKuv.github.io/lampa-smart-filters/v3/smart-filters.js';
-        console.log('[SmartFilters] Loading:', url);
+        console.log('FINAL: Start called');
+        var url = 'https://YuriKuv.github.io/lampa-smart-filters/v3/smart-filters.js?t=' + Date.now();
+        console.log('FINAL: Loading:', url);
         
         Lampa.Utils.putScriptAsync(url, function() {
-            console.log('[SmartFilters] Script loaded');
+            console.log('FINAL: Script loaded callback');
             setTimeout(function() {
                 if (window.SmartFiltersPlugin) {
-                    console.log('[SmartFilters] Plugin found, calling init');
-                    window.SmartFiltersPlugin.init();
+                    console.log('FINAL: Plugin found!', window.SmartFiltersPlugin);
                 } else {
-                    console.error('[SmartFilters] Plugin NOT found');
+                    console.error('FINAL: Plugin NOT found');
                 }
             }, 500);
         });
