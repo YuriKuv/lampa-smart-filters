@@ -16,22 +16,31 @@
     
     // --- Функции работы с данными ---
     function loadData() {
-        var saved = Lampa.Storage.get(STORAGE_KEY);
-        if (saved && saved.categories) {
-            categories = saved.categories;
-        } else {
-            categories = [
-                { id: '1', name: 'Избранное', filters: [] },
-                { id: '2', name: 'Смотреть позже', filters: [] },
-                { id: '3', name: 'Любимые жанры', filters: [] }
-            ];
-            saveData();
+        try {
+            var saved = Lampa.Storage.get(STORAGE_KEY);
+            if (saved && saved.categories) {
+                categories = saved.categories;
+            } else {
+                categories = [
+                    { id: '1', name: 'Избранное', filters: [] },
+                    { id: '2', name: 'Смотреть позже', filters: [] },
+                    { id: '3', name: 'Любимые жанры', filters: [] }
+                ];
+                saveData();
+            }
+            console.log('[SmartFilters] Загружено категорий:', categories.length);
+        } catch(e) {
+            console.error('[SmartFilters] Ошибка загрузки данных:', e);
+            categories = [];
         }
-        console.log('[SmartFilters] Загружено категорий:', categories.length);
     }
     
     function saveData() {
-        Lampa.Storage.set(STORAGE_KEY, { categories: categories });
+        try {
+            Lampa.Storage.set(STORAGE_KEY, { categories: categories });
+        } catch(e) {
+            console.error('[SmartFilters] Ошибка сохранения:', e);
+        }
     }
     
     // --- Получение текущего фильтра ---
@@ -40,9 +49,9 @@
             var params = {};
             if (Lampa.Controller && Lampa.Controller.filters && Lampa.Controller.filters.params) {
                 var p = Lampa.Controller.filters.params;
-                if (p.genres) params.genres = p.genres;
+                if (p.genres && p.genres.length) params.genres = p.genres;
                 if (p.year) params.year = p.year;
-                if (p.countries) params.countries = p.countries;
+                if (p.countries && p.countries.length) params.countries = p.countries;
                 if (p.sort) params.sort = p.sort;
                 if (p.rating) params.rating = p.rating;
             }
@@ -56,6 +65,8 @@
     // --- Применение фильтра ---
     function applyFilter(params) {
         try {
+            if (!params) return false;
+            
             if (Lampa.Controller && Lampa.Controller.filters) {
                 if (typeof Lampa.Controller.filters.setParams === 'function') {
                     Lampa.Controller.filters.setParams(params);
@@ -81,7 +92,7 @@
             return false;
         }
         
-        var category = categories.find(c => c.id === categoryId);
+        var category = categories.find(function(c) { return c.id === categoryId; });
         if (category) {
             category.filters.push({
                 id: Date.now().toString(),
@@ -98,8 +109,11 @@
     
     // --- Диалог сохранения ---
     function showSaveDialog() {
+        console.log('[SmartFilters] showSaveDialog вызван');
+        
         if (categories.length === 0) {
-            if (confirm('Нет категорий. Создать "Избранное"?')) {
+            var create = confirm('Нет категорий. Создать "Избранное"?');
+            if (create) {
                 categories.push({ id: Date.now().toString(), name: 'Избранное', filters: [] });
                 saveData();
             } else {
@@ -108,9 +122,9 @@
         }
         
         var message = '📁 Выберите категорию:\n\n';
-        categories.forEach((cat, i) => {
-            message += (i + 1) + '. ' + cat.name + ' (' + cat.filters.length + ')\n';
-        });
+        for (var i = 0; i < categories.length; i++) {
+            message += (i + 1) + '. ' + categories[i].name + ' (' + categories[i].filters.length + ')\n';
+        }
         message += '\nВведите номер:';
         
         var choice = prompt(message);
@@ -124,12 +138,15 @@
     
     // --- Показать список фильтров ---
     function showFiltersList() {
+        console.log('[SmartFilters] showFiltersList вызван');
+        
         var allFilters = [];
-        categories.forEach(cat => {
-            cat.filters.forEach(f => {
-                allFilters.push({ category: cat.name, filter: f });
-            });
-        });
+        for (var i = 0; i < categories.length; i++) {
+            var cat = categories[i];
+            for (var j = 0; j < cat.filters.length; j++) {
+                allFilters.push({ category: cat.name, filter: cat.filters[j] });
+            }
+        }
         
         if (allFilters.length === 0) {
             if (Lampa.Notify) Lampa.Notify.show('📭 Нет сохранённых фильтров', 2000);
@@ -137,9 +154,9 @@
         }
         
         var message = '📋 Сохранённые фильтры:\n\n';
-        allFilters.forEach((item, i) => {
-            message += (i + 1) + '. [' + item.category + '] ' + item.filter.name + '\n';
-        });
+        for (var i = 0; i < allFilters.length; i++) {
+            message += (i + 1) + '. [' + allFilters[i].category + '] ' + allFilters[i].filter.name + '\n';
+        }
         message += '\nВведите номер для применения:';
         
         var choice = prompt(message);
@@ -148,22 +165,21 @@
         }
     }
     
-    // --- Добавление пункта в меню (как в kinopoisk.js) ---
+    // --- Добавление пункта в меню ---
     function addMenuItem() {
         console.log('[SmartFilters] Добавление пункта меню...');
         
         // Удаляем старые, чтобы не было дублей
         $('.menu__item[data-name="smart_filters_menu"]').remove();
         
-        // Создаём элемент как в примере
-        var button = $('<li class="menu__item selector" data-name="smart_filters_menu">\n\
-            <div class="menu__ico">\n\
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">\n\
-                    <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>\n\
-                    <path d="M8 4h2v16H8V4zM14 4h2v16h-2V4z"/>\n\
-                </svg>\n\
-            </div>\n\
-            <div class="menu__text">' + PLUGIN_NAME + '</div>\n\
+        // Создаём элемент
+        var button = $('<li class="menu__item selector" data-name="smart_filters_menu">\
+            <div class="menu__ico">\
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">\
+                    <path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2zM8 4h2v16H8V4zM14 4h2v16h-2V4z"/>\
+                </svg>\
+            </div>\
+            <div class="menu__text">' + PLUGIN_NAME + '</div>\
         </li>');
         
         // Добавляем перед настройками
@@ -175,10 +191,13 @@
         }
         
         // Обработчик нажатия
-        button.on('hover:enter', function() {
+        button.off('hover:enter').on('hover:enter', function() {
             console.log('[SmartFilters] Нажатие на пункт меню');
             
-            // Показываем подменю
+            // Удаляем старое подменю
+            $('.menu__submenu[data-parent="smart_filters_menu"]').remove();
+            
+            // Создаём подменю
             var submenuHtml = '<div class="menu__submenu" data-parent="smart_filters_menu" style="position: absolute; background: rgba(0,0,0,0.95); border-radius: 8px; min-width: 200px; z-index: 1000;">';
             submenuHtml += '<div class="menu__submenu-item selector" data-action="save" style="padding: 12px 16px; cursor: pointer;">💾 Сохранить текущий фильтр</div>';
             submenuHtml += '<div class="menu__submenu-item selector" data-action="list" style="padding: 12px 16px; cursor: pointer;">📋 Мои фильтры</div>';
@@ -187,12 +206,12 @@
             $('body').append(submenuHtml);
             
             // Обработчики подменю
-            $('[data-action="save"]').on('hover:enter', function() {
+            $('[data-action="save"]').off('hover:enter').on('hover:enter', function() {
                 showSaveDialog();
                 $('.menu__submenu[data-parent="smart_filters_menu"]').remove();
             });
             
-            $('[data-action="list"]').on('hover:enter', function() {
+            $('[data-action="list"]').off('hover:enter').on('hover:enter', function() {
                 showFiltersList();
                 $('.menu__submenu[data-parent="smart_filters_menu"]').remove();
             });
@@ -205,17 +224,16 @@
     function addFilterButton() {
         console.log('[SmartFilters] Добавление кнопки в фильтр...');
         
-        // Проверяем каждую секунду, пока не найдём панель фильтров
         var interval = setInterval(function() {
             var filterPanel = $('.filter-panel .buttons, .filters-panel .buttons');
             if (filterPanel.length && !$('.smart-filters-btn').length) {
-                var btnHtml = '<div class="button smart-filters-btn selector" style="margin-left: 10px;">\n\
-                    <div class="button__icon">💾</div>\n\
-                    <div class="button__text">Сохранить фильтр</div>\n\
+                var btnHtml = '<div class="button smart-filters-btn selector" style="margin-left: 10px;">\
+                    <div class="button__icon">💾</div>\
+                    <div class="button__text">Сохранить фильтр</div>\
                 </div>';
                 filterPanel.append(btnHtml);
                 
-                $('.smart-filters-btn').on('hover:enter', function() {
+                $('.smart-filters-btn').off('hover:enter').on('hover:enter', function() {
                     showSaveDialog();
                 });
                 
@@ -228,7 +246,10 @@
     // --- Добавление раздела в настройки ---
     function addSettings() {
         try {
-            if (typeof Lampa.SettingsApi === 'undefined') return;
+            if (typeof Lampa.SettingsApi === 'undefined') {
+                console.log('[SmartFilters] SettingsApi не доступен');
+                return;
+            }
             
             Lampa.SettingsApi.addComponent({
                 component: 'smart_filters_settings',
@@ -249,7 +270,7 @@
                     if (confirm('Удалить все сохранённые фильтры?')) {
                         categories = [];
                         saveData();
-                        Lampa.Notify.show('Все фильтры удалены', 2000);
+                        if (Lampa.Notify) Lampa.Notify.show('Все фильтры удалены', 2000);
                     }
                 }
             });
@@ -260,20 +281,24 @@
         }
     }
     
-    // --- Инициализация плагина (как в kinopoisk.js) ---
+    // --- Инициализация плагина ---
     function initPlugin() {
         console.log('[SmartFilters] Инициализация...');
         
-        loadData();
-        addMenuItem();
-        addFilterButton();
-        addSettings();
-        
-        console.log('[SmartFilters] Готов к работе!');
-        if (Lampa.Notify) Lampa.Notify.show(PLUGIN_NAME + ' загружен', 2000);
+        try {
+            loadData();
+            addMenuItem();
+            addFilterButton();
+            addSettings();
+            
+            console.log('[SmartFilters] Готов к работе!');
+            if (Lampa.Notify) Lampa.Notify.show(PLUGIN_NAME + ' загружен', 2000);
+        } catch(e) {
+            console.error('[SmartFilters] Ошибка инициализации:', e);
+        }
     }
     
-    // --- Запуск (как в kinopoisk.js) ---
+    // --- Запуск ---
     if (window.appready) {
         initPlugin();
     } else {
