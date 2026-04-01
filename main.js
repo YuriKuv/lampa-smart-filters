@@ -24,11 +24,22 @@
         let scriptUrl = `https://YuriKuv.github.io/lampa-smart-filters/${version}/smart-filters.js`;
         
         Lampa.Utils.putScriptAsync(scriptUrl, function() {
-            console.log(`[${PLUGIN_CONFIG.id}] v${PLUGIN_VERSION} loaded successfully`);
+            console.log(`[${PLUGIN_ID}] v${PLUGIN_VERSION} loaded successfully`);
             
-            if (window.SmartFiltersPlugin && typeof window.SmartFiltersPlugin.init === 'function') {
-                window.SmartFiltersPlugin.init();
-            }
+            // Ждём немного, чтобы плагин успел инициализироваться
+            setTimeout(function() {
+                if (window.SmartFiltersPlugin && typeof window.SmartFiltersPlugin.init === 'function') {
+                    window.SmartFiltersPlugin.init();
+                } else {
+                    console.log(`[${PLUGIN_ID}] Waiting for plugin to initialize...`);
+                    // Пробуем ещё раз через секунду
+                    setTimeout(function() {
+                        if (window.SmartFiltersPlugin && typeof window.SmartFiltersPlugin.init === 'function') {
+                            window.SmartFiltersPlugin.init();
+                        }
+                    }, 1000);
+                }
+            }, 500);
         });
     }
     
