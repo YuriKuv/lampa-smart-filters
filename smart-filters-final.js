@@ -30,10 +30,11 @@
         updateMenuItems();
     }
     
-    // --- Получение текущих параметров фильтра из компонента ---
+    // --- Получение текущих параметров фильтра из активного компонента ---
     function getCurrentFilterParams() {
         try {
             var params = {};
+            // Пытаемся получить параметры из активного фильтра
             if (Lampa.Controller && Lampa.Controller.filters && Lampa.Controller.filters.params) {
                 var p = Lampa.Controller.filters.params;
                 if (p.genres && p.genres.length) params.genres = p.genres;
@@ -53,143 +54,76 @@
         }
     }
     
-    // --- Применение фильтра и открытие раздела ---
-    function openFilteredSection(filterName, filterParams) {
-        console.log('[SmartFilters] Открываем раздел с фильтром:', filterName);
+    // --- Применение фильтра и переход в раздел ---
+    function applyFilterAndNavigate(filterName, filterParams) {
+        console.log('[SmartFilters] Применяем фильтр:', filterName);
         
-        // Создаём компонент для отображения отфильтрованного контента
-        var componentName = 'smart_filter_' + Date.now();
-        
-        // Функция для загрузки контента с применённым фильтром
-        var component = function(object) {
-            var comp = new Lampa.InteractionCategory(object);
-            comp.create = function() {
-                var params = {};
-                
-                // Применяем сохранённые параметры фильтра
-                if (filterParams) {
-                    if (filterParams.genres) params.genres = filterParams.genres;
-                    if (filterParams.year) params.year = filterParams.year;
-                    if (filterParams.yearFrom) params.yearFrom = filterParams.yearFrom;
-                    if (filterParams.yearTo) params.yearTo = filterParams.yearTo;
-                    if (filterParams.countries) params.countries = filterParams.countries;
-                    if (filterParams.sort) params.sort = filterParams.sort;
-                    if (filterParams.ratingFrom) params.ratingFrom = filterParams.ratingFrom;
-                    if (filterParams.ratingTo) params.ratingTo = filterParams.ratingTo;
-                    if (filterParams.keyword) params.keyword = filterParams.keyword;
-                }
-                
-                // Определяем тип контента (фильмы или сериалы)
-                var currentActivity = Lampa.Activity.active();
-                var mediaType = 'movie';
-                if (currentActivity && currentActivity.url) {
-                    if (currentActivity.url.indexOf('tv') !== -1 || currentActivity.url.indexOf('series') !== -1) {
-                        mediaType = 'tv';
-                    }
-                }
-                
-                // Формируем URL для запроса
-                var apiUrl = Lampa.Utils.protocol() + 'tmdb.' + Lampa.Manifest.cub_domain + '/3/discover/' + mediaType;
-                apiUrl += '?api_key=4ef0d7355d9ffb5151e987764708ce96&language=ru';
-                
-                // Добавляем параметры фильтра
-                if (params.genres && params.genres.length) {
-                    apiUrl += '&with_genres=' + params.genres.join(',');
-                }
-                if (params.year) {
-                    apiUrl += '&primary_release_year=' + params.year;
-                }
-                if (params.yearFrom && params.yearTo) {
-                    apiUrl += '&primary_release_date.gte=' + params.yearFrom + '-01-01&primary_release_date.lte=' + params.yearTo + '-12-31';
-                }
-                if (params.countries && params.countries.length) {
-                    apiUrl += '&with_origin_country=' + params.countries.join(',');
-                }
-                if (params.sort) {
-                    var sortMap = {
-                        'popularity.desc': 'popularity.desc',
-                        'vote_average.desc': 'vote_average.desc',
-                        'release_date.desc': 'primary_release_date.desc',
-                        'original_title.asc': 'original_title.asc'
-                    };
-                    apiUrl += '&sort_by=' + (sortMap[params.sort] || 'popularity.desc');
-                }
-                if (params.ratingFrom) {
-                    apiUrl += '&vote_average.gte=' + params.ratingFrom;
-                }
-                if (params.ratingTo) {
-                    apiUrl += '&vote_average.lte=' + params.ratingTo;
-                }
-                
-                apiUrl += '&page=' + object.page;
-                
-                // Выполняем запрос
-                Lampa.Api.request(apiUrl, function(data) {
-                    if (data && data.results) {
-                        this.build(data);
-                    } else {
-                        this.empty();
-                    }
-                }.bind(this), function() {
-                    this.empty();
-                }.bind(this));
-            };
-            comp.nextPageReuest = function(object, resolve, reject) {
-                var url = this.url;
-                if (object.page > 1) {
-                    url += '&page=' + object.page;
-                }
-                Lampa.Api.request(url, resolve, reject);
-            }.bind(comp);
-            return comp;
-        };
-        
-        // Регистрируем компонент
-        Lampa.Component.add(componentName, component);
-        
-        // Открываем раздел
-        Lampa.Activity.push({
-            url: '',
-            title: filterName || 'Мой фильтр',
-            component: componentName,
-            page: 1
-        });
-    }
-    
-    // --- Открыть редактор фильтра (как встроенный фильтр) ---
-    function openFilterEditor(onSave) {
-        console.log('[SmartFilters] Открываем редактор фильтра');
-        
-        // Получаем текущий раздел
+        // Определяем текущий раздел (фильмы или сериалы)
         var currentActivity = Lampa.Activity.active();
-        var mediaType = 'movie';
-        var currentUrl = '';
+        var targetComponent = 'catalog';
+        var targetUrl = '';
         
+        // Если мы в разделе фильмов или сериалов, используем его
         if (currentActivity) {
-            if (currentActivity.url && (currentActivity.url.indexOf('tv') !== -1 || currentActivity.url.indexOf('series') !== -1)) {
-                mediaType = 'tv';
+            var component = currentActivity.component;
+            if (component === 'catalog' || component === 'movie' || component === 'tv' || component === 'serial') {
+                targetComponent = component;
+                targetUrl = currentActivity.url || '';
             }
-            currentUrl = currentActivity.url;
         }
         
-        // Открываем стандартный интерфейс фильтра Lampa
+        // Если не определили, по умолчанию открываем фильмы
+        if (!targetUrl) {
+            targetUrl = 'https://tmdb.' + Lampa.Manifest.cub_domain + '/3/discover/movie?api_key=4ef0d7355d9ffb5151e987764708ce96&language=ru';
+        }
+        
+        // Сохраняем параметры фильтра во временное хранилище
+        Lampa.Storage.set('smart_filters_temp_params', filterParams);
+        
+        // Переходим в раздел
         Lampa.Activity.push({
-            url: currentUrl,
-            title: 'Настройка фильтра',
-            component: 'filter_editor',
-            onBack: function(params) {
-                if (params && onSave) {
-                    onSave(params);
-                }
-            }
+            url: targetUrl,
+            title: filterName,
+            component: targetComponent,
+            page: 1
         });
         
-        // Альтернативный способ: используем встроенный компонент фильтра
+        // После перехода применяем фильтр
         setTimeout(function() {
+            if (Lampa.Controller && Lampa.Controller.filters) {
+                Lampa.Controller.filters.setParams(filterParams);
+                if (Lampa.Controller.filters.update) Lampa.Controller.filters.update();
+                if (Lampa.Controller.filters.reload) Lampa.Controller.filters.reload();
+            }
+            if (Lampa.Notify) Lampa.Notify.show('✓ Фильтр "' + filterName + '" применён', 1500);
+        }, 500);
+    }
+    
+    // --- Открыть стандартный интерфейс фильтрации ---
+    function openFilterInterface() {
+        console.log('[SmartFilters] Открываем интерфейс фильтрации');
+        
+        // Получаем текущий активный раздел
+        var currentActivity = Lampa.Activity.active();
+        if (currentActivity && currentActivity.component === 'catalog') {
+            // Если уже в каталоге, открываем фильтр
             if (Lampa.Controller && Lampa.Controller.filters) {
                 Lampa.Controller.toggle('filter');
             }
-        }, 500);
+        } else {
+            // Иначе переходим в каталог фильмов и открываем фильтр
+            Lampa.Activity.push({
+                url: 'https://tmdb.' + Lampa.Manifest.cub_domain + '/3/discover/movie?api_key=4ef0d7355d9ffb5151e987764708ce96&language=ru',
+                title: 'Фильмы',
+                component: 'catalog',
+                page: 1
+            });
+            setTimeout(function() {
+                if (Lampa.Controller && Lampa.Controller.filters) {
+                    Lampa.Controller.toggle('filter');
+                }
+            }, 500);
+        }
     }
     
     // --- Сохранить текущий фильтр ---
@@ -197,7 +131,7 @@
         var currentParams = getCurrentFilterParams();
         
         if (!currentParams) {
-            if (Lampa.Notify) Lampa.Notify.show('✗ Сначала примените фильтр', 2000);
+            if (Lampa.Notify) Lampa.Notify.show('✗ Сначала откройте фильтр и примените параметры', 2000);
             return;
         }
         
@@ -215,40 +149,17 @@
         if (Lampa.Notify) Lampa.Notify.show('✓ Фильтр "' + name + '" сохранён', 2000);
     }
     
-    // --- Создать новый фильтр через редактор ---
+    // --- Создать новый фильтр (открыть фильтр, потом сохранить) ---
     function createNewFilter() {
-        // Открываем страницу с фильтрами
-        var currentActivity = Lampa.Activity.active();
-        var currentComponent = currentActivity ? currentActivity.component : 'catalog';
+        // Открываем интерфейс фильтрации
+        openFilterInterface();
         
-        // Переходим в раздел с фильтрами
-        Lampa.Activity.push({
-            url: '',
-            title: 'Новый фильтр',
-            component: 'filter_creator',
-            onComplete: function(params) {
-                if (params && params.genres) {
-                    var name = prompt('Введите название фильтра:', 'Новый фильтр');
-                    if (name && name.trim()) {
-                        savedFilters.push({
-                            id: Date.now().toString(),
-                            name: name.trim(),
-                            params: params,
-                            date: new Date().toLocaleString()
-                        });
-                        saveFilters();
-                        if (Lampa.Notify) Lampa.Notify.show('✓ Фильтр "' + name + '" сохранён', 2000);
-                    }
-                }
-            }
-        });
-        
-        // Используем встроенный компонент фильтра
+        // Показываем подсказку
         setTimeout(function() {
-            if (Lampa.Controller && Lampa.Controller.filters) {
-                Lampa.Controller.filters.open();
+            if (Lampa.Notify) {
+                Lampa.Notify.show('Настройте фильтр, затем нажмите "Сохранить фильтр"', 3000);
             }
-        }, 500);
+        }, 1000);
     }
     
     // --- Обновить пункты меню ---
@@ -260,8 +171,8 @@
         addMainMenuItem();
         
         // Добавляем пункты для каждого сохранённого фильтра
-        savedFilters.forEach(function(filter, index) {
-            addFilterMenuItem(filter, index);
+        savedFilters.forEach(function(filter) {
+            addFilterMenuItem(filter);
         });
     }
     
@@ -293,7 +204,7 @@
     }
     
     // --- Добавить пункт для сохранённого фильтра ---
-    function addFilterMenuItem(filter, index) {
+    function addFilterMenuItem(filter) {
         var menuName = 'smart_filter_' + filter.id;
         
         var button = $('<li class="menu__item selector" data-name="' + menuName + '">\
@@ -321,10 +232,10 @@
         // Обработчик для применения фильтра
         button.off('hover:enter').on('hover:enter', function() {
             console.log('[SmartFilters] Применяем фильтр:', filter.name);
-            openFilteredSection(filter.name, filter.params);
+            applyFilterAndNavigate(filter.name, filter.params);
         });
         
-        // Обработчик для удаления (при долгом нажатии или через подменю)
+        // Удаление при долгом нажатии
         button.on('contextmenu', function(e) {
             e.preventDefault();
             if (confirm('Удалить фильтр "' + filter.name + '"?')) {
