@@ -4,41 +4,26 @@
     console.log('[SmartFilters] Loader started');
     
     function start() {
-        console.log('[SmartFilters] Start function called');
+        console.log('[SmartFilters] Start called');
+        var url = 'https://YuriKuv.github.io/lampa-smart-filters/v3/smart-filters.js';
+        console.log('[SmartFilters] Loading:', url);
         
-        let version = 'v3';
-        if (Lampa.Manifest.app_digital && Lampa.Manifest.app_digital < 3.0) {
-            version = 'v2';
-        }
-        
-        let scriptUrl = `https://YuriKuv.github.io/lampa-smart-filters/${version}/smart-filters.js`;
-        console.log('[SmartFilters] Loading script from:', scriptUrl);
-        
-        Lampa.Utils.putScriptAsync(scriptUrl, function() {
-            console.log('[SmartFilters] Script loaded successfully');
-            
-            // Проверяем, что плагин появился
+        Lampa.Utils.putScriptAsync(url, function() {
+            console.log('[SmartFilters] Script loaded');
             setTimeout(function() {
                 if (window.SmartFiltersPlugin) {
-                    console.log('[SmartFilters] Plugin object found');
-                    if (typeof window.SmartFiltersPlugin.init === 'function') {
-                        console.log('[SmartFilters] Calling init()');
-                        window.SmartFiltersPlugin.init();
-                    } else {
-                        console.error('[SmartFilters] init is not a function');
-                    }
+                    console.log('[SmartFilters] Plugin found, calling init');
+                    window.SmartFiltersPlugin.init();
                 } else {
-                    console.error('[SmartFilters] SmartFiltersPlugin not found on window');
+                    console.error('[SmartFilters] Plugin NOT found');
                 }
             }, 500);
         });
     }
     
     if (window.appready) {
-        console.log('[SmartFilters] App already ready');
         start();
     } else {
-        console.log('[SmartFilters] Waiting for app');
         Lampa.Listener.follow('app', start);
     }
 })();
