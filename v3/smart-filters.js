@@ -1,10 +1,15 @@
 (function() {
     'use strict';
     
+    console.log('[SmartFilters] File loaded, checking conditions...');
+    
     // Предотвращаем двойную инициализацию
     if (window.SmartFiltersPlugin && window.SmartFiltersPlugin.initialized) {
+        console.log('[SmartFilters] Already initialized, skipping');
         return;
     }
+    
+    console.log('[SmartFilters] Starting initialization...');
     
     // --- Конфигурация плагина ---
     const PLUGIN_CONFIG = {
@@ -17,12 +22,14 @@
         defaultCategories: ['Избранное', 'Смотреть позже', 'Любимые жанры']
     };
     
+    console.log('[SmartFilters] Config loaded:', PLUGIN_CONFIG);
+    
     // --- Глобальные переменные плагина ---
     let categories = [];
     let currentCategory = null;
     let currentFilterParams = {};
     
-    // --- UI Классы для стилизации (адаптация под Lampa) ---
+    // --- UI Классы для стилизации ---
     const UI_CLASSES = {
         menuItem: 'menu__item',
         menuItemText: 'menu__item-text',
@@ -46,27 +53,45 @@
         
         // Инициализация плагина
         init: function() {
-            if (this.initialized) return;
+            console.log('[SmartFilters] init() called');
+            
+            if (this.initialized) {
+                console.log('[SmartFilters] Already initialized, returning');
+                return;
+            }
             
             console.log(`[${PLUGIN_CONFIG.id}] Initializing...`);
             
-            // Загружаем сохранённые категории
-            this.loadCategories();
-            
-            // Создаём раздел в настройках
-            this.createSettingsSection();
-            
-            // Создаём меню в боковой панели
-            this.createSidebarMenu();
-            
-            // Добавляем кнопку сохранения в интерфейс фильтра
-            this.addSaveFilterButton();
-            
-            // Подписываемся на события Lampa
-            this.subscribeToEvents();
-            
-            this.initialized = true;
-            console.log(`[${PLUGIN_CONFIG.id}] Initialized successfully`);
+            try {
+                // Загружаем сохранённые категории
+                this.loadCategories();
+                console.log('[SmartFilters] Categories loaded:', categories.length);
+                
+                // Создаём раздел в настройках
+                this.createSettingsSection();
+                console.log('[SmartFilters] Settings section created');
+                
+                // Создаём меню в боковой панели
+                this.createSidebarMenu();
+                console.log('[SmartFilters] Sidebar menu created');
+                
+                // Добавляем кнопку сохранения в интерфейс фильтра
+                this.addSaveFilterButton();
+                console.log('[SmartFilters] Save button added');
+                
+                this.initialized = true;
+                console.log(`[${PLUGIN_CONFIG.id}] Initialized successfully`);
+                
+                // Показываем уведомление
+                if (Lampa.Notify) {
+                    Lampa.Notify.show('Smart Filters плагин загружен', 2000);
+                }
+            } catch(e) {
+                console.error('[SmartFilters] Initialization error:', e);
+                if (Lampa.Notify) {
+                    Lampa.Notify.show('Ошибка загрузки Smart Filters: ' + e.message, 3000);
+                }
+            }
         },
         
         // Загрузка категорий из хранилища
@@ -102,47 +127,59 @@
         createSettingsSection: function() {
             const self = this;
             
-            // Добавляем раздел в настройки
-            Lampa.SettingsApi.addComponent({
-                id: PLUGIN_CONFIG.id,
-                name: PLUGIN_CONFIG.name,
-                icon: '<svg>...</svg>', // Иконка плагина
-                component: 'smart_filters_settings',
-                position: 100,
-                handler: function() {
-                    self.showSettingsModal();
+            try {
+                // Проверяем наличие API настроек
+                if (typeof Lampa.SettingsApi === 'undefined') {
+                    console.log('[SmartFilters] SettingsApi not available');
+                    return;
                 }
-            });
-            
-            // Добавляем настройки плагина
-            Lampa.SettingsApi.addParam({
-                component: 'smart_filters_settings',
-                name: 'auto_save',
-                type: 'toggle',
-                value: Lampa.Storage.get(PLUGIN_CONFIG.storagePrefix + 'auto_save') || true,
-                title: 'Автосохранение фильтров',
-                subtitle: 'Автоматически сохранять последние использованные фильтры',
-                onChange: function(value) {
-                    Lampa.Storage.set(PLUGIN_CONFIG.storagePrefix + 'auto_save', value);
-                }
-            });
-            
-            Lampa.SettingsApi.addParam({
-                component: 'smart_filters_settings',
-                name: 'max_filters',
-                type: 'select',
-                value: Lampa.Storage.get(PLUGIN_CONFIG.storagePrefix + 'max_filters') || 20,
-                title: 'Максимум фильтров на категорию',
-                options: [
-                    { value: 10, name: '10' },
-                    { value: 20, name: '20' },
-                    { value: 50, name: '50' },
-                    { value: 100, name: '100' }
-                ],
-                onChange: function(value) {
-                    Lampa.Storage.set(PLUGIN_CONFIG.storagePrefix + 'max_filters', value);
-                }
-            });
+                
+                // Добавляем раздел в настройки
+                Lampa.SettingsApi.addComponent({
+                    id: PLUGIN_CONFIG.id,
+                    name: PLUGIN_CONFIG.name,
+                    icon: '🎯',
+                    component: 'smart_filters_settings',
+                    position: 100,
+                    handler: function() {
+                        self.showSettingsModal();
+                    }
+                });
+                
+                // Добавляем параметр автосохранения
+                Lampa.SettingsApi.addParam({
+                    component: 'smart_filters_settings',
+                    name: 'auto_save',
+                    type: 'toggle',
+                    value: Lampa.Storage.get(PLUGIN_CONFIG.storagePrefix + 'auto_save') || true,
+                    title: 'Автосохранение фильтров',
+                    subtitle: 'Автоматически сохранять последние использованные фильтры',
+                    onChange: function(value) {
+                        Lampa.Storage.set(PLUGIN_CONFIG.storagePrefix + 'auto_save', value);
+                    }
+                });
+                
+                // Добавляем параметр лимита фильтров
+                Lampa.SettingsApi.addParam({
+                    component: 'smart_filters_settings',
+                    name: 'max_filters',
+                    type: 'select',
+                    value: Lampa.Storage.get(PLUGIN_CONFIG.storagePrefix + 'max_filters') || 20,
+                    title: 'Максимум фильтров на категорию',
+                    options: [
+                        { value: 10, name: '10' },
+                        { value: 20, name: '20' },
+                        { value: 50, name: '50' },
+                        { value: 100, name: '100' }
+                    ],
+                    onChange: function(value) {
+                        Lampa.Storage.set(PLUGIN_CONFIG.storagePrefix + 'max_filters', value);
+                    }
+                });
+                
+            } catch(e) {
+                console.error('[SmartFilters] Error creating settings section:', e);
+            }
         },
         
         // Показать модальное окно настроек
@@ -151,23 +188,23 @@
             
             // Создаём модальное окно для управления категориями
             const modalHtml = `
-                <div class="${UI_CLASSES.modal}" data-modal="smart_filters_settings">
-                    <div class="${UI_CLASSES.modalContent}" style="width: 600px;">
-                        <div class="${UI_CLASSES.modalHeader}">
-                            <h3>Управление категориями</h3>
-                            <div class="${UI_CLASSES.button}" data-action="close">✖</div>
+                <div class="${UI_CLASSES.modal}" data-modal="smart_filters_settings" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 10000; display: flex; align-items: center; justify-content: center;">
+                    <div class="${UI_CLASSES.modalContent}" style="background: #1a1a1a; border-radius: 12px; min-width: 400px; max-width: 90vw; max-height: 80vh; overflow: hidden;">
+                        <div class="${UI_CLASSES.modalHeader}" style="padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
+                            <h3 style="margin: 0;">Управление категориями</h3>
+                            <div class="${UI_CLASSES.button}" data-action="close" style="cursor: pointer;">✖</div>
                         </div>
-                        <div class="${UI_CLASSES.modalBody}">
+                        <div class="${UI_CLASSES.modalBody}" style="padding: 20px; max-height: 60vh; overflow-y: auto;">
                             <div class="smart-filters-categories-list">
                                 ${this.renderCategoriesList()}
                             </div>
                             <div class="smart-filters-add-category" style="margin-top: 20px;">
-                                <input type="text" class="${UI_CLASSES.input}" placeholder="Название новой категории" id="new_category_name">
-                                <div class="${UI_CLASSES.button}" data-action="add_category">➕ Добавить категорию</div>
+                                <input type="text" class="modal-input" placeholder="Название новой категории" id="new_category_name" style="width: 100%; padding: 10px; margin-bottom: 10px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: #fff;">
+                                <div class="${UI_CLASSES.button}" data-action="add_category" style="display: inline-block; padding: 10px 20px; background: #4caf50; border-radius: 6px; cursor: pointer; text-align: center;">➕ Добавить категорию</div>
                             </div>
                         </div>
-                        <div class="${UI_CLASSES.modalFooter}">
-                            <div class="${UI_CLASSES.button}" data-action="close">Закрыть</div>
+                        <div class="${UI_CLASSES.modalFooter}" style="padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: flex-end;">
+                            <div class="${UI_CLASSES.button}" data-action="close" style="padding: 8px 16px; background: rgba(255,255,255,0.1); border-radius: 6px; cursor: pointer;">Закрыть</div>
                         </div>
                     </div>
                 </div>
@@ -185,15 +222,18 @@
                 if (name && name.trim()) {
                     this.addCategory(name.trim());
                     $('#new_category_name').val('');
-                    this.showSettingsModal(); // Обновляем модальное окно
+                    $('[data-modal="smart_filters_settings"]').remove();
+                    this.showSettingsModal();
                 }
             });
             
             $('[data-action="edit_category"]').on('hover:enter', function() {
                 const id = $(this).data('id');
-                const newName = prompt('Введите новое название:', $(this).data('name'));
+                const currentName = $(this).data('name');
+                const newName = prompt('Введите новое название:', currentName);
                 if (newName && newName.trim()) {
                     self.editCategory(id, newName.trim());
+                    $('[data-modal="smart_filters_settings"]').remove();
                     self.showSettingsModal();
                 }
             });
@@ -202,6 +242,7 @@
                 const id = $(this).data('id');
                 if (confirm('Удалить категорию и все фильтры в ней?')) {
                     self.deleteCategory(id);
+                    $('[data-modal="smart_filters_settings"]').remove();
                     self.showSettingsModal();
                 }
             });
@@ -210,7 +251,7 @@
         // Рендер списка категорий
         renderCategoriesList: function() {
             if (categories.length === 0) {
-                return '<div class="smart-filters-empty">Нет созданных категорий</div>';
+                return '<div class="smart-filters-empty" style="text-align: center; padding: 40px; color: rgba(255,255,255,0.5);">Нет созданных категорий</div>';
             }
             
             return categories.map(cat => `
@@ -222,8 +263,8 @@
                         </div>
                     </div>
                     <div style="display: flex; gap: 10px;">
-                        <div class="${UI_CLASSES.button}" data-action="edit_category" data-id="${cat.id}" data-name="${this.escapeHtml(cat.name)}" style="padding: 5px 10px;">✏️</div>
-                        <div class="${UI_CLASSES.button}" data-action="delete_category" data-id="${cat.id}" style="padding: 5px 10px;">🗑️</div>
+                        <div class="modal-button-small" data-action="edit_category" data-id="${cat.id}" data-name="${this.escapeHtml(cat.name)}" style="padding: 5px 10px; background: rgba(255,255,255,0.1); border-radius: 4px; cursor: pointer;">✏️</div>
+                        <div class="modal-button-small" data-action="delete_category" data-id="${cat.id}" style="padding: 5px 10px; background: rgba(255,255,255,0.1); border-radius: 4px; cursor: pointer;">🗑️</div>
                     </div>
                 </div>
             `).join('');
@@ -240,24 +281,31 @@
             };
             categories.push(newCategory);
             this.saveCategories();
+            if (Lampa.Notify) Lampa.Notify.show(`Категория "${name}" создана`, 2000);
         },
         
         // Редактирование категории
         editCategory: function(id, newName) {
             const category = categories.find(c => c.id === id);
             if (category) {
+                const oldName = category.name;
                 category.name = newName;
                 category.updatedAt = Date.now();
                 this.saveCategories();
+                if (Lampa.Notify) Lampa.Notify.show(`Категория переименована в "${newName}"`, 2000);
             }
         },
         
         // Удаление категории
         deleteCategory: function(id) {
-            categories = categories.filter(c => c.id !== id);
-            this.saveCategories();
+            const category = categories.find(c => c.id === id);
+            if (category) {
+                const name = category.name;
+                categories = categories.filter(c => c.id !== id);
+                this.saveCategories();
+                if (Lampa.Notify) Lampa.Notify.show(`Категория "${name}" удалена`, 2000);
+            }
             
-            // Если удалена текущая категория, сбрасываем её
             if (currentCategory && currentCategory.id === id) {
                 currentCategory = null;
             }
@@ -267,10 +315,16 @@
         createSidebarMenu: function() {
             const self = this;
             
+            // Проверяем, существует ли уже пункт меню
+            if ($('.menu__item[data-name="smart_filters_root"]').length) {
+                console.log('[SmartFilters] Menu already exists');
+                return;
+            }
+            
             // Создаём основной пункт меню
             const menuHtml = `
-                <div class="${UI_CLASSES.menuItem}" data-name="smart_filters_root">
-                    <div class="${UI_CLASSES.menuItemText}">
+                <div class="menu__item" data-name="smart_filters_root">
+                    <div class="menu__item-text">
                         🎯 ${PLUGIN_CONFIG.name}
                     </div>
                 </div>
@@ -284,7 +338,10 @@
                 $('.menu__list').append(menuHtml);
             }
             
+            console.log('[SmartFilters] Menu item added to sidebar');
+            
             // Обработчик для основного пункта
+            $(document).off('hover:enter', '.menu__item[data-name="smart_filters_root"]');
             $(document).on('hover:enter', '.menu__item[data-name="smart_filters_root"]', function(e) {
                 self.showCategoriesSubmenu();
             });
@@ -299,15 +356,15 @@
             
             if (categories.length === 0) {
                 const emptyHtml = `
-                    <div class="${UI_CLASSES.menuSubmenu}" data-parent="smart_filters_root">
-                        <div class="${UI_CLASSES.menuSubmenuItem}" data-action="create_category">
-                            <div class="${UI_CLASSES.menuItemText}">➕ Создать первую категорию</div>
+                    <div class="menu__submenu" data-parent="smart_filters_root" style="position: absolute; background: rgba(0,0,0,0.95); border-radius: 8px; min-width: 220px;">
+                        <div class="menu__submenu-item" data-action="create_category" style="padding: 12px 16px; cursor: pointer;">
+                            <div class="menu__submenu-item-text">➕ Создать первую категорию</div>
                         </div>
                     </div>
                 `;
                 $('body').append(emptyHtml);
                 
-                $('[data-action="create_category"]').on('hover:enter', () => {
+                $('[data-action="create_category"]').off('hover:enter').on('hover:enter', () => {
                     const name = prompt('Введите название категории:');
                     if (name && name.trim()) {
                         this.addCategory(name.trim());
@@ -317,20 +374,20 @@
                 return;
             }
             
-            let submenuHtml = `<div class="${UI_CLASSES.menuSubmenu}" data-parent="smart_filters_root">`;
+            let submenuHtml = `<div class="menu__submenu" data-parent="smart_filters_root" style="position: absolute; background: rgba(0,0,0,0.95); border-radius: 8px; min-width: 220px;">`;
             
             categories.forEach(category => {
                 submenuHtml += `
-                    <div class="${UI_CLASSES.menuSubmenuItem}" data-category-id="${category.id}" data-category-name="${this.escapeHtml(category.name)}">
-                        <div class="${UI_CLASSES.menuItemText}">📁 ${this.escapeHtml(category.name)}</div>
-                        <div class="menu__item-count">${category.filters.length}</div>
+                    <div class="menu__submenu-item" data-category-id="${category.id}" data-category-name="${this.escapeHtml(category.name)}" style="padding: 12px 16px; cursor: pointer; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <div class="menu__submenu-item-text">📁 ${this.escapeHtml(category.name)}</div>
+                        <div class="menu__item-count" style="background: rgba(76,175,80,0.3); border-radius: 12px; padding: 2px 8px;">${category.filters.length}</div>
                     </div>
                 `;
             });
             
             submenuHtml += `
-                <div class="${UI_CLASSES.menuSubmenuItem} menu__submenu-item--divider" data-action="manage_categories">
-                    <div class="${UI_CLASSES.menuItemText}">⚙️ Управление категориями</div>
+                <div class="menu__submenu-item menu__submenu-item--divider" data-action="manage_categories" style="padding: 12px 16px; cursor: pointer; border-top: 1px solid rgba(255,255,255,0.1); margin-top: 5px;">
+                    <div class="menu__submenu-item-text">⚙️ Управление категориями</div>
                 </div>
             `;
             
@@ -338,7 +395,7 @@
             $('body').append(submenuHtml);
             
             // Обработчик для категорий
-            $('.menu__submenu-item[data-category-id]').on('hover:enter', function() {
+            $('.menu__submenu-item[data-category-id]').off('hover:enter').on('hover:enter', function() {
                 const categoryId = $(this).data('category-id');
                 const category = categories.find(c => c.id === categoryId);
                 if (category) {
@@ -348,7 +405,7 @@
             });
             
             // Обработчик для управления категориями
-            $('[data-action="manage_categories"]').on('hover:enter', () => {
+            $('[data-action="manage_categories"]').off('hover:enter').on('hover:enter', () => {
                 this.showSettingsModal();
                 $('.menu__submenu[data-parent="smart_filters_root"]').remove();
             });
@@ -359,35 +416,35 @@
             const self = this;
             
             let submenuHtml = `
-                <div class="${UI_CLASSES.menuSubmenu}" data-parent="smart_filters_${category.id}">
-                    <div class="${UI_CLASSES.menuSubmenuItem} menu__submenu-item--header">
-                        <div class="${UI_CLASSES.menuItemText}">📁 ${this.escapeHtml(category.name)}</div>
+                <div class="menu__submenu" data-parent="smart_filters_${category.id}" style="position: absolute; background: rgba(0,0,0,0.95); border-radius: 8px; min-width: 220px;">
+                    <div class="menu__submenu-item menu__submenu-item--header" style="padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); opacity: 0.7;">
+                        <div class="menu__submenu-item-text">📁 ${this.escapeHtml(category.name)}</div>
                     </div>
             `;
             
             if (category.filters.length === 0) {
                 submenuHtml += `
-                    <div class="${UI_CLASSES.menuSubmenuItem}">
-                        <div class="${UI_CLASSES.menuItemText}" style="color: rgba(255,255,255,0.5);">Нет сохранённых фильтров</div>
+                    <div class="menu__submenu-item" style="padding: 12px 16px;">
+                        <div class="menu__submenu-item-text" style="color: rgba(255,255,255,0.5);">Нет сохранённых фильтров</div>
                     </div>
                 `;
             } else {
-                category.filters.forEach((filter, index) => {
+                category.filters.forEach((filter) => {
                     submenuHtml += `
-                        <div class="${UI_CLASSES.menuSubmenuItem}" data-filter-id="${filter.id}">
-                            <div class="${UI_CLASSES.menuItemText}">🔖 ${this.escapeHtml(filter.name)}</div>
-                            <div class="menu__item-icon menu__item-icon--delete" data-action="delete_filter" data-filter-id="${filter.id}">✖</div>
+                        <div class="menu__submenu-item" data-filter-id="${filter.id}" style="padding: 12px 16px; cursor: pointer; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                            <div class="menu__submenu-item-text">🔖 ${this.escapeHtml(filter.name)}</div>
+                            <div class="menu__item-icon menu__item-icon--delete" data-action="delete_filter" data-filter-id="${filter.id}" style="margin-left: 12px; cursor: pointer;">✖</div>
                         </div>
                     `;
                 });
             }
             
             submenuHtml += `
-                <div class="${UI_CLASSES.menuSubmenuItem} menu__submenu-item--divider" data-action="save_current_filter">
-                    <div class="${UI_CLASSES.menuItemText}">💾 Сохранить текущий фильтр</div>
+                <div class="menu__submenu-item menu__submenu-item--divider" data-action="save_current_filter" style="padding: 12px 16px; cursor: pointer; border-top: 1px solid rgba(255,255,255,0.1); margin-top: 5px;">
+                    <div class="menu__submenu-item-text">💾 Сохранить текущий фильтр</div>
                 </div>
-                <div class="${UI_CLASSES.menuSubmenuItem}" data-action="back_to_categories">
-                    <div class="${UI_CLASSES.menuItemText}">← Назад к категориям</div>
+                <div class="menu__submenu-item" data-action="back_to_categories" style="padding: 12px 16px; cursor: pointer;">
+                    <div class="menu__submenu-item-text">← Назад к категориям</div>
                 </div>
             `;
             
@@ -395,7 +452,7 @@
             $('body').append(submenuHtml);
             
             // Обработчик для применения фильтра
-            $('.menu__submenu-item[data-filter-id]').on('hover:enter', function() {
+            $('.menu__submenu-item[data-filter-id]').off('hover:enter').on('hover:enter', function() {
                 const filterId = $(this).data('filter-id');
                 const filter = category.filters.find(f => f.id === filterId);
                 if (filter && filter.params) {
@@ -405,7 +462,7 @@
             });
             
             // Обработчик для удаления фильтра
-            $('[data-action="delete_filter"]').on('hover:enter', function(e) {
+            $('[data-action="delete_filter"]').off('hover:enter').on('hover:enter', function(e) {
                 e.stopPropagation();
                 const filterId = $(this).data('filter-id');
                 if (confirm('Удалить этот фильтр?')) {
@@ -418,13 +475,13 @@
             });
             
             // Обработчик для сохранения текущего фильтра
-            $('[data-action="save_current_filter"]').on('hover:enter', () => {
+            $('[data-action="save_current_filter"]').off('hover:enter').on('hover:enter', () => {
                 this.saveCurrentFilterDialog(category);
                 $('.menu__submenu[data-parent="smart_filters_${category.id}"]').remove();
             });
             
             // Обработчик для возврата к категориям
-            $('[data-action="back_to_categories"]').on('hover:enter', () => {
+            $('[data-action="back_to_categories"]').off('hover:enter').on('hover:enter', () => {
                 this.showCategoriesSubmenu();
             });
         },
@@ -435,53 +492,15 @@
             const currentParams = this.getCurrentFilterParams();
             
             if (!currentParams || Object.keys(currentParams).length === 0) {
-                Lampa.Notify.show('Нет активных параметров фильтрации', 3000);
+                if (Lampa.Notify) Lampa.Notify.show('Нет активных параметров фильтрации', 3000);
                 return;
             }
             
-            const modalHtml = `
-                <div class="${UI_CLASSES.modal}" data-modal="save_filter">
-                    <div class="${UI_CLASSES.modalContent}" style="width: 500px;">
-                        <div class="${UI_CLASSES.modalHeader}">
-                            <h3>Сохранить фильтр</h3>
-                            <div class="${UI_CLASSES.button}" data-action="close">✖</div>
-                        </div>
-                        <div class="${UI_CLASSES.modalBody}">
-                            <div style="margin-bottom: 15px;">
-                                <label>Название фильтра:</label>
-                                <input type="text" class="${UI_CLASSES.input}" id="filter_name" placeholder="Например: Боевики 2024" autocomplete="off">
-                            </div>
-                            <div>
-                                <label>Параметры фильтра:</label>
-                                <div style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; margin-top: 5px; font-size: 12px;">
-                                    ${this.formatFilterParams(currentParams)}
-                                </div>
-                            </div>
-                        </div>
-                        <div class="${UI_CLASSES.modalFooter}">
-                            <div class="${UI_CLASSES.button}" data-action="cancel">Отмена</div>
-                            <div class="${UI_CLASSES.button} button--green" data-action="save">Сохранить</div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            $('body').append(modalHtml);
-            
-            $('[data-action="close"], [data-action="cancel"]').on('hover:enter', function() {
-                $('[data-modal="save_filter"]').remove();
-            });
-            
-            $('[data-action="save"]').on('hover:enter', () => {
-                const name = $('#filter_name').val();
-                if (name && name.trim()) {
-                    this.saveFilterToCategory(category, name.trim(), currentParams);
-                    $('[data-modal="save_filter"]').remove();
-                    Lampa.Notify.show(`Фильтр "${name}" сохранён`, 2000);
-                } else {
-                    Lampa.Notify.show('Введите название фильтра', 2000);
-                }
-            });
+            const name = prompt('Введите название фильтра:', 'Мой фильтр');
+            if (name && name.trim()) {
+                this.saveFilterToCategory(category, name.trim(), currentParams);
+                if (Lampa.Notify) Lampa.Notify.show(`Фильтр "${name}" сохранён в "${category.name}"`, 2000);
+            }
         },
         
         // Сохранение фильтра в категорию
@@ -527,10 +546,12 @@
                 }
                 
                 // Добавляем информацию о текущем разделе
-                const currentActivity = Lampa.Activity.active();
-                if (currentActivity && currentActivity.name) {
-                    params.section = currentActivity.name;
-                    params.url = currentActivity.url;
+                if (Lampa.Activity && Lampa.Activity.active) {
+                    const currentActivity = Lampa.Activity.active();
+                    if (currentActivity) {
+                        params.section = currentActivity.name || currentActivity.title;
+                        params.url = currentActivity.url;
+                    }
                 }
                 
                 return params;
@@ -547,31 +568,27 @@
                 
                 // Применяем параметры фильтрации
                 if (Lampa.Controller && Lampa.Controller.filters) {
-                    Lampa.Controller.filters.setParams(params);
+                    if (typeof Lampa.Controller.filters.setParams === 'function') {
+                        Lampa.Controller.filters.setParams(params);
+                    } else {
+                        Lampa.Controller.filters.params = params;
+                    }
                     
                     // Обновляем интерфейс
-                    if (Lampa.Controller.filters.update) {
+                    if (typeof Lampa.Controller.filters.update === 'function') {
                         Lampa.Controller.filters.update();
                     }
                     
                     // Перезагружаем контент
-                    if (Lampa.Controller.filters.reload) {
+                    if (typeof Lampa.Controller.filters.reload === 'function') {
                         Lampa.Controller.filters.reload();
                     }
                 }
                 
-                // Если указан раздел, переходим в него
-                if (params.section && params.url) {
-                    Lampa.Activity.push({
-                        url: params.url,
-                        title: params.section
-                    });
-                }
-                
-                Lampa.Notify.show('Фильтр применён', 1500);
+                if (Lampa.Notify) Lampa.Notify.show('Фильтр применён', 1500);
             } catch(e) {
                 console.error('[SmartFilters] Error applying filter:', e);
-                Lampa.Notify.show('Ошибка применения фильтра', 2000);
+                if (Lampa.Notify) Lampa.Notify.show('Ошибка применения фильтра', 2000);
             }
         },
         
@@ -579,29 +596,35 @@
         addSaveFilterButton: function() {
             const self = this;
             
-            // Ждём загрузки интерфейса фильтра
-            Lampa.Listener.follow('filter:render', function() {
-                // Проверяем, есть ли уже кнопка
+            // Функция для добавления кнопки
+            const addButton = function() {
                 if ($('.smart-filters-save-btn').length) return;
                 
-                // Добавляем кнопку в интерфейс фильтра
                 const saveButtonHtml = `
-                    <div class="button smart-filters-save-btn" style="margin-left: 10px;">
+                    <div class="button smart-filters-save-btn" style="margin-left: 10px; cursor: pointer;">
                         <div class="button__icon">💾</div>
                         <div class="button__text">Сохранить фильтр</div>
                     </div>
                 `;
                 
-                // Вставляем кнопку в панель фильтров
-                const filterPanel = $('.filter-panel .buttons');
+                const filterPanel = $('.filter-panel .buttons, .filters-panel .buttons');
                 if (filterPanel.length) {
                     filterPanel.append(saveButtonHtml);
                     
-                    $('.smart-filters-save-btn').on('hover:enter', function() {
+                    $('.smart-filters-save-btn').off('hover:enter').on('hover:enter', function() {
                         self.quickSaveFilter();
                     });
+                    console.log('[SmartFilters] Save button added to filter panel');
                 }
-            });
+            };
+            
+            // Пытаемся добавить сразу
+            setTimeout(addButton, 1000);
+            
+            // Следим за изменениями в интерфейсе
+            if (Lampa.Listener && Lampa.Listener.follow) {
+                Lampa.Listener.follow('filter:render', addButton);
+            }
         },
         
         // Быстрое сохранение фильтра
@@ -609,7 +632,7 @@
             const currentParams = this.getCurrentFilterParams();
             
             if (!currentParams || Object.keys(currentParams).length === 0) {
-                Lampa.Notify.show('Нет активных параметров фильтрации', 2000);
+                if (Lampa.Notify) Lampa.Notify.show('Нет активных параметров фильтрации', 2000);
                 return;
             }
             
@@ -623,17 +646,15 @@
             }
             
             // Выбор категории для сохранения
-            const categoryNames = categories.map((c, i) => `${i + 1}. ${c.name}`).join('\n');
+            let categoryNames = categories.map((c, i) => `${i + 1}. ${c.name}`).join('\n');
             const choice = prompt(`Выберите категорию для сохранения:\n${categoryNames}\n\nВведите номер или название:`);
             
             if (choice) {
                 let selectedCategory = null;
                 
-                // Поиск по номеру
                 if (!isNaN(choice) && choice > 0 && choice <= categories.length) {
                     selectedCategory = categories[choice - 1];
                 } else {
-                    // Поиск по названию
                     selectedCategory = categories.find(c => c.name.toLowerCase().includes(choice.toLowerCase()));
                 }
                 
@@ -641,70 +662,18 @@
                     const name = prompt('Введите название фильтра:', 'Мой фильтр');
                     if (name && name.trim()) {
                         this.saveFilterToCategory(selectedCategory, name.trim(), currentParams);
-                        Lampa.Notify.show(`Фильтр сохранён в "${selectedCategory.name}"`, 2000);
+                        if (Lampa.Notify) Lampa.Notify.show(`Фильтр сохранён в "${selectedCategory.name}"`, 2000);
                     }
                 } else {
-                    Lampa.Notify.show('Категория не найдена', 2000);
+                    if (Lampa.Notify) Lampa.Notify.show('Категория не найдена', 2000);
                 }
             }
         },
         
         // Обновление меню категорий
         updateCategoriesMenu: function() {
-            // Обновляем существующее меню при изменении категорий
-            if ($('.menu__item[data-name="smart_filters_root"]').length) {
-                // Просто пересоздаём подменю при следующем открытии
-                // Ничего не делаем, т.к. подменю создаётся динамически
-            }
-        },
-        
-        // Подписка на события Lampa
-        subscribeToEvents: function() {
-            const self = this;
-            const autoSave = Lampa.Storage.get(PLUGIN_CONFIG.storagePrefix + 'auto_save') || true;
-            
-            if (autoSave) {
-                // Автосохранение последнего использованного фильтра
-                Lampa.Listener.follow('filter:change', function(params) {
-                    if (params && Object.keys(params).length > 0) {
-                        Lampa.Storage.set(PLUGIN_CONFIG.storagePrefix + 'last_filter', params);
-                    }
-                });
-                
-                // Восстановление последнего фильтра при запуске
-                const lastFilter = Lampa.Storage.get(PLUGIN_CONFIG.storagePrefix + 'last_filter');
-                if (lastFilter) {
-                    setTimeout(() => {
-                        self.applyFilter(lastFilter);
-                    }, 1000);
-                }
-            }
-        },
-        
-        // Форматирование параметров фильтра для отображения
-        formatFilterParams: function(params) {
-            const lines = [];
-            
-            if (params.genres && params.genres.length) {
-                lines.push(`Жанры: ${params.genres.join(', ')}`);
-            }
-            if (params.year) {
-                lines.push(`Год: ${params.year}`);
-            }
-            if (params.countries && params.countries.length) {
-                lines.push(`Страны: ${params.countries.join(', ')}`);
-            }
-            if (params.sort) {
-                lines.push(`Сортировка: ${params.sort}`);
-            }
-            if (params.rating) {
-                lines.push(`Рейтинг: ${params.rating}`);
-            }
-            if (params.keyword) {
-                lines.push(`Поиск: ${params.keyword}`);
-            }
-            
-            return lines.length ? lines.join('<br>') : 'Нет параметров';
+            // Метод для обновления меню при изменении категорий
+            console.log('[SmartFilters] Categories updated, menu will refresh on next open');
         },
         
         // Экранирование HTML
@@ -719,9 +688,22 @@
         }
     };
     
-    // Экспортируем плагин
-    if (typeof module !== 'undefined' && module.exports) {
-        module.exports = window.SmartFiltersPlugin;
+    // Автозапуск
+    console.log('[SmartFilters] Setting up auto-start...');
+    
+    if (typeof Lampa !== 'undefined' && Lampa.Listener) {
+        if (window.appready) {
+            console.log('[SmartFilters] App ready, starting now');
+            window.SmartFiltersPlugin.init();
+        } else {
+            console.log('[SmartFilters] Waiting for app event');
+            Lampa.Listener.follow('app', function() {
+                console.log('[SmartFilters] App event received');
+                window.SmartFiltersPlugin.init();
+            });
+        }
+    } else {
+        console.error('[SmartFilters] Lampa not available');
     }
     
 })();
