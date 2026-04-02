@@ -3,20 +3,12 @@
     
     var STORAGE_KEY = 'smart_filters_list';
     
-    // Сопоставление типов контента
     var CONTENT_TYPES = {
         "Фильмы": { url: "discover/movie", component: "category" },
         "Сериалы": { url: "discover/tv", component: "category" },
         "Мультфильмы": { url: "discover/movie", component: "category", extra: "with_genres=16" },
         "Мультсериалы": { url: "discover/tv", component: "category", extra: "with_genres=16" },
         "Аниме": { url: "discover/movie", component: "category", extra: "with_genres=16&with_original_language=ja" }
-    };
-    
-    // Сопоставление языков
-    var LANG_MAP = {
-        "Русский": "ru", "Английский": "en", "Японский": "ja", "Корейский": "ko",
-        "Китайский": "zh", "Немецкий": "de", "Французский": "fr", "Испанский": "es",
-        "Итальянский": "it", "Португальский": "pt", "Польский": "pl", "Турецкий": "tr"
     };
     
     var plugin = {
@@ -58,7 +50,6 @@
             if (activity) {
                 var url = activity.url || '';
                 
-                // Определяем тип
                 if (url.indexOf('discover/tv') !== -1) {
                     filters.type = (url.indexOf('with_genres=16') !== -1) ? "Мультсериалы" : "Сериалы";
                 } else if (url.indexOf('discover/movie') !== -1) {
@@ -69,15 +60,12 @@
                     }
                 }
                 
-                // Жанры
                 var gMatch = url.match(/with_genres=([0-9,]+)/);
                 if (gMatch) filters.genres = gMatch[1].split(',').map(Number);
                 
-                // Язык
                 var lMatch = url.match(/with_original_language=([a-z]+)/);
                 if (lMatch) filters.language = lMatch[1];
                 
-                // Год
                 var yMatch = url.match(/primary_release_date\.gte=([0-9]+)/);
                 if (yMatch) filters.yearFrom = parseInt(yMatch[1]);
                 var y2Match = url.match(/primary_release_date\.lte=([0-9]+)/);
@@ -170,29 +158,37 @@
         }
     };
     
-    // Добавляем кнопку сохранения
-    function addSaveButton() {
-        var toolbar = $('.category__toolbar');
-        if (toolbar.length && !toolbar.find('.smart-save-btn').length) {
+    // Добавляем кнопку в верхнюю панель (рядом с поиском)
+    function addFloatingSaveButton() {
+        // Ищем контейнер с кнопками вверху
+        var header = $('.category__head, .category__header, .selector-wrap').first();
+        
+        if (header.length && !$('.smart-float-btn').length) {
             var btn = $(
-                '<div class="toolbar__button selector smart-save-btn">' +
-                    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">' +
-                        '<path d="M4 4H20V20H4V4Z" stroke="currentColor" fill="none"/>' +
-                        '<path d="M8 8H16V10H8V8Z" fill="currentColor"/>' +
-                        '<path d="M8 12H14V14H8V12Z" fill="currentColor"/>' +
-                    '</svg>' +
-                    '<span>Сохранить</span>' +
+                '<div class="selector smart-float-btn" style="' +
+                    'display:inline-block;' +
+                    'margin-left:10px;' +
+                    'padding:8px 12px;' +
+                    'background:rgba(0,0,0,0.6);' +
+                    'border-radius:20px;' +
+                    'cursor:pointer;' +
+                '">' +
+                    '🔖 Сохранить фильтр' +
                 '</div>'
             );
             btn.on('hover:enter', function() { plugin.showSaveDialog(); });
-            toolbar.append(btn);
+            header.append(btn);
+            console.log('Кнопка добавлена в:', header);
+        } else if (!header.length) {
+            console.log('Хедер не найден, повтор через 1 сек');
+            setTimeout(addFloatingSaveButton, 1000);
         }
     }
     
     // Слушаем открытие категории
     Lampa.Listener.follow('activity', function(e) {
         if (e.type === 'create' && e.activity && e.activity.component === 'category') {
-            setTimeout(addSaveButton, 500);
+            setTimeout(addFloatingSaveButton, 1000);
         }
     });
     
@@ -208,7 +204,7 @@
                 if (e.type === 'ready') plugin.updateMenu();
             });
         }
-        console.log('Smart Filters Plugin v2 загружен');
+        console.log('Smart Filters Plugin v3 загружен');
     }
     
     init();
