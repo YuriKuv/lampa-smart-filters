@@ -3,19 +3,8 @@
     
     var STORAGE_KEY = 'smart_filters_list';
     
-    var CONTENT_TYPES = {
-        "Фильмы": { url: "discover/movie", component: "category" },
-        "Сериалы": { url: "discover/tv", component: "category" },
-        "Мультфильмы": { url: "discover/movie", component: "category", extra: "with_genres=16" },
-        "Мультсериалы": { url: "discover/tv", component: "category", extra: "with_genres=16" },
-        "Аниме": { url: "discover/movie", component: "category", extra: "with_genres=16&with_original_language=ja" }
-    };
-    
     // Функция показа диалога ввода через Lampa.Input.edit
     function showInputDialog(title, defaultValue, callback) {
-        // Создаем временный элемент для редактирования
-        var tempInput = $('<input type="text" value="' + defaultValue.replace(/"/g, '&quot;') + '">');
-        
         Lampa.Input.edit({
             title: title,
             value: defaultValue,
@@ -56,62 +45,68 @@
             var filters = {
                 id: Date.now(),
                 name: "Мой фильтр",
-                type: "Фильмы",
-                genres: [],
-                language: null,
+                genres: null,
                 yearFrom: null,
                 yearTo: null
             };
             
-            if (activity && activity.url) {
-                var url = activity.url;
+            if (activity && activity.params) {
+                // Сохраняем параметры напрямую из activity
+                if (activity.params.genres) filters.genres = activity.params.genres;
+                if (activity.params.year) filters.yearFrom = activity.params.year;
                 
-                if (url.indexOf('discover/tv') !== -1) {
-                    filters.type = (url.indexOf('with_genres=16') !== -1) ? "Мультсериалы" : "Сериалы";
-                } else if (url.indexOf('discover/movie') !== -1) {
-                    if (url.indexOf('with_genres=16') !== -1) {
-                        filters.type = (url.indexOf('with_original_language=ja') !== -1) ? "Аниме" : "Мультфильмы";
-                    } else {
-                        filters.type = "Фильмы";
-                    }
+                // Также проверяем URL
+                if (activity.url) {
+                    var gMatch = activity.url.match(/with_genres=([0-9,]+)/);
+                    if (gMatch && !filters.genres) filters.genres = gMatch[1];
+                    
+                    var yMatch = activity.url.match(/primary_release_date\.gte=([0-9]+)/);
+                    if (yMatch) filters.yearFrom = yMatch[1];
                 }
-                
-                var gMatch = url.match(/with_genres=([0-9,]+)/);
-                if (gMatch) filters.genres = gMatch[1].split(',').map(Number);
-                
-                var lMatch = url.match(/with_original_language=([a-z]+)/);
-                if (lMatch) filters.language = lMatch[1];
-                
-                var yMatch = url.match(/primary_release_date\.gte=([0-9]+)/);
-                if (yMatch) filters.yearFrom = parseInt(yMatch[1]);
-                var y2Match = url.match(/primary_release_date\.lte=([0-9]+)/);
-                if (y2Match) filters.yearTo = parseInt(y2Match[1]);
             }
             
             return filters;
         },
         
         openFilter: function(filter) {
-            var typeConfig = CONTENT_TYPES[filter.type] || CONTENT_TYPES["Фильмы"];
-            var url = typeConfig.url;
-            var params = [];
-            
-            if (typeConfig.extra) params.push(typeConfig.extra);
-            if (filter.genres && filter.genres.length) params.push('with_genres=' + filter.genres.join(','));
-            if (filter.language) params.push('with_original_language=' + filter.language);
-            if (filter.yearFrom) params.push('primary_release_date.gte=' + filter.yearFrom + '-01-01');
-            if (filter.yearTo) params.push('primary_release_date.lte=' + filter.yearTo + '-12-31');
-            
-            if (params.length) url += '?' + params.join('&');
-            
-            Lampa.Activity.push({
-                url: url,
-                title: filter.name,
-                component: typeConfig.component,
-                source: "tmdb",
+            // Формируем параметры для Lampa.Activity.push
+            var params = {
+                component: 'category',
+                source: 'tmdb',
                 page: 1,
-                card_type: true
-            });
+                card_type: true,
+                title: filter.name
+            };
+            
+            // Добавляем жанры если есть
+            if (filter.genres) {
+                params.genres = filter.genres;
+            }
+            
+            // Добавляем год если есть
+            if (filter.yearFrom) {
+                params.year = filter.yearFrom;
+            }
+            
+            // Формируем URL в зависимости от типа (по умолчанию фильмы)
+            var url = 'discover/movie';
+            params.url = url;
+            
+            console.log('Открываем фильтр с параметрами:', params);
+            
+            try {
+                Lampa.Activity.push(params);
+            } catch(e) {
+                console.error('Ошибка открытия фильтра:', e);
+                // Пробуем альтернативный способ
+                Lampa.Activity.push({
+                    url: 'discover/movie',
+                    title: filter.name,
+                    component: 'category',
+                    source: 'tmdb',
+                    page: 1
+                });
+            }
         },
         
         updateMenu: function() {
@@ -198,16 +193,14 @@
             actionsBar.insertBefore(saveBtn, actionsBar.firstChild);
             console.log('Кнопка успешно добавлена!');
         } else if (!actionsBar) {
-            console.log('head__actions не найден, повтор через 500ms');
             setTimeout(forceAddButton, 500);
         }
     }
     
-    // Запускаем добавление кнопки сразу и после каждого перехода
+    // Запускаем добавление кнопки
     function initButton() {
         forceAddButton();
         
-        // Следим за изменением URL
         var lastUrl = window.location.href;
         setInterval(function() {
             if (window.location.href !== lastUrl) {
@@ -240,7 +233,7 @@
                 }
             });
         }
-        console.log('Smart Filters Plugin v8 загружен');
+        console.log('Smart Filters Plugin v9 загружен');
     }
     
     init();
