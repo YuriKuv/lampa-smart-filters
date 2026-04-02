@@ -47,8 +47,8 @@
                 yearTo: null
             };
             
-            if (activity) {
-                var url = activity.url || '';
+            if (activity && activity.url) {
+                var url = activity.url;
                 
                 if (url.indexOf('discover/tv') !== -1) {
                     filters.type = (url.indexOf('with_genres=16') !== -1) ? "Мультсериалы" : "Сериалы";
@@ -104,7 +104,6 @@
             var filters = this.loadFilters();
             if (!filters.length) return;
             
-            // Ищем меню (в твоей структуре .menu .menu__list)
             var menuList = $('.menu .menu__list').eq(0);
             if (!menuList.length) {
                 setTimeout(this.updateMenu.bind(this), 1000);
@@ -159,35 +158,59 @@
         }
     };
     
-    // Добавляем кнопку в верхнюю панель (рядом с иконками поиска, настроек)
-    function addSaveButtonToHeader() {
-        var actionsBar = $('.head__actions');
-        if (actionsBar.length && !actionsBar.find('.smart-save-header').length) {
-            var saveBtn = $(
-                '<div class="head__action selector smart-save-header" style="margin-right:15px;">' +
-                    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">' +
-                        '<path d="M4 4H20V20H4V4Z" stroke="currentColor" fill="none"/>' +
-                        '<path d="M8 8H16V10H8V8Z" fill="currentColor"/>' +
-                        '<path d="M8 12H14V14H8V12Z" fill="currentColor"/>' +
-                    '</svg>' +
-                    '<span style="margin-left:5px;">Сохранить</span>' +
-                '</div>'
-            );
-            saveBtn.on('hover:enter', function() { 
-                plugin.showSaveDialog(); 
+    // Функция принудительного добавления кнопки
+    function forceAddButton() {
+        var actionsBar = document.querySelector('.head__actions');
+        if (actionsBar && !document.querySelector('.smart-save-header')) {
+            console.log('Нашел head__actions, добавляю кнопку');
+            
+            var saveBtn = document.createElement('div');
+            saveBtn.className = 'head__action selector smart-save-header';
+            saveBtn.style.marginRight = '15px';
+            saveBtn.style.cursor = 'pointer';
+            saveBtn.style.display = 'flex';
+            saveBtn.style.alignItems = 'center';
+            saveBtn.innerHTML = `
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M4 4H20V20H4V4Z" stroke="currentColor" fill="none"/>
+                    <path d="M8 8H16V10H8V8Z" fill="currentColor"/>
+                    <path d="M8 12H14V14H8V12Z" fill="currentColor"/>
+                </svg>
+                <span style="margin-left:5px;">Сохранить фильтр</span>
+            `;
+            
+            saveBtn.addEventListener('hover:enter', function() {
+                plugin.showSaveDialog();
             });
-            actionsBar.prepend(saveBtn);
-            console.log('Кнопка сохранения добавлена в head__actions');
-        } else if (!actionsBar.length) {
-            console.log('head__actions не найден, повтор через 1 сек');
-            setTimeout(addSaveButtonToHeader, 1000);
+            
+            actionsBar.insertBefore(saveBtn, actionsBar.firstChild);
+            console.log('Кнопка успешно добавлена!');
+        } else if (!actionsBar) {
+            console.log('head__actions не найден, повтор через 500ms');
+            setTimeout(forceAddButton, 500);
+        } else {
+            console.log('Кнопка уже существует');
         }
     }
     
-    // Слушаем открытие категории
+    // Запускаем добавление кнопки сразу и после каждого перехода
+    function initButton() {
+        forceAddButton();
+        
+        // Следим за изменением URL (переходы между страницами)
+        var lastUrl = window.location.href;
+        setInterval(function() {
+            if (window.location.href !== lastUrl) {
+                lastUrl = window.location.href;
+                setTimeout(forceAddButton, 1000);
+            }
+        }, 500);
+    }
+    
+    // Слушаем событие активности
     Lampa.Listener.follow('activity', function(e) {
-        if (e.type === 'create' && e.activity && e.activity.component === 'category') {
-            setTimeout(addSaveButtonToHeader, 1500);
+        if (e.type === 'create') {
+            setTimeout(forceAddButton, 1500);
         }
     });
     
@@ -198,12 +221,16 @@
         
         if (window.appready) {
             plugin.updateMenu();
+            initButton();
         } else {
             Lampa.Listener.follow('app', function(e) {
-                if (e.type === 'ready') plugin.updateMenu();
+                if (e.type === 'ready') {
+                    plugin.updateMenu();
+                    initButton();
+                }
             });
         }
-        console.log('Smart Filters Plugin v5 загружен');
+        console.log('Smart Filters Plugin v6 загружен');
     }
     
     init();
