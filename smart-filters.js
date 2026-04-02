@@ -11,30 +11,20 @@
         "Аниме": { url: "discover/movie", component: "category", extra: "with_genres=16&with_original_language=ja" }
     };
     
-    // Функция показа диалога ввода
+    // Функция показа диалога ввода через Lampa.Input.edit
     function showInputDialog(title, defaultValue, callback) {
-        // Пробуем разные методы Lampa
-        if (Lampa.Input && typeof Lampa.Input.show === 'function') {
-            Lampa.Input.show({
-                title: title,
-                default: defaultValue,
-                onInput: callback
-            });
-        } else if (Lampa.Input && typeof Lampa.Input.prompt === 'function') {
-            Lampa.Input.prompt(title, defaultValue, callback);
-        } else if (Lampa.Prompt && typeof Lampa.Prompt.show === 'function') {
-            Lampa.Prompt.show({
-                title: title,
-                value: defaultValue,
-                onOk: callback
-            });
-        } else {
-            // Самый простой способ — через стандартный prompt
-            var result = prompt(title, defaultValue);
-            if (result && result.trim()) {
-                callback(result.trim());
+        // Создаем временный элемент для редактирования
+        var tempInput = $('<input type="text" value="' + defaultValue.replace(/"/g, '&quot;') + '">');
+        
+        Lampa.Input.edit({
+            title: title,
+            value: defaultValue,
+            onEdit: function(value) {
+                if (value && value.trim()) {
+                    callback(value.trim());
+                }
             }
-        }
+        });
     }
     
     var plugin = {
@@ -250,7 +240,7 @@
                 }
             });
         }
-        console.log('Smart Filters Plugin v7 загружен');
+        console.log('Smart Filters Plugin v8 загружен');
     }
     
     init();
