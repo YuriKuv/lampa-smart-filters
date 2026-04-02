@@ -12,53 +12,60 @@
         "Телевизионный фильм": 10770, "Триллер": 53, "Военный": 10752, "Вестерн": 37
     };
 
-    var GENRES_REVERSE = {};
-    for (var g in GENRES_MAP) {
-        GENRES_REVERSE[GENRES_MAP[g]] = g;
-    }
-
-    var LANGUAGES_MAP = {
-        "Русский": "ru", "Английский": "en", "Японский": "ja",
-        "Китайский": "zh", "Корейский": "ko", "Французский": "fr",
-        "Немецкий": "de", "Испанский": "es", "Итальянский": "it"
-    };
-
-    var LANGUAGES_REVERSE = {};
-    for (var l in LANGUAGES_MAP) {
-        LANGUAGES_REVERSE[LANGUAGES_MAP[l]] = l;
-    }
-
     // ==================== ФУНКЦИИ ====================
     
+    function showNoty(text) {
+        console.log('[MyFilters] Уведомление:', text);
+        if (typeof Lampa !== 'undefined' && Lampa.Noty) {
+            Lampa.Noty.show(text);
+        } else {
+            alert(text);
+        }
+    }
+
     function rebuildFiltersMenu() {
         console.log('[MyFilters] rebuildFiltersMenu вызван');
         
-        // Удаляем старый раздел
         $('.menu__item[data-action="my_filters_section"]').remove();
         
         var filters = Lampa.Storage.get('my_custom_filters', []);
         console.log('[MyFilters] Найдено фильтров:', filters.length);
         
-        if (filters.length === 0) {
-            // Добавим тестовый пункт для проверки
-            var testItem = $(`
+        // Добавляем тестовую кнопку с правильным событием
+        if ($('.menu__item[data-action="test_filter"]').length === 0) {
+            var testBtn = $(`
                 <li class="menu__item selector" data-action="test_filter">
-                    <div class="menu__ico">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M4 6H20V8H4V6ZM6 11H18V13H6V11ZM10 16H14V18H10V16Z" fill="currentColor"/>
-                        </svg>
-                    </div>
-                    <div class="menu__text">🔧 ТЕСТ: Фильтр работает</div>
+                    <div class="menu__ico">🧪</div>
+                    <div class="menu__text">🧪 ТЕСТ ПЛАГИНА</div>
                 </li>
             `);
-            testItem.on('hover:enter', function() {
-                Lampa.Noty.show('Плагин работает! Теперь можно сохранять фильтры');
-                console.log('[MyFilters] Тестовая кнопка нажата');
+            
+            // Пробуем разные события
+            testBtn.on('click', function(e) {
+                e.stopPropagation();
+                console.log('[MyFilters] TEST: click событие сработало');
+                showNoty('Плагин работает! (click)');
             });
-            $(".menu .menu__list").eq(1).append(testItem);
-            $(".menu .menu__list").eq(0).append(testItem.clone());
-            return;
+            
+            testBtn.on('hover:enter', function() {
+                console.log('[MyFilters] TEST: hover:enter событие сработало');
+                showNoty('Плагин работает! (hover:enter)');
+            });
+            
+            testBtn.on('v-click', function() {
+                console.log('[MyFilters] TEST: v-click событие сработало');
+                showNoty('Плагин работает! (v-click)');
+            });
+            
+            // Добавляем в оба меню для надежности
+            $(".menu .menu__list").each(function() {
+                $(this).append(testBtn.clone(true));
+            });
+            
+            console.log('[MyFilters] Тестовая кнопка добавлена');
         }
+        
+        if (filters.length === 0) return;
         
         // Создаем раздел "Мои фильтры"
         var sectionHtml = `
@@ -88,24 +95,16 @@
                 </div>
             `);
             
-            filterItem.on('hover:enter', function(e) {
+            filterItem.on('click', function(e) {
                 if ($(e.target).hasClass('menu__delete')) {
                     e.stopPropagation();
-                    Lampa.Select.show({
-                        title: "Удалить фильтр?",
-                        items: [{ title: "Да", value: "yes" }, { title: "Нет", value: "no" }],
-                        onSelect: function(item) {
-                            if (item.value === "yes") {
-                                var newFilters = Lampa.Storage.get('my_custom_filters', []).filter(function(f) { return f.id !== filter.id; });
-                                Lampa.Storage.set('my_custom_filters', newFilters);
-                                rebuildFiltersMenu();
-                                Lampa.Noty.show('Фильтр удален');
-                            }
-                        }
-                    });
+                    var newFilters = Lampa.Storage.get('my_custom_filters', []).filter(function(f) { return f.id !== filter.id; });
+                    Lampa.Storage.set('my_custom_filters', newFilters);
+                    rebuildFiltersMenu();
+                    showNoty('Фильтр удален');
                     return;
                 }
-                Lampa.Noty.show('Открываем: ' + filter.name);
+                showNoty('Открываем: ' + filter.name);
                 console.log('[MyFilters] Открываем фильтр:', filter);
             });
             
@@ -114,8 +113,7 @@
         
         section.append(submenu);
         
-        var menuList = $(".menu .menu__list").eq(1);
-        if (menuList.length === 0) menuList = $(".menu .menu__list").eq(0);
+        var menuList = $(".menu .menu__list").eq(0);
         menuList.append(section);
     }
 
@@ -129,37 +127,35 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M17 3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.1 21 21 20.1 21 19V7L17 3ZM12 19C10.34 19 9 17.66 9 16C9 14.34 10.34 13 12 13C13.66 13 15 14.34 15 16C15 17.66 13.66 19 12 19ZM15 9H5V5H15V9Z" fill="currentColor"/>
                 </svg>
-                <span>Сохранить фильтр</span>
+                <span>💾 Сохранить фильтр</span>
             </div>
         `;
         
         var button = $(buttonHtml);
         
-        button.on('hover:enter', function() {
-            Lampa.Input.show({
-                title: "Название фильтра",
-                placeholder: "Например: Боевики 2024",
-                onEnter: function(name) {
-                    if (name && name.trim()) {
-                        var newFilter = {
-                            id: Date.now().toString(),
-                            name: name.trim(),
-                            type: "movie",
-                            genres: [],
-                            language: null,
-                            yearFrom: 2000,
-                            yearTo: 2025,
-                            created: new Date().toISOString()
-                        };
-                        
-                        var filters = Lampa.Storage.get('my_custom_filters', []);
-                        filters.push(newFilter);
-                        Lampa.Storage.set('my_custom_filters', filters);
-                        rebuildFiltersMenu();
-                        Lampa.Noty.show('Фильтр "' + name + '" сохранен');
-                    }
-                }
-            });
+        button.on('click', function(e) {
+            e.stopPropagation();
+            console.log('[MyFilters] Кнопка сохранения нажата');
+            
+            var filterName = prompt("Введите название фильтра:", "Мой фильтр");
+            if (filterName && filterName.trim()) {
+                var newFilter = {
+                    id: Date.now().toString(),
+                    name: filterName.trim(),
+                    type: "movie",
+                    genres: [],
+                    language: null,
+                    yearFrom: 2000,
+                    yearTo: 2025,
+                    created: new Date().toISOString()
+                };
+                
+                var filters = Lampa.Storage.get('my_custom_filters', []);
+                filters.push(newFilter);
+                Lampa.Storage.set('my_custom_filters', filters);
+                rebuildFiltersMenu();
+                showNoty('Фильтр "' + filterName + '" сохранен');
+            }
         });
         
         // Ждем появления контейнера с кнопками
@@ -168,10 +164,17 @@
             if (buttonsContainer.length) {
                 if (buttonsContainer.find('[data-action="save_filter"]').length === 0) {
                     buttonsContainer.append(button);
-                    console.log('[MyFilters] Кнопка добавлена');
+                    console.log('[MyFilters] Кнопка сохранения добавлена в full-start__buttons');
                 }
             } else {
-                setTimeout(tryAppend, 1000);
+                // Пробуем другие контейнеры
+                var altContainer = $('.full-start-new__buttons');
+                if (altContainer.length) {
+                    altContainer.append(button);
+                    console.log('[MyFilters] Кнопка сохранения добавлена в full-start-new__buttons');
+                } else {
+                    setTimeout(tryAppend, 1000);
+                }
             }
         }
         tryAppend();
@@ -187,25 +190,11 @@
         rebuildFiltersMenu();
         addSaveFilterButton();
         
-        // Добавляем тестовую кнопку в меню принудительно
-        setTimeout(function() {
-            if ($('.menu__item[data-action="test_filter"]').length === 0) {
-                var testBtn = $(`
-                    <li class="menu__item selector" data-action="test_filter">
-                        <div class="menu__ico">🔧</div>
-                        <div class="menu__text">🔧 ТЕСТ ПЛАГИНА</div>
-                    </li>
-                `);
-                testBtn.on('hover:enter', function() {
-                    Lampa.Noty.show('Плагин работает! Теперь можно добавлять фильтры кнопкой на экране категории');
-                });
-                $(".menu .menu__list").eq(0).append(testBtn);
-                console.log('[MyFilters] Тестовая кнопка добавлена в меню');
-            }
-        }, 3000);
+        console.log('[MyFilters] Плагин полностью загружен');
+        showNoty('Плагин "Мои фильтры" загружен!');
     }
     
-    // Множественные попытки запуска
+    // Запуск с проверкой Lampa
     if (typeof Lampa !== 'undefined' && Lampa) {
         if (window.appready === true) {
             startPlugin();
@@ -213,8 +202,7 @@
             Lampa.Listener.follow('app', function(e) {
                 if (e.type === 'ready') startPlugin();
             });
-            // Запасной вариант
-            setTimeout(startPlugin, 5000);
+            setTimeout(startPlugin, 3000);
         }
     } else {
         console.log('[MyFilters] Lampa не найдена, ждем...');
