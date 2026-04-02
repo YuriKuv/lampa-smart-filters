@@ -2,14 +2,29 @@
     'use strict';
     
     // Защита от повторной загрузки
-    if (window.SmartFiltersClean) return;
-    window.SmartFiltersClean = true;
+    if (window.SmartFiltersFinalWorking) return;
+    window.SmartFiltersFinalWorking = true;
     
     console.log('[SmartFilters] Плагин загружается...');
     
     // --- Хранилище ---
     const STORAGE_KEY = 'smart_filters_saved';
     let savedFilters = [];
+    
+    // --- Карта соответствий ---
+    const genreMap = {
+        'Боевик': 28, 'Приключения': 12, 'Мультфильм': 16, 'Комедия': 35,
+        'Криминал': 80, 'Документальный': 99, 'Драма': 18, 'Семейный': 10751,
+        'Фэнтези': 14, 'История': 36, 'Ужасы': 27, 'Музыка': 10402,
+        'Детектив': 9648, 'Мелодрама': 10749, 'Военный': 10752, 'Телевизионный фильм': 10770,
+        'Триллер': 53, 'Вестерн': 37
+    };
+    
+    const countryMap = {
+        'Русский': 'RU', 'Английский': 'US', 'Французский': 'FR', 'Немецкий': 'DE',
+        'Испанский': 'ES', 'Итальянский': 'IT', 'Японский': 'JP', 'Китайский': 'CN',
+        'Корейский': 'KR', 'Индийский': 'IN'
+    };
     
     // --- Загрузка ---
     function loadFilters() {
@@ -26,36 +41,42 @@
         updateSettingsPanel();
     }
     
-    // --- Получение ВСЕХ параметров фильтра из DOM ---
+    // --- Получение параметров фильтра из DOM ---
     function getCurrentFilterParams() {
         try {
             var params = {};
             
-            // Тип
             var typeEl = $('.selectbox-item:contains("Тип") .selectbox-item__subtitle');
             if (typeEl.length && typeEl.text() !== 'Не выбрано') {
                 params.type = typeEl.text();
             }
             
-            // Рейтинг
             var ratingEl = $('.selectbox-item:contains("Рейтинг") .selectbox-item__subtitle');
             if (ratingEl.length && ratingEl.text() !== 'Не выбрано') {
-                params.rating = ratingEl.text();
+                var ratingText = ratingEl.text();
+                if (ratingText.includes('до')) {
+                    var match = ratingText.match(/(\d+)/);
+                    if (match) params.rating = match[1];
+                } else if (ratingText.includes('От')) {
+                    var match = ratingText.match(/(\d+)/);
+                    if (match) params.rating = match[1];
+                } else {
+                    params.rating = ratingText;
+                }
             }
             
-            // Жанр
             var genreEl = $('.selectbox-item:contains("Жанр") .selectbox-item__subtitle');
             if (genreEl.length && genreEl.text() !== 'Не выбрано') {
                 params.genre = genreEl.text();
+                params.genreId = genreMap[params.genre] || null;
             }
             
-            // Язык оригинала (страна)
             var countryEl = $('.selectbox-item:contains("Язык оригинала") .selectbox-item__subtitle');
             if (countryEl.length && countryEl.text() !== 'Не выбрано') {
                 params.country = countryEl.text();
+                params.countryCode = countryMap[params.country] || null;
             }
             
-            // Год
             var yearEl = $('.selectbox-item:contains("Год") .selectbox-item__subtitle');
             if (yearEl.length && yearEl.text() !== 'Не выбрано') {
                 params.year = yearEl.text();
@@ -64,12 +85,12 @@
             console.log('[SmartFilters] Сохранены параметры:', params);
             return Object.keys(params).length > 0 ? params : null;
         } catch(e) {
-            console.error('[SmartFilters] Ошибка получения параметров:', e);
+            console.error('[SmartFilters] Ошибка:', e);
             return null;
         }
     }
     
-    // --- Применение фильтра (открытие раздела с фильтрацией) ---
+    // --- Применение фильтра ---
     function applyFilter(filter) {
         try {
             console.log('[SmartFilters] Применяем фильтр:', filter);
@@ -77,44 +98,43 @@
             var params = filter.params;
             if (!params) return false;
             
-            // Определяем тип контента
-            var mediaType = 'movie';
-            if (params.type === 'Сериалы') {
-                mediaType = 'tv';
-            }
+            var mediaType = (params.type === 'Сериалы') ? 'tv' : 'movie';
             
-            // Формируем URL с параметрами фильтрации
             var apiUrl = 'https://tmdb.' + Lampa.Manifest.cub_domain + '/3/discover/' + mediaType;
             apiUrl += '?api_key=4ef0d7355d9ffb5151e987764708ce96&language=ru';
             
-            // Добавляем параметры в URL
-            if (params.genre && params.genre !== 'Не выбрано') {
-                apiUrl += '&with_genres=' + encodeURIComponent(params.genre);
+            // Добавляем жанр (по ID)
+            if (params.genreId) {
+                apiUrl += '&with_genres=' + params.genreId;
             }
             
-            if (params.year && params.year !== 'Не выбрано') {
+            // Добавляем год
+            if (params.year) {
                 apiUrl += '&primary_release_year=' + params.year;
-            }
-            
-            if (params.country && params.country !== 'Не выбрано') {
-                apiUrl += '&with_origin_country=' + encodeURIComponent(params.country);
-            }
-            
-            if (params.rating && params.rating !== 'Не выбрано') {
-                var ratingValue = parseFloat(params.rating);
-                if (!isNaN(ratingValue)) {
-                    apiUrl += '&vote_average.gte=' + ratingValue;
+                if (mediaType === 'tv') {
+                    apiUrl += '&first_air_date_year=' + params.year;
                 }
             }
             
-            apiUrl += '&page=1';
+            // Добавляем страну
+            if (params.countryCode) {
+                apiUrl += '&with_origin_country=' + params.countryCode;
+            }
+            
+            // Добавляем рейтинг
+            if (params.rating) {
+                var ratingNum = parseFloat(params.rating);
+                if (!isNaN(ratingNum)) {
+                    apiUrl += '&vote_average.gte=' + ratingNum;
+                }
+            }
+            
+            apiUrl += '&page=1&sort_by=popularity.desc';
             
             console.log('[SmartFilters] URL:', apiUrl);
             
-            // Создаём компонент для отображения
             var componentName = 'smart_filter_' + filter.id;
             
-            // Удаляем старый компонент, если есть
             if (Lampa.Component.list[componentName]) {
                 delete Lampa.Component.list[componentName];
             }
@@ -123,13 +143,15 @@
                 var comp = new Lampa.InteractionCategory(object);
                 comp.create = function() {
                     Lampa.Api.request(apiUrl, function(data) {
-                        if (data && data.results) {
+                        if (data && data.results && data.results.length) {
                             this.build(data);
                         } else {
                             this.empty();
+                            Lampa.Noty.show('По вашему запросу ничего не найдено', 2000);
                         }
                     }.bind(this), function() {
                         this.empty();
+                        Lampa.Noty.show('Ошибка загрузки данных', 2000);
                     }.bind(this));
                 };
                 comp.nextPageReuest = function(object, resolve, reject) {
@@ -141,7 +163,6 @@
             
             Lampa.Component.add(componentName, FilterComponent);
             
-            // Открываем раздел
             Lampa.Activity.push({
                 url: apiUrl,
                 title: filter.name,
@@ -152,13 +173,13 @@
             Lampa.Noty.show('✓ Открыт фильтр "' + filter.name + '"', 1500);
             return true;
         } catch(e) {
-            console.error('[SmartFilters] Ошибка применения:', e);
+            console.error('[SmartFilters] Ошибка:', e);
             Lampa.Noty.show('Ошибка применения фильтра', 2000);
             return false;
         }
     }
     
-    // --- Сохранение текущего фильтра ---
+    // --- Сохранение фильтра ---
     function saveCurrentFilter() {
         var params = getCurrentFilterParams();
         
@@ -222,15 +243,12 @@
         });
     }
     
-    // --- Обновление меню (только пункты для открытия, без крестиков) ---
+    // --- Обновление меню ---
     function updateMenu() {
-        // Удаляем старые пункты
         $('.menu__item[data-name^="smart_filter_saved_"]').remove();
         
-        // Находим пункт "Фильтр"
         var filterItem = $('.menu__item[data-action="filter"]');
         
-        // Добавляем сохранённые фильтры после "Фильтр"
         savedFilters.forEach(function(filter) {
             var item = $('<li class="menu__item selector" data-name="smart_filter_saved_' + filter.id + '">\
                 <div class="menu__ico"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg></div>\
@@ -243,9 +261,7 @@
                 $('.menu__list').append(item);
             }
             
-            // Применение фильтра при нажатии
             item.on('hover:enter', function() {
-                console.log('[SmartFilters] Открываем фильтр:', filter.name);
                 applyFilter(filter);
             });
         });
@@ -253,45 +269,36 @@
     
     // --- Обновление панели настроек ---
     function updateSettingsPanel() {
-        // Находим контейнер настроек
-        var settingsContainer = $('.settings__body');
-        if (!settingsContainer.length) return;
+        var container = $('.smart-filters-list-container');
+        if (!container.length) return;
         
-        // Находим или создаём раздел
-        var section = settingsContainer.find('[data-component="smart_filters"]');
-        if (!section.length) return;
+        container.empty();
         
-        // Обновляем список фильтров
-        var filtersList = section.find('.smart-filters-list');
-        if (filtersList.length) {
-            filtersList.empty();
-            
-            if (savedFilters.length === 0) {
-                filtersList.html('<div style="padding: 1em; text-align: center; opacity: 0.7;">Нет сохранённых фильтров</div>');
-            } else {
-                savedFilters.forEach(function(filter) {
-                    var filterItem = $('<div class="settings-param" style="display: flex; justify-content: space-between; align-items: center; padding: 0.5em 0; border-bottom: 1px solid rgba(255,255,255,0.1);">\
-                        <div style="flex: 1;">\
-                            <div class="settings-param__name">' + filter.name + '</div>\
-                            <div style="font-size: 0.7em; opacity: 0.6;">' + filter.date + '</div>\
-                        </div>\
-                        <div class="button smart-filters-delete-btn selector" data-id="' + filter.id + '" data-name="' + filter.name + '" style="padding: 0.3em 0.8em; background: rgba(255,255,255,0.1); border-radius: 0.3em;">🗑️ Удалить</div>\
-                    </div>');
-                    filtersList.append(filterItem);
-                    
-                    filterItem.find('.smart-filters-delete-btn').on('hover:enter', function() {
-                        var id = parseInt($(this).data('id'));
-                        var name = $(this).data('name');
-                        deleteFilter(id, name);
-                    });
-                });
-            }
+        if (savedFilters.length === 0) {
+            container.html('<div style="padding: 1em; text-align: center; opacity: 0.7;">Нет сохранённых фильтров</div>');
+            return;
         }
+        
+        savedFilters.forEach(function(filter) {
+            var filterItem = $('<div style="display: flex; justify-content: space-between; align-items: center; padding: 0.8em 0; border-bottom: 1px solid rgba(255,255,255,0.1);">\
+                <div style="flex: 1;">\
+                    <div style="font-weight: bold;">' + filter.name + '</div>\
+                    <div style="font-size: 0.7em; opacity: 0.6;">' + filter.date + '</div>\
+                </div>\
+                <div class="button smart-filters-delete-btn selector" data-id="' + filter.id + '" data-name="' + filter.name.replace(/'/g, "\\'") + '" style="padding: 0.3em 0.8em; background: rgba(255,255,255,0.1); border-radius: 0.3em;">🗑️ Удалить</div>\
+            </div>');
+            container.append(filterItem);
+            
+            filterItem.find('.smart-filters-delete-btn').on('hover:enter', function() {
+                var id = parseInt($(this).data('id'));
+                var name = $(this).data('name');
+                deleteFilter(id, name);
+            });
+        });
     }
     
-    // --- Добавление основного пункта в меню ---
+    // --- Добавление пункта в меню ---
     function addMainMenuItem() {
-        // Удаляем старый
         $('.menu__item[data-name="smart_filters_root"]').remove();
         
         var filterItem = $('.menu__item[data-action="filter"]');
@@ -307,7 +314,6 @@
             $('.menu__list').append(mainItem);
         }
         
-        // Подменю
         mainItem.off('hover:enter').on('hover:enter', function() {
             $('.menu__submenu[data-parent="smart_filters_root"]').remove();
             
@@ -325,21 +331,16 @@
         });
     }
     
-    // --- Показать список фильтров (для подменю) ---
+    // --- Показать список фильтров ---
     function showFiltersList() {
         if (savedFilters.length === 0) {
             Lampa.Noty.show('Нет сохранённых фильтров', 2000);
             return;
         }
         
-        var items = [];
-        for (var i = 0; i < savedFilters.length; i++) {
-            items.push({
-                title: savedFilters[i].name,
-                subtitle: 'Сохранён: ' + savedFilters[i].date,
-                filter: savedFilters[i]
-            });
-        }
+        var items = savedFilters.map(function(f) {
+            return { title: f.name, subtitle: 'Сохранён: ' + f.date, filter: f };
+        });
         
         Lampa.Select.show({
             title: 'Мои фильтры',
@@ -368,50 +369,40 @@
         }, 500);
     }
     
-    // --- Добавление раздела в настройки ---
+    // --- Добавление настроек ---
     function addSettings() {
         if (!Lampa.SettingsApi) return;
         
-        // Добавляем компонент
+        // Удаляем старый компонент, если есть
+        if (Lampa.SettingsApi.components.smart_filters) {
+            delete Lampa.SettingsApi.components.smart_filters;
+        }
+        
         Lampa.SettingsApi.addComponent({
             component: 'smart_filters',
             name: 'Smart Filters',
             icon: '🔖'
         });
         
-        // Список фильтров
+        // Контейнер для списка фильтров
         Lampa.SettingsApi.addParam({
             component: 'smart_filters',
             param: { name: 'filters_list', type: 'info' },
-            field: {
-                name: 'Сохранённые фильтры',
-                value: function() { return ''; }
-            },
+            field: { name: 'Сохранённые фильтры', value: '' },
             onRender: function(element) {
-                // Создаём контейнер для списка фильтров
-                var container = $('<div class="smart-filters-list" style="margin-top: 0.5em;"></div>');
-                element.find('.settings-param__value').append(container);
+                var container = $('<div class="smart-filters-list-container" style="margin-top: 0.5em;"></div>');
+                element.find('.settings-param__value').html('').append(container);
                 updateSettingsPanel();
             }
         });
         
-        // Кнопка очистки
+        // Кнопка очистки (одна)
         Lampa.SettingsApi.addParam({
             component: 'smart_filters',
-            param: { name: 'clear_all_btn', type: 'button' },
-            field: { name: '🗑️ Очистить все фильтры' },
+            param: { name: 'clear_all', type: 'button' },
+            field: { name: 'Очистить все фильтры' },
             onChange: function() {
                 clearAllFilters();
-            }
-        });
-        
-        // Информация о количестве
-        Lampa.SettingsApi.addParam({
-            component: 'smart_filters',
-            param: { name: 'count_info', type: 'info' },
-            field: {
-                name: 'Всего фильтров',
-                value: function() { return savedFilters.length + ' шт.'; }
             }
         });
     }
@@ -424,14 +415,18 @@
         addFilterButton();
         addSettings();
         console.log('[SmartFilters] Готов!');
-        Lampa.Noty.show('Smart Filters загружен', 2000);
+        setTimeout(function() {
+            Lampa.Noty.show('Smart Filters загружен', 2000);
+        }, 500);
     }
     
     // --- Запуск ---
     if (window.appready) {
-        init();
+        setTimeout(init, 500);
     } else {
-        Lampa.Listener.follow('app', init);
+        Lampa.Listener.follow('app', function() {
+            setTimeout(init, 500);
+        });
     }
     
 })();
