@@ -11,6 +11,32 @@
         "Аниме": { url: "discover/movie", component: "category", extra: "with_genres=16&with_original_language=ja" }
     };
     
+    // Функция показа диалога ввода
+    function showInputDialog(title, defaultValue, callback) {
+        // Пробуем разные методы Lampa
+        if (Lampa.Input && typeof Lampa.Input.show === 'function') {
+            Lampa.Input.show({
+                title: title,
+                default: defaultValue,
+                onInput: callback
+            });
+        } else if (Lampa.Input && typeof Lampa.Input.prompt === 'function') {
+            Lampa.Input.prompt(title, defaultValue, callback);
+        } else if (Lampa.Prompt && typeof Lampa.Prompt.show === 'function') {
+            Lampa.Prompt.show({
+                title: title,
+                value: defaultValue,
+                onOk: callback
+            });
+        } else {
+            // Самый простой способ — через стандартный prompt
+            var result = prompt(title, defaultValue);
+            if (result && result.trim()) {
+                callback(result.trim());
+            }
+        }
+    }
+    
     var plugin = {
         loadFilters: function() {
             return Lampa.Storage.get(STORAGE_KEY, []);
@@ -145,14 +171,10 @@
         showSaveDialog: function() {
             var current = this.getCurrentFilters();
             var self = this;
-            Lampa.Input.show({
-                title: 'Название фильтра',
-                default: current.name,
-                onInput: function(name) {
-                    if (name && name.trim()) {
-                        current.name = name.trim();
-                        self.saveFilter(current);
-                    }
+            showInputDialog('Название фильтра', current.name, function(name) {
+                if (name && name.trim()) {
+                    current.name = name.trim();
+                    self.saveFilter(current);
                 }
             });
         }
@@ -188,8 +210,6 @@
         } else if (!actionsBar) {
             console.log('head__actions не найден, повтор через 500ms');
             setTimeout(forceAddButton, 500);
-        } else {
-            console.log('Кнопка уже существует');
         }
     }
     
@@ -197,7 +217,7 @@
     function initButton() {
         forceAddButton();
         
-        // Следим за изменением URL (переходы между страницами)
+        // Следим за изменением URL
         var lastUrl = window.location.href;
         setInterval(function() {
             if (window.location.href !== lastUrl) {
@@ -230,7 +250,7 @@
                 }
             });
         }
-        console.log('Smart Filters Plugin v6 загружен');
+        console.log('Smart Filters Plugin v7 загружен');
     }
     
     init();
