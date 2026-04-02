@@ -104,6 +104,7 @@
             var filters = this.loadFilters();
             if (!filters.length) return;
             
+            // Ищем меню (в твоей структуре .menu .menu__list)
             var menuList = $('.menu .menu__list').eq(0);
             if (!menuList.length) {
                 setTimeout(this.updateMenu.bind(this), 1000);
@@ -158,63 +159,35 @@
         }
     };
     
-    // Универсальное добавление кнопки — ищем любую кнопку фильтра
-    function addSmartButton() {
-        // Ищем кнопку "Фильтр" или "По жанру" или "По году"
-        var filterBtn = $('div:contains("Фильтр"), div:contains("По жанру"), div:contains("По году"), .filter-button, [class*="filter"]').first();
-        
-        if (filterBtn.length) {
-            if (!filterBtn.parent().find('.smart-save-btn').length) {
-                var saveBtn = $(
-                    '<div class="smart-save-btn selector" style="' +
-                        'display:inline-block;' +
-                        'margin-left:15px;' +
-                        'padding:8px 15px;' +
-                        'background:#2c3e50;' +
-                        'color:white;' +
-                        'border-radius:20px;' +
-                        'cursor:pointer;' +
-                        'font-size:14px;' +
-                    '">' +
-                        '💾 Сохранить фильтр' +
-                    '</div>'
-                );
-                saveBtn.on('hover:enter', function() { plugin.showSaveDialog(); });
-                filterBtn.parent().append(saveBtn);
-                console.log('Кнопка добавлена рядом с:', filterBtn.text());
-            }
-        } else {
-            // Если кнопку фильтра не нашли, ищем заголовок
-            var title = $('.category__title, .title, h1, h2').first();
-            if (title.length && !title.parent().find('.smart-save-btn').length) {
-                var saveBtn2 = $(
-                    '<div class="smart-save-btn selector" style="' +
-                        'display:inline-block;' +
-                        'margin-left:15px;' +
-                        'padding:8px 15px;' +
-                        'background:#2c3e50;' +
-                        'color:white;' +
-                        'border-radius:20px;' +
-                        'cursor:pointer;' +
-                        'font-size:14px;' +
-                    '">' +
-                        '💾 Сохранить фильтр' +
-                    '</div>'
-                );
-                saveBtn2.on('hover:enter', function() { plugin.showSaveDialog(); });
-                title.parent().append(saveBtn2);
-                console.log('Кнопка добавлена рядом с заголовком');
-            } else {
-                console.log('Ничего не найдено, повтор через 1 сек');
-                setTimeout(addSmartButton, 1000);
-            }
+    // Добавляем кнопку в верхнюю панель (рядом с иконками поиска, настроек)
+    function addSaveButtonToHeader() {
+        var actionsBar = $('.head__actions');
+        if (actionsBar.length && !actionsBar.find('.smart-save-header').length) {
+            var saveBtn = $(
+                '<div class="head__action selector smart-save-header" style="margin-right:15px;">' +
+                    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">' +
+                        '<path d="M4 4H20V20H4V4Z" stroke="currentColor" fill="none"/>' +
+                        '<path d="M8 8H16V10H8V8Z" fill="currentColor"/>' +
+                        '<path d="M8 12H14V14H8V12Z" fill="currentColor"/>' +
+                    '</svg>' +
+                    '<span style="margin-left:5px;">Сохранить</span>' +
+                '</div>'
+            );
+            saveBtn.on('hover:enter', function() { 
+                plugin.showSaveDialog(); 
+            });
+            actionsBar.prepend(saveBtn);
+            console.log('Кнопка сохранения добавлена в head__actions');
+        } else if (!actionsBar.length) {
+            console.log('head__actions не найден, повтор через 1 сек');
+            setTimeout(addSaveButtonToHeader, 1000);
         }
     }
     
     // Слушаем открытие категории
     Lampa.Listener.follow('activity', function(e) {
         if (e.type === 'create' && e.activity && e.activity.component === 'category') {
-            setTimeout(addSmartButton, 1500);
+            setTimeout(addSaveButtonToHeader, 1500);
         }
     });
     
@@ -230,7 +203,7 @@
                 if (e.type === 'ready') plugin.updateMenu();
             });
         }
-        console.log('Smart Filters Plugin v4 загружен');
+        console.log('Smart Filters Plugin v5 загружен');
     }
     
     init();
