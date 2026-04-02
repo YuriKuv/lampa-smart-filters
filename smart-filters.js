@@ -158,37 +158,63 @@
         }
     };
     
-    // Добавляем кнопку в верхнюю панель (рядом с поиском)
-    function addFloatingSaveButton() {
-        // Ищем контейнер с кнопками вверху
-        var header = $('.category__head, .category__header, .selector-wrap').first();
+    // Универсальное добавление кнопки — ищем любую кнопку фильтра
+    function addSmartButton() {
+        // Ищем кнопку "Фильтр" или "По жанру" или "По году"
+        var filterBtn = $('div:contains("Фильтр"), div:contains("По жанру"), div:contains("По году"), .filter-button, [class*="filter"]').first();
         
-        if (header.length && !$('.smart-float-btn').length) {
-            var btn = $(
-                '<div class="selector smart-float-btn" style="' +
-                    'display:inline-block;' +
-                    'margin-left:10px;' +
-                    'padding:8px 12px;' +
-                    'background:rgba(0,0,0,0.6);' +
-                    'border-radius:20px;' +
-                    'cursor:pointer;' +
-                '">' +
-                    '🔖 Сохранить фильтр' +
-                '</div>'
-            );
-            btn.on('hover:enter', function() { plugin.showSaveDialog(); });
-            header.append(btn);
-            console.log('Кнопка добавлена в:', header);
-        } else if (!header.length) {
-            console.log('Хедер не найден, повтор через 1 сек');
-            setTimeout(addFloatingSaveButton, 1000);
+        if (filterBtn.length) {
+            if (!filterBtn.parent().find('.smart-save-btn').length) {
+                var saveBtn = $(
+                    '<div class="smart-save-btn selector" style="' +
+                        'display:inline-block;' +
+                        'margin-left:15px;' +
+                        'padding:8px 15px;' +
+                        'background:#2c3e50;' +
+                        'color:white;' +
+                        'border-radius:20px;' +
+                        'cursor:pointer;' +
+                        'font-size:14px;' +
+                    '">' +
+                        '💾 Сохранить фильтр' +
+                    '</div>'
+                );
+                saveBtn.on('hover:enter', function() { plugin.showSaveDialog(); });
+                filterBtn.parent().append(saveBtn);
+                console.log('Кнопка добавлена рядом с:', filterBtn.text());
+            }
+        } else {
+            // Если кнопку фильтра не нашли, ищем заголовок
+            var title = $('.category__title, .title, h1, h2').first();
+            if (title.length && !title.parent().find('.smart-save-btn').length) {
+                var saveBtn2 = $(
+                    '<div class="smart-save-btn selector" style="' +
+                        'display:inline-block;' +
+                        'margin-left:15px;' +
+                        'padding:8px 15px;' +
+                        'background:#2c3e50;' +
+                        'color:white;' +
+                        'border-radius:20px;' +
+                        'cursor:pointer;' +
+                        'font-size:14px;' +
+                    '">' +
+                        '💾 Сохранить фильтр' +
+                    '</div>'
+                );
+                saveBtn2.on('hover:enter', function() { plugin.showSaveDialog(); });
+                title.parent().append(saveBtn2);
+                console.log('Кнопка добавлена рядом с заголовком');
+            } else {
+                console.log('Ничего не найдено, повтор через 1 сек');
+                setTimeout(addSmartButton, 1000);
+            }
         }
     }
     
     // Слушаем открытие категории
     Lampa.Listener.follow('activity', function(e) {
         if (e.type === 'create' && e.activity && e.activity.component === 'category') {
-            setTimeout(addFloatingSaveButton, 1000);
+            setTimeout(addSmartButton, 1500);
         }
     });
     
@@ -204,7 +230,7 @@
                 if (e.type === 'ready') plugin.updateMenu();
             });
         }
-        console.log('Smart Filters Plugin v3 загружен');
+        console.log('Smart Filters Plugin v4 загружен');
     }
     
     init();
