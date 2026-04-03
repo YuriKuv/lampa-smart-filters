@@ -10,36 +10,6 @@
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
             Lampa.Noty.show(text);
-        } else {
-            console.log('[SaveFilter]', text);
-        }
-    }
-
-    // ==================== ДИАЛОГ ВВОДА НАЗВАНИЯ ====================
-    
-    function showInputDialog(title, placeholder, callback) {
-        if (typeof Lampa !== 'undefined' && Lampa.Input) {
-            // Используем родной диалог Lampa
-            Lampa.Input.show({
-                title: title,
-                placeholder: placeholder || '',
-                onBack: function() {
-                    console.log('[SaveFilter] Диалог закрыт');
-                },
-                onEnter: function(value) {
-                    if (value && value.trim()) {
-                        callback(value.trim());
-                    } else {
-                        showMsg('Название не может быть пустым');
-                    }
-                }
-            });
-        } else {
-            // Fallback для отладки
-            var result = prompt(title, placeholder);
-            if (result && result.trim()) {
-                callback(result.trim());
-            }
         }
     }
 
@@ -102,15 +72,11 @@
     // ==================== СОХРАНЕНИЕ ====================
     
     function saveCurrentFilter() {
-        console.log('[SaveFilter] saveCurrentFilter вызван');
-        
         var activity = Lampa.Activity.active();
         if (!activity) {
             showMsg('Не удалось определить текущую страницу');
             return;
         }
-        
-        console.log('[SaveFilter] Текущий activity:', activity.component, activity.url);
         
         var validComponents = ['category', 'category_full', 'serial', 'movie', 'cartoon', 'anime', 'tv', 'catalog'];
         if (!validComponents.includes(activity.component) && activity.component.indexOf('category') === -1) {
@@ -124,35 +90,31 @@
         }
         
         var defaultName = getDefaultName(activity);
+        var name = prompt('Введите название закладки:', defaultName);
+        if (!name || !name.trim()) return;
         
-        showInputDialog('Сохранить закладку', defaultName, function(name) {
-            console.log('[SaveFilter] Сохраняем закладку:', name);
-            
-            var newFilter = {
-                id: Date.now(),
-                name: name,
-                url: normalizeUrl(activity),
-                component: activity.component || 'category',
-                source: activity.source || 'tmdb',
-                card_type: true,
-                page: 1
-            };
-            if (activity.genres) newFilter.genres = activity.genres;
-            if (activity.sort) newFilter.sort = activity.sort;
-            
-            var filters = Lampa.Storage.get(STORAGE_KEY, []);
-            filters.push(newFilter);
-            Lampa.Storage.set(STORAGE_KEY, filters);
-            updateFiltersMenu();
-            showMsg('✓ Закладка "' + name + '" сохранена');
-        });
+        var newFilter = {
+            id: Date.now(),
+            name: name.trim(),
+            url: normalizeUrl(activity),
+            component: activity.component || 'category',
+            source: activity.source || 'tmdb',
+            card_type: true,
+            page: 1
+        };
+        if (activity.genres) newFilter.genres = activity.genres;
+        if (activity.sort) newFilter.sort = activity.sort;
+        
+        var filters = Lampa.Storage.get(STORAGE_KEY, []);
+        filters.push(newFilter);
+        Lampa.Storage.set(STORAGE_KEY, filters);
+        updateFiltersMenu();
+        showMsg('✓ Закладка "' + name + '" сохранена');
     }
 
     // ==================== ОТКРЫТИЕ ====================
     
     function openFilter(filter) {
-        console.log('[SaveFilter] Открываем закладку:', filter.name);
-        
         var openParams = {
             url: filter.url,
             title: filter.name,
@@ -163,7 +125,6 @@
         };
         if (filter.genres) openParams.genres = filter.genres;
         if (filter.sort) openParams.sort = filter.sort;
-        
         Lampa.Activity.push(openParams);
     }
 
@@ -216,6 +177,7 @@
     var saveButton = null;
     var clearButton = null;
     
+    // Кнопка "Сохранить закладку" в левом меню
     function addSaveButtonToMenu() {
         if (saveButton && saveButton.length) return;
         
@@ -240,6 +202,7 @@
         }
     }
     
+    // Кнопка "Удалить все закладки" в левом меню
     function addClearButtonToMenu() {
         if (clearButton && clearButton.length) return;
         
@@ -260,6 +223,7 @@
         
         var settingsList = $('.menu .menu__list').eq(1);
         if (settingsList.length) {
+            // Вставляем после кнопки сохранения
             if (saveButton && saveButton.length) {
                 saveButton.after(clearButton);
             } else {
@@ -268,6 +232,7 @@
         }
     }
     
+    // Кнопка "Сохранить закладку" в верхней панели
     function addSaveButtonToHeader() {
         if ($('[data-action="save_bookmark_header"]').length) return;
         
@@ -286,6 +251,7 @@
         $('.head__actions').append(bookmarkBtn);
     }
     
+    // Кнопка "Удалить все закладки" в верхней панели
     function addClearButtonToHeader() {
         if ($('[data-action="clear_bookmarks_header"]').length) return;
         
@@ -320,15 +286,18 @@
         var savePosition = Lampa.Storage.get(POSITION_SAVE_KEY, 'menu');
         var clearPosition = Lampa.Storage.get(POSITION_CLEAR_KEY, 'menu');
         
+        // Удаляем все кнопки
         removeButtonsFromMenu();
         removeButtonsFromHeader();
         
+        // Добавляем кнопку "Сохранить закладку"
         if (savePosition === 'menu') {
             addSaveButtonToMenu();
         } else if (savePosition === 'header') {
             addSaveButtonToHeader();
         }
         
+        // Добавляем кнопку "Удалить все закладки"
         if (clearPosition === 'menu') {
             addClearButtonToMenu();
         } else if (clearPosition === 'header') {
@@ -339,6 +308,7 @@
     // ==================== НАСТРОЙКИ ====================
     
     function addSettings() {
+        // Настройка для кнопки "Сохранить закладку"
         Lampa.SettingsApi.addParam({
             component: 'interface',
             param: {
@@ -360,6 +330,7 @@
             }
         });
         
+        // Настройка для кнопки "Удалить все закладки"
         Lampa.SettingsApi.addParam({
             component: 'interface',
             param: {
@@ -385,11 +356,13 @@
     // ==================== ОБНОВЛЕНИЕ МЕНЮ ЗАКЛАДОК ====================
     
     function updateFiltersMenu() {
+        // Удаляем старые закладки
         $('.submenu-item').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         if (filters.length === 0) return;
         
+        // Добавляем закладки в ОСНОВНОЙ список (индекс 0)
         var mainList = $('.menu .menu__list').eq(0);
         if (!mainList.length) return;
         
@@ -448,7 +421,6 @@
         applyButtonPositions();
         updateFiltersMenu();
         addSettings();
-        showMsg('✓ Плагин загружен. Настройки в разделе "Интерфейс"');
     }
     
     if (typeof Lampa !== 'undefined') {
