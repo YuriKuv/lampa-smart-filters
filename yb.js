@@ -193,14 +193,11 @@
             saveCurrentFilter();
         });
         
-        // Добавляем в третий список (индекс 2), где Настройки
-        var settingsList = $('.menu .menu__list').eq(2);
-        
+        // Добавляем в список с Настройками (индекс 1) в начало
+        var settingsList = $('.menu .menu__list').eq(1);
         if (settingsList.length) {
-            // Вставляем в начало списка настроек
             settingsList.prepend(menuButton);
         } else {
-            // Fallback
             $('.menu .menu__list').first().append(menuButton);
         }
     }
@@ -252,7 +249,7 @@
                 name: 'bookmark_position',
                 type: 'select',
                 values: {
-                    'menu': 'В левом меню (перед Настройками)',
+                    'menu': 'В левом меню (над Настройками)',
                     'header': 'В верхней панели'
                 },
                 default: 'menu'
@@ -289,17 +286,16 @@
     // ==================== ОБНОВЛЕНИЕ МЕНЮ ЗАКЛАДОК ====================
     
     function updateFiltersMenu() {
-        // Удаляем только закладки
+        // Удаляем старые закладки
         $('.submenu-item').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         if (filters.length === 0) return;
         
-        // Находим список настроек (индекс 2)
-        var settingsList = $('.menu .menu__list').eq(2);
-        if (!settingsList.length) return;
+        // Добавляем закладки в ОСНОВНОЙ список (индекс 0)
+        var mainList = $('.menu .menu__list').eq(0);
+        if (!mainList.length) return;
         
-        // Добавляем закладки после кнопки сохранения
         filters.forEach(function(filter) {
             var safeName = filter.name.replace(/[&<>]/g, function(m) {
                 if (m === '&') return '&amp;';
@@ -342,7 +338,7 @@
                 deleteFilter(filter.id, filter.name);
             });
             
-            settingsList.append(item);
+            mainList.append(item);
         });
         
         console.log('[SaveFilter] Меню обновлено, закладок:', filters.length);
@@ -355,7 +351,7 @@
         applyButtonPosition();
         updateFiltersMenu();
         addSettings();
-        showMsg('✓ Плагин загружен. Кнопка в левом меню, перед Настройками');
+        showMsg('✓ Плагин загружен. Кнопка над Настройками, закладки в основном меню');
     }
     
     if (typeof Lampa !== 'undefined') {
