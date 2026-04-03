@@ -4,44 +4,90 @@
     console.log('[SaveFilter] Плагин запущен');
 
     var STORAGE_KEY = 'saved_filters_list';
-    var holdTimer = null;
-    var currentFilterId = null;
+    var isFilterWindowOpen = false;
 
     function showMsg(text) {
         console.log('[SaveFilter]', text);
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
             Lampa.Noty.show(text);
-        } else {
-            alert(text);
         }
     }
 
-    // ==================== СОХРАНЕНИЕ ТЕКУЩЕГО ФИЛЬТРА ====================
+    // ==================== ОТКРЫТИЕ ШТАТНОГО ФИЛЬТРА ====================
     
-    function saveCurrentFilter() {
+    function openNativeFilter() {
+        console.log('[SaveFilter] Открываем штатный фильтр');
+        
+        // Находим и открываем окно фильтрации
+        var filterBtn = $('.head__action.open--filter, .head__action[data-action="filter"]');
+        
+        if (filterBtn.length) {
+            filterBtn.trigger('click');
+            isFilterWindowOpen = true;
+            
+            // Ждем появления кнопки "Начать поиск" и вешаем обработчик
+            setTimeout(function() {
+                var searchBtn = $('.selectbox__footer .selector:contains("Начать поиск"), .selectbox__footer .selector:contains("Применить")');
+                if (searchBtn.length && !searchBtn.hasClass('filter-save-handler')) {
+                    searchBtn.addClass('filter-save-handler');
+                    
+                    // Сохраняем оригинальный обработчик
+                    var originalClick = searchBtn.data('events');
+                    
+                    // Добавляем свой обработчик
+                    searchBtn.on('click', function(e) {
+                        console.log('[SaveFilter] Фильтр применен');
+                        setTimeout(function() {
+                            saveCurrentFilterAfterApply();
+                        }, 500);
+                    });
+                }
+            }, 1000);
+        } else {
+            showMsg('Кнопка фильтра не найдена');
+        }
+    }
+
+    // ==================== СОХРАНЕНИЕ ПОСЛЕ ПРИМЕНЕНИЯ ФИЛЬТРА ====================
+    
+    function saveCurrentFilterAfterApply() {
         var currentActivity = Lampa.Activity.active();
-        if (!currentActivity) {
-            showMsg('Не удалось определить текущую страницу');
+        
+        if (!currentActivity || (currentActivity.component !== 'category_full' && currentActivity.component !== 'category')) {
+            showMsg('Подождите, фильтр применяется...');
+            setTimeout(saveCurrentFilterAfterApply, 1000);
             return;
         }
         
-        if (currentActivity.component !== 'category_full' && currentActivity.component !== 'category') {
-            showMsg('Откройте раздел Фильмы или Сериалы и примените фильтр');
-            return;
-        }
-        
-        var name = prompt('Введите название фильтра:', currentActivity.title || 'Мой фильтр');
-        if (!name) return;
-        
+        // Открываем диалог в стиле Lampa
+        Lampa.Input.show({
+            title: 'Название фильтра',
+            placeholder: 'Введите название...',
+            onBack: function() {
+                console.log('[SaveFilter] Отмена сохранения');
+            },
+            onEnter: function(name) {
+                if (name && name.trim()) {
+                    saveFilter(name.trim(), currentActivity);
+                } else {
+                    showMsg('Название не может быть пустым');
+                }
+            }
+        });
+    }
+
+    // ==================== СОХРАНЕНИЕ ФИЛЬТРА ====================
+    
+    function saveFilter(name, activity) {
         var newFilter = {
             id: Date.now(),
             name: name,
-            url: currentActivity.url,
-            title: currentActivity.title,
-            component: currentActivity.component,
-            source: currentActivity.source || 'tmdb',
-            card_type: currentActivity.card_type || true,
-            params: currentActivity.params || {}
+            url: activity.url,
+            title: activity.title,
+            component: activity.component,
+            source: activity.source || 'tmdb',
+            card_type: activity.card_type || true,
+            params: activity.params || {}
         };
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
@@ -70,8 +116,6 @@
     // ==================== УДАЛЕНИЕ ФИЛЬТРА ====================
     
     function deleteFilter(filterId, filterName) {
-        console.log('[SaveFilter] deleteFilter вызван для:', filterId, filterName);
-        
         Lampa.Select.show({
             title: 'Удалить фильтр?',
             items: [
@@ -99,29 +143,29 @@
         
         // Удаляем старые пункты
         $('.menu__item[data-action="saved_filters_section"]').remove();
-        $('.menu__item[data-action="save_current_filter"]').remove();
+        $('.menu__item[data-action="create_filter_btn"]').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         console.log('[SaveFilter] Найдено фильтров:', filters.length);
         
-        // Кнопка сохранения текущего фильтра
-        var saveBtn = $(`
-            <li class="menu__item selector" data-action="save_current_filter">
+        // Кнопка создания фильтра
+        var createBtn = $(`
+            <li class="menu__item selector" data-action="create_filter_btn">
                 <div class="menu__ico">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M17 3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.1 21 21 20.1 21 19V7L17 3ZM12 19C10.34 19 9 17.66 9 16C9 14.34 10.34 13 12 13C13.66 13 15 14.34 15 16C15 17.66 13.66 19 12 19ZM15 9H5V5H15V9Z" fill="currentColor"/>
+                        <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" fill="currentColor"/>
                     </svg>
                 </div>
-                <div class="menu__text">Сохранить фильтр</div>
+                <div class="menu__text">Создать фильтр</div>
             </li>
         `);
         
-        saveBtn.on('click', function(e) {
+        createBtn.on('click', function(e) {
             e.stopPropagation();
-            saveCurrentFilter();
+            openNativeFilter();
         });
         
-        $('.menu .menu__list').first().append(saveBtn);
+        $('.menu .menu__list').first().append(createBtn);
         
         if (filters.length === 0) return;
         
@@ -150,45 +194,30 @@
                 </div>
             `);
             
-            // Обработчик нажатия (открытие)
+            // Короткое нажатие — открытие
             item.on('click', function(e) {
                 e.stopPropagation();
-                // Если есть активный таймер долгого нажатия — не открываем
-                if (holdTimer) return;
                 openFilter(filter);
             });
             
-            // Обработчик начала долгого нажатия (для телевизора с пультом)
-            item.on('v-click', function(e) {
-                e.stopPropagation();
-                console.log('[SaveFilter] Долгое нажатие на фильтр:', filter.name);
-                deleteFilter(filter.id, filter.name);
-            });
-            
-            // Альтернативный способ: событие hold (если есть в Lampa)
-            item.on('hover:hold', function(e) {
-                e.stopPropagation();
-                console.log('[SaveFilter] hover:hold на фильтр:', filter.name);
-                deleteFilter(filter.id, filter.name);
-            });
-            
-            // Обработка таймером для обычного click + удержание
-            item.on('mousedown', function(e) {
-                currentFilterId = filter.id;
+            // Долгое нажатие — удаление
+            var holdTimer = null;
+            item.on('mousedown', function() {
                 holdTimer = setTimeout(function() {
-                    if (currentFilterId === filter.id) {
-                        console.log('[SaveFilter] Удержание на фильтр:', filter.name);
-                        deleteFilter(filter.id, filter.name);
-                    }
+                    deleteFilter(filter.id, filter.name);
                     holdTimer = null;
-                    currentFilterId = null;
                 }, 800);
             }).on('mouseup mouseleave', function() {
                 if (holdTimer) {
                     clearTimeout(holdTimer);
                     holdTimer = null;
-                    currentFilterId = null;
                 }
+            });
+            
+            // События Lampa для пульта
+            item.on('v-click', function(e) {
+                e.stopPropagation();
+                deleteFilter(filter.id, filter.name);
             });
             
             submenu.append(item);
@@ -198,8 +227,42 @@
         
         var firstMenu = $('.menu .menu__list').first();
         firstMenu.append(section);
-        
-        console.log('[SaveFilter] Меню обновлено');
+    }
+
+    // ==================== ПЕРЕХВАТ ПРИМЕНЕНИЯ ФИЛЬТРА ====================
+    
+    function hookFilterApply() {
+        // Следим за появлением окна фильтрации
+        Lampa.Listener.follow('selectbox', function(e) {
+            if (e.type === 'open') {
+                console.log('[SaveFilter] Окно фильтра открыто');
+                
+                setTimeout(function() {
+                    var applyBtn = $('.selectbox__footer .selector:contains("Начать поиск"), .selectbox__footer .selector:contains("Применить")');
+                    if (applyBtn.length && !applyBtn.hasClass('filter-save-hooked')) {
+                        applyBtn.addClass('filter-save-hooked');
+                        
+                        applyBtn.on('click', function() {
+                            console.log('[SaveFilter] Фильтр применен, ждем результат...');
+                            setTimeout(function() {
+                                var activity = Lampa.Activity.active();
+                                if (activity && (activity.component === 'category_full' || activity.component === 'category')) {
+                                    Lampa.Input.show({
+                                        title: 'Название фильтра',
+                                        placeholder: 'Введите название...',
+                                        onEnter: function(name) {
+                                            if (name && name.trim()) {
+                                                saveFilter(name.trim(), activity);
+                                            }
+                                        }
+                                    });
+                                }
+                            }, 1000);
+                        });
+                    }
+                }, 500);
+            }
+        });
     }
 
     // ==================== ЗАПУСК ====================
@@ -207,7 +270,8 @@
     function init() {
         console.log('[SaveFilter] Инициализация');
         updateFiltersMenu();
-        showMsg('Плагин загружен. Откройте фильтр и нажмите "Сохранить фильтр" в меню');
+        hookFilterApply();
+        showMsg('Плагин загружен. Нажмите "Создать фильтр" в меню');
     }
     
     if (typeof Lampa !== 'undefined') {
