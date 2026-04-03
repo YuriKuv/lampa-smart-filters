@@ -23,7 +23,6 @@
             return;
         }
         
-        // Проверяем, что это страница с фильтрацией
         if (currentActivity.component !== 'category_full' && currentActivity.component !== 'category') {
             showMsg('Откройте раздел Фильмы или Сериалы и примените фильтр');
             return;
@@ -74,8 +73,6 @@
             return f.id != filterId; 
         });
         Lampa.Storage.set(STORAGE_KEY, newFilters);
-        
-        // Перестраиваем меню
         updateFiltersMenu();
         showMsg('Фильтр "' + filterName + '" удален');
     }
@@ -83,13 +80,12 @@
     // ==================== МЕНЮ ====================
     
     function updateFiltersMenu() {
-        // Удаляем старые пункты
         $('.menu__item[data-action="saved_filters_section"]').remove();
         $('.menu__item[data-action="save_current_filter"]').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         
-        // Кнопка сохранения текущего фильтра
+        // Кнопка сохранения текущего фильтра (иконка как в Lampa)
         var saveBtn = $(`
             <li class="menu__item selector" data-action="save_current_filter">
                 <div class="menu__ico">
@@ -97,7 +93,7 @@
                         <path d="M17 3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.1 21 21 20.1 21 19V7L17 3ZM12 19C10.34 19 9 17.66 9 16C9 14.34 10.34 13 12 13C13.66 13 15 14.34 15 16C15 17.66 13.66 19 12 19ZM15 9H5V5H15V9Z" fill="currentColor"/>
                     </svg>
                 </div>
-                <div class="menu__text">💾 Сохранить фильтр</div>
+                <div class="menu__text">Сохранить фильтр</div>
             </li>
         `);
         
@@ -117,7 +113,7 @@
                         <path d="M4 6H20V8H4V6ZM6 11H18V13H6V11ZM10 16H14V18H10V16Z" fill="currentColor"/>
                     </svg>
                 </div>
-                <div class="menu__text">📁 Мои фильтры</div>
+                <div class="menu__text">Мои фильтры</div>
             </li>
         `);
         
@@ -126,21 +122,22 @@
         filters.forEach(function(filter) {
             var item = $(`
                 <div class="menu__item selector submenu-item" data-filter-id="${filter.id}">
-                    <div class="menu__ico">🔖</div>
+                    <div class="menu__ico">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M4 6H20V8H4V6ZM6 11H18V13H6V11ZM10 16H14V18H10V16Z" fill="currentColor"/>
+                        </svg>
+                    </div>
                     <div class="menu__text">${filter.name}</div>
-                    <div class="menu__delete" style="margin-left: auto; padding: 0 10px; color: #ff5555;">✕</div>
+                    <div class="menu__delete" style="margin-left: auto; padding: 0 10px;">✕</div>
                 </div>
             `);
             
-            // Обработчик клика
             item.on('click', function(e) {
-                // Если кликнули на крестик или на его родителя
                 if ($(e.target).hasClass('menu__delete') || $(e.target).parent().hasClass('menu__delete')) {
                     e.stopPropagation();
                     deleteFilter(filter.id, filter.name);
                     return;
                 }
-                // Иначе открываем фильтр
                 openFilter(filter);
             });
             
@@ -149,7 +146,6 @@
         
         section.append(submenu);
         
-        // Добавляем в конец первого меню
         var firstMenu = $('.menu .menu__list').first();
         firstMenu.append(section);
     }
