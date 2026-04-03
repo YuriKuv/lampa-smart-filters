@@ -68,24 +68,43 @@
     // ==================== УДАЛЕНИЕ ФИЛЬТРА ====================
     
     function deleteFilter(filterId, filterName) {
+        console.log('[SaveFilter] deleteFilter вызван для:', filterId, filterName);
+        
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
+        console.log('[SaveFilter] Было фильтров:', filters.length);
+        
         var newFilters = filters.filter(function(f) { 
             return f.id != filterId; 
         });
+        
         Lampa.Storage.set(STORAGE_KEY, newFilters);
-        updateFiltersMenu();
+        console.log('[SaveFilter] Стало фильтров:', newFilters.length);
+        
+        // Удаляем элементы из DOM напрямую
+        $('.submenu-item[data-filter-id="' + filterId + '"]').remove();
+        
+        // Проверяем, остались ли еще фильтры
+        var remainingFilters = Lampa.Storage.get(STORAGE_KEY, []);
+        if (remainingFilters.length === 0) {
+            // Если фильтров нет, удаляем весь раздел
+            $('.menu__item[data-action="saved_filters_section"]').remove();
+        }
+        
         showMsg('Фильтр "' + filterName + '" удален');
     }
-
     // ==================== МЕНЮ ====================
     
     function updateFiltersMenu() {
+        console.log('[SaveFilter] Обновление меню');
+        
+        // Удаляем старые пункты
         $('.menu__item[data-action="saved_filters_section"]').remove();
         $('.menu__item[data-action="save_current_filter"]').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
+        console.log('[SaveFilter] Найдено фильтров:', filters.length);
         
-        // Кнопка сохранения текущего фильтра (иконка как в Lampa)
+        // Кнопка сохранения текущего фильтра
         var saveBtn = $(`
             <li class="menu__item selector" data-action="save_current_filter">
                 <div class="menu__ico">
@@ -132,13 +151,18 @@
                 </div>
             `);
             
+            // Обработчик для пункта фильтра
             item.on('click', function(e) {
+                // Проверяем, кликнули ли на крестик
                 if ($(e.target).hasClass('menu__delete') || $(e.target).parent().hasClass('menu__delete')) {
                     e.stopPropagation();
+                    e.preventDefault();
+                    console.log('[SaveFilter] Удаляем фильтр:', filter.id, filter.name);
                     deleteFilter(filter.id, filter.name);
-                    return;
+                    return false;
                 }
                 openFilter(filter);
+                return false;
             });
             
             submenu.append(item);
@@ -148,6 +172,8 @@
         
         var firstMenu = $('.menu .menu__list').first();
         firstMenu.append(section);
+        
+        console.log('[SaveFilter] Меню обновлено');
     }
 
     // ==================== ЗАПУСК ====================
