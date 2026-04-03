@@ -171,7 +171,7 @@
         });
     }
 
-    // ==================== КНОПКА В МЕНЮ (ФИКСИРОВАННОЕ МЕСТО) ====================
+    // ==================== КНОПКА В МЕНЮ ====================
     
     var menuButton = null;
     
@@ -193,18 +193,14 @@
             saveCurrentFilter();
         });
         
-        // Добавляем кнопку в menu__list 1 (где Настройки), в самое начало этого списка
-        var settingsList = $('.menu .menu__list').eq(1);
+        // Добавляем в третий список (индекс 2), где Настройки
+        var settingsList = $('.menu .menu__list').eq(2);
         
         if (settingsList.length) {
             // Вставляем в начало списка настроек
             settingsList.prepend(menuButton);
-            // Добавляем разделитель перед кнопкой (опционально)
-            if (settingsList.find('.menu__split').length === 0) {
-                settingsList.before('<div class="menu__split"></div>');
-            }
         } else {
-            // Fallback — добавляем в конец первого списка
+            // Fallback
             $('.menu .menu__list').first().append(menuButton);
         }
     }
@@ -230,12 +226,6 @@
     function removeButtonFromMenu() {
         $('[data-action="save_filter_btn"]').remove();
         menuButton = null;
-        // Удаляем лишние разделители
-        $('.menu__split').each(function() {
-            if ($(this).next('.menu__split').length) {
-                $(this).remove();
-            }
-        });
     }
 
     function removeButtonFromHeader() {
@@ -299,62 +289,61 @@
     // ==================== ОБНОВЛЕНИЕ МЕНЮ ЗАКЛАДОК ====================
     
     function updateFiltersMenu() {
-        // Удаляем только закладки, но не кнопку сохранения
-        $('.menu__item.submenu-item').remove();
+        // Удаляем только закладки
+        $('.submenu-item').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         if (filters.length === 0) return;
         
-        // Добавляем закладки после кнопки сохранения
-        var targetList = $('.menu .menu__list').eq(1);
-        var saveButton = targetList.find('[data-action="save_filter_btn"]');
+        // Находим список настроек (индекс 2)
+        var settingsList = $('.menu .menu__list').eq(2);
+        if (!settingsList.length) return;
         
-        if (saveButton.length) {
-            saveButton.after(filters.map(function(filter) {
-                var safeName = filter.name.replace(/[&<>]/g, function(m) {
-                    if (m === '&') return '&amp;';
-                    if (m === '<') return '&lt;';
-                    if (m === '>') return '&gt;';
-                    return m;
-                });
-                
-                var item = $(`
-                    <li class="menu__item selector submenu-item" data-filter-id="${filter.id}">
-                        <div class="menu__ico">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M4 6H20V8H4V6ZM6 11H18V13H6V11ZM10 16H14V18H10V16Z" fill="currentColor"/>
-                            </svg>
-                        </div>
-                        <div class="menu__text" style="white-space: normal; line-height: 1.3; padding-right: 10px;">${safeName}</div>
-                    </li>
-                `);
-                
-                item.on('click', function(e) {
-                    e.stopPropagation();
-                    openFilter(filter);
-                });
-                
-                var holdTimer = null;
-                item.on('mousedown', function() {
-                    holdTimer = setTimeout(function() {
-                        deleteFilter(filter.id, filter.name);
-                        holdTimer = null;
-                    }, 800);
-                }).on('mouseup mouseleave', function() {
-                    if (holdTimer) {
-                        clearTimeout(holdTimer);
-                        holdTimer = null;
-                    }
-                });
-                
-                item.on('v-click', function(e) {
-                    e.stopPropagation();
+        // Добавляем закладки после кнопки сохранения
+        filters.forEach(function(filter) {
+            var safeName = filter.name.replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            });
+            
+            var item = $(`
+                <li class="menu__item selector submenu-item" data-filter-id="${filter.id}">
+                    <div class="menu__ico">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M4 6H20V8H4V6ZM6 11H18V13H6V11ZM10 16H14V18H10V16Z" fill="currentColor"/>
+                        </svg>
+                    </div>
+                    <div class="menu__text" style="white-space: normal; line-height: 1.3; padding-right: 10px;">${safeName}</div>
+                </li>
+            `);
+            
+            item.on('click', function(e) {
+                e.stopPropagation();
+                openFilter(filter);
+            });
+            
+            var holdTimer = null;
+            item.on('mousedown', function() {
+                holdTimer = setTimeout(function() {
                     deleteFilter(filter.id, filter.name);
-                });
-                
-                return item;
-            }));
-        }
+                    holdTimer = null;
+                }, 800);
+            }).on('mouseup mouseleave', function() {
+                if (holdTimer) {
+                    clearTimeout(holdTimer);
+                    holdTimer = null;
+                }
+            });
+            
+            item.on('v-click', function(e) {
+                e.stopPropagation();
+                deleteFilter(filter.id, filter.name);
+            });
+            
+            settingsList.append(item);
+        });
         
         console.log('[SaveFilter] Меню обновлено, закладок:', filters.length);
     }
@@ -366,7 +355,7 @@
         applyButtonPosition();
         updateFiltersMenu();
         addSettings();
-        showMsg('✓ Плагин загружен. Кнопка "Сохранить закладку" — в левом меню перед Настройками');
+        showMsg('✓ Плагин загружен. Кнопка в левом меню, перед Настройками');
     }
     
     if (typeof Lampa !== 'undefined') {
