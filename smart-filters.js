@@ -5,12 +5,12 @@
 
     var STORAGE_KEY = 'user_filters_list';
     
-    // Маппинг жанров (название -> ID TMDB)
+    // Маппинг жанров
     var GENRES_LIST = [
         "Боевик", "Приключения", "Мультфильм", "Комедия", "Криминал",
         "Документальный", "Драма", "Семейный", "Фэнтези", "История",
         "Ужасы", "Музыка", "Детектив", "Мелодрама", "Фантастика",
-        "Телевизионный фильм", "Триллер", "Военный", "Вестерн"
+        "Триллер", "Военный", "Вестерн"
     ];
     
     var GENRES_MAP = {
@@ -18,41 +18,36 @@
         "Криминал": 80, "Документальный": 99, "Драма": 18, "Семейный": 10751,
         "Фэнтези": 14, "История": 36, "Ужасы": 27, "Музыка": 10402,
         "Детектив": 9648, "Мелодрама": 10749, "Фантастика": 878,
-        "Телевизионный фильм": 10770, "Триллер": 53, "Военный": 10752, "Вестерн": 37
+        "Триллер": 53, "Военный": 10752, "Вестерн": 37
     };
     
-    // Маппинг языков
     var LANGUAGES_LIST = [
         "Русский", "Английский", "Японский", "Китайский", "Корейский",
-        "Французский", "Немецкий", "Испанский", "Итальянский", "Португальский"
+        "Французский", "Немецкий", "Испанский", "Итальянский"
     ];
     
     var LANGUAGES_MAP = {
         "Русский": "ru", "Английский": "en", "Японский": "ja",
         "Китайский": "zh", "Корейский": "ko", "Французский": "fr",
-        "Немецкий": "de", "Испанский": "es", "Итальянский": "it", "Португальский": "pt"
+        "Немецкий": "de", "Испанский": "es", "Итальянский": "it"
     };
 
     function showMsg(text) {
         console.log('[FilterCreator]', text);
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
             Lampa.Noty.show(text);
-        } else {
-            alert(text);
         }
     }
 
     // ==================== ОКНО СОЗДАНИЯ ФИЛЬТРА ====================
     
     function openFilterCreator() {
-        // Состояние выбора
         var selectedType = 'movie';
         var selectedGenres = [];
-        var selectedLanguage = null;
+        var selectedLanguage = '';
         var yearFrom = 2000;
         var yearTo = new Date().getFullYear();
         
-        // Функция обновления отображения выбранных жанров
         function updateGenresDisplay() {
             var container = $('#filter_genres_selected');
             if (container.length) {
@@ -62,11 +57,10 @@
                     }
                     return id;
                 });
-                container.html(names.length ? '✓ ' + names.join(', ') : 'Не выбраны');
+                container.text(names.length ? '✓ ' + names.join(', ') : 'Не выбраны');
             }
         }
         
-        // Создаем HTML окна
         var dialogHtml = `
             <div id="filter_creator_dialog" style="
                 position: fixed;
@@ -86,7 +80,6 @@
                 <div style="padding: 20px;">
                     <div style="font-size: 20px; margin-bottom: 15px; text-align: center;">➕ Создать фильтр</div>
                     
-                    <!-- Тип контента -->
                     <div style="margin-bottom: 15px;">
                         <div style="margin-bottom: 5px; color: #aaa;">Тип контента</div>
                         <div style="display: flex; gap: 10px;">
@@ -95,9 +88,8 @@
                         </div>
                     </div>
                     
-                    <!-- Жанры -->
                     <div style="margin-bottom: 15px;">
-                        <div style="margin-bottom: 5px; color: #aaa;">Жанры (можно выбрать несколько)</div>
+                        <div style="margin-bottom: 5px; color: #aaa;">Жанры</div>
                         <div id="filter_genres_list" style="display: flex; flex-wrap: wrap; gap: 8px; max-height: 150px; overflow-y: auto; padding: 5px; background: #0d0d1a; border-radius: 8px;">
                             ${GENRES_LIST.map(function(g) { 
                                 return '<div class="genre_item" data-genre="' + g + '" style="padding: 5px 10px; background: #2a2a3e; border-radius: 20px; cursor: pointer;">' + g + '</div>';
@@ -106,7 +98,6 @@
                         <div style="margin-top: 8px; font-size: 12px; color: #aaa;">Выбрано: <span id="filter_genres_selected">Не выбраны</span></div>
                     </div>
                     
-                    <!-- Язык -->
                     <div style="margin-bottom: 15px;">
                         <div style="margin-bottom: 5px; color: #aaa;">Язык оригинала</div>
                         <select id="filter_language" style="width: 100%; padding: 8px; background: #2a2a3e; color: white; border: none; border-radius: 6px;">
@@ -115,16 +106,14 @@
                         </select>
                     </div>
                     
-                    <!-- Годы -->
                     <div style="margin-bottom: 15px;">
-                        <div style="margin-bottom: 5px; color: #aaa;">Диапазон годов</div>
+                        <div style="margin-bottom: 5px; color: #aaa;">Годы</div>
                         <div style="display: flex; gap: 10px;">
                             <input type="number" id="filter_year_from" value="2000" placeholder="с" style="flex:1; padding: 8px; background: #2a2a3e; color: white; border: none; border-radius: 6px;">
                             <input type="number" id="filter_year_to" value="${new Date().getFullYear()}" placeholder="по" style="flex:1; padding: 8px; background: #2a2a3e; color: white; border: none; border-radius: 6px;">
                         </div>
                     </div>
                     
-                    <!-- Кнопки -->
                     <div style="display: flex; gap: 10px; margin-top: 20px;">
                         <div id="filter_save_btn" style="flex:1; padding: 10px; text-align: center; background: #4CAF50; border-radius: 6px; cursor: pointer;">💾 Сохранить</div>
                         <div id="filter_cancel_btn" style="flex:1; padding: 10px; text-align: center; background: #555; border-radius: 6px; cursor: pointer;">Отмена</div>
@@ -136,14 +125,12 @@
         
         $('body').append(dialogHtml);
         
-        // Выбор типа
         $('.filter_type_btn').on('click', function() {
             $('.filter_type_btn').css('background', '#333');
             $(this).css('background', '#4CAF50');
             selectedType = $(this).data('type');
         });
         
-        // Выбор жанров
         $('.genre_item').on('click', function() {
             var genreName = $(this).data('genre');
             var genreId = GENRES_MAP[genreName];
@@ -159,11 +146,10 @@
             updateGenresDisplay();
         });
         
-        // Сохранение
         $('#filter_save_btn').on('click', function() {
             yearFrom = parseInt($('#filter_year_from').val()) || 2000;
             yearTo = parseInt($('#filter_year_to').val()) || new Date().getFullYear();
-            selectedLanguage = $('#filter_language').val() || null;
+            selectedLanguage = $('#filter_language').val() || '';
             
             var name = prompt('Введите название фильтра:', 'Мой фильтр');
             if (name && name.trim()) {
@@ -187,41 +173,46 @@
             $('#filter_creator_dialog, #filter_overlay').remove();
         });
         
-        // Отмена
         $('#filter_cancel_btn, #filter_overlay').on('click', function() {
             $('#filter_creator_dialog, #filter_overlay').remove();
         });
     }
 
-    // ==================== ОТКРЫТИЕ ФИЛЬТРА ====================
+    // ==================== ОТКРЫТИЕ ФИЛЬТРА (ИСПРАВЛЕННАЯ ВЕРСИЯ) ====================
     
     function openFilter(filter) {
-        console.log('[FilterCreator] Открываем:', filter);
+        console.log('[FilterCreator] Открываем фильтр:', filter);
         
-        var baseUrl = filter.type === 'movie' ? 'discover/movie' : 'discover/tv';
-        var params = ['sort_by=popularity.desc', 'language=ru-RU'];
+        // Формируем параметры для URL
+        var urlParams = [];
         
         if (filter.genres && filter.genres.length > 0) {
-            params.push('with_genres=' + filter.genres.join(','));
+            urlParams.push('with_genres=' + filter.genres.join(','));
         }
         
         if (filter.language) {
-            params.push('with_original_language=' + filter.language);
+            urlParams.push('with_original_language=' + filter.language);
         }
         
         if (filter.yearFrom) {
             var dateField = filter.type === 'movie' ? 'primary_release_date.gte' : 'first_air_date.gte';
-            params.push(dateField + '=' + filter.yearFrom + '-01-01');
+            urlParams.push(dateField + '=' + filter.yearFrom + '-01-01');
         }
         
         if (filter.yearTo) {
             var dateFieldTo = filter.type === 'movie' ? 'primary_release_date.lte' : 'first_air_date.lte';
-            params.push(dateFieldTo + '=' + filter.yearTo + '-12-31');
+            urlParams.push(dateFieldTo + '=' + filter.yearTo + '-12-31');
         }
         
-        var url = baseUrl + '?' + params.join('&');
+        // Добавляем базовые параметры
+        urlParams.push('sort_by=popularity.desc');
+        urlParams.push('language=ru-RU');
+        
+        var url = (filter.type === 'movie' ? 'discover/movie' : 'discover/tv') + '?' + urlParams.join('&');
+        
         console.log('[FilterCreator] URL:', url);
         
+        // Правильный вызов Activity.push
         Lampa.Activity.push({
             url: url,
             title: filter.name,
@@ -231,14 +222,16 @@
         });
     }
 
-    // ==================== МЕНЮ С ФИЛЬТРАМИ ====================
+    // ==================== ОБНОВЛЕНИЕ МЕНЮ (БЕЗ ДУБЛЕЙ) ====================
     
     function updateFiltersMenu() {
+        // Удаляем только старые пункты, но не все
         $('.menu__item[data-action="user_filters_section"]').remove();
+        $('.menu__item[data-action="create_filter_btn"]').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         
-        // Кнопка создания нового фильтра (всегда показываем)
+        // Кнопка создания нового фильтра
         var createBtn = $(`
             <li class="menu__item selector" data-action="create_filter_btn">
                 <div class="menu__ico">➕</div>
@@ -266,23 +259,26 @@
         
         filters.forEach(function(filter) {
             var item = $(`
-                <div class="menu__item selector submenu-item">
+                <div class="menu__item selector submenu-item" data-filter-id="${filter.id}">
                     <div class="menu__ico">🔖</div>
                     <div class="menu__text">${filter.name}</div>
                     <div class="menu__delete" style="margin-left: auto; padding: 0 10px; color: #ff5555;">✕</div>
                 </div>
             `);
             
+            // Обработчик клика
             item.on('click', function(e) {
-                if ($(e.target).hasClass('menu__delete')) {
+                // Если кликнули на крестик - удаляем
+                if ($(e.target).hasClass('menu__delete') || $(e.target).parent().hasClass('menu__delete')) {
                     e.stopPropagation();
                     var newFilters = filters.filter(function(f) { return f.id !== filter.id; });
                     Lampa.Storage.set(STORAGE_KEY, newFilters);
-                    updateFiltersMenu();
-                    showMsg('Фильтр удален');
-                } else {
-                    openFilter(filter);
+                    updateFiltersMenu(); // Перестраиваем меню
+                    showMsg('Фильтр "' + filter.name + '" удален');
+                    return;
                 }
+                // Иначе открываем фильтр
+                openFilter(filter);
             });
             
             submenu.append(item);
