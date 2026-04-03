@@ -164,7 +164,8 @@
             onSelect: function(item) {
                 if (item.value === 'yes') {
                     Lampa.Storage.set(STORAGE_KEY, []);
-                    updateFiltersMenu();
+                    $('.submenu-item').remove();
+                    $('[data-filter-id]').remove();
                     showMsg('Все закладки удалены');
                 }
             }
@@ -193,7 +194,6 @@
             saveCurrentFilter();
         });
         
-        // Добавляем в список с Настройками (индекс 1) в начало
         var settingsList = $('.menu .menu__list').eq(1);
         if (settingsList.length) {
             settingsList.prepend(menuButton);
@@ -286,13 +286,16 @@
     // ==================== ОБНОВЛЕНИЕ МЕНЮ ЗАКЛАДОК ====================
     
     function updateFiltersMenu() {
-        // Удаляем старые закладки
         $('.submenu-item').remove();
+        $('[data-filter-id]').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
-        if (filters.length === 0) return;
         
-        // Добавляем закладки в ОСНОВНОЙ список (индекс 0)
+        if (filters.length === 0) {
+            console.log('[SaveFilter] Нет закладок для отображения');
+            return;
+        }
+        
         var mainList = $('.menu .menu__list').eq(0);
         if (!mainList.length) return;
         
@@ -351,6 +354,7 @@
         applyButtonPosition();
         updateFiltersMenu();
         addSettings();
+        showMsg('✓ Плагин загружен. Кнопка над Настройками, закладки в основном меню');
     }
     
     if (typeof Lampa !== 'undefined') {
