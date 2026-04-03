@@ -77,9 +77,11 @@
     // ==================== МЕНЮ ====================
     
     function updateFiltersMenu() {
-        // Удаляем старые пункты
-        $('.menu__item[data-action="saved_filters_section"]').remove();
+        // Полностью удаляем ВСЕ наши пункты меню по классам
         $('.menu__item[data-action="save_filter_btn"]').remove();
+        $('.menu__item[data-action="saved_filters_section"]').remove();
+        // Также удаляем все submenu-item с нашими фильтрами
+        $('.submenu-item').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         
