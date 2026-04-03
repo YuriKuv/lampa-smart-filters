@@ -4,7 +4,6 @@
     console.log('[SaveFilter] Плагин запущен');
 
     var STORAGE_KEY = 'saved_filters_list';
-    var isFilterWindowOpen = false;
 
     function showMsg(text) {
         console.log('[SaveFilter]', text);
@@ -16,64 +15,65 @@
     // ==================== ОТКРЫТИЕ ШТАТНОГО ФИЛЬТРА ====================
     
     function openNativeFilter() {
-        console.log('[SaveFilter] Открываем штатный фильтр');
+        console.log('[SaveFilter] Открываем штатный фильтр из левого меню');
         
-        // Находим и открываем окно фильтрации
-        var filterBtn = $('.head__action.open--filter, .head__action[data-action="filter"]');
+        var filterMenuItem = $('.menu__item[data-action="filter"]');
         
-        if (filterBtn.length) {
-            filterBtn.trigger('click');
-            isFilterWindowOpen = true;
+        if (filterMenuItem.length) {
+            filterMenuItem.trigger('click');
+            console.log('[SaveFilter] Клик по пункту "Фильтр" отправлен');
             
-            // Ждем появления кнопки "Начать поиск" и вешаем обработчик
             setTimeout(function() {
-                var searchBtn = $('.selectbox__footer .selector:contains("Начать поиск"), .selectbox__footer .selector:contains("Применить")');
-                if (searchBtn.length && !searchBtn.hasClass('filter-save-handler')) {
-                    searchBtn.addClass('filter-save-handler');
-                    
-                    // Сохраняем оригинальный обработчик
-                    var originalClick = searchBtn.data('events');
-                    
-                    // Добавляем свой обработчик
-                    searchBtn.on('click', function(e) {
-                        console.log('[SaveFilter] Фильтр применен');
-                        setTimeout(function() {
-                            saveCurrentFilterAfterApply();
-                        }, 500);
-                    });
-                }
-            }, 1000);
+                hookFilterApply();
+            }, 500);
         } else {
-            showMsg('Кнопка фильтра не найдена');
+            console.log('[SaveFilter] Пункт меню "Фильтр" не найден');
+            showMsg('Пункт "Фильтр" не найден в меню');
         }
     }
 
-    // ==================== СОХРАНЕНИЕ ПОСЛЕ ПРИМЕНЕНИЯ ФИЛЬТРА ====================
+    // ==================== ПЕРЕХВАТ КНОПКИ "НАЧАТЬ ПОИСК" ====================
     
-    function saveCurrentFilterAfterApply() {
-        var currentActivity = Lampa.Activity.active();
+    function hookFilterApply() {
+        console.log('[SaveFilter] Поиск кнопки "Начать поиск"');
         
-        if (!currentActivity || (currentActivity.component !== 'category_full' && currentActivity.component !== 'category')) {
-            showMsg('Подождите, фильтр применяется...');
-            setTimeout(saveCurrentFilterAfterApply, 1000);
-            return;
-        }
+        var searchBtn = $('.selectbox__footer .selector:contains("Начать поиск"), .selectbox__footer .selector:contains("Применить")');
         
-        // Открываем диалог в стиле Lampa
-        Lampa.Input.show({
-            title: 'Название фильтра',
-            placeholder: 'Введите название...',
-            onBack: function() {
-                console.log('[SaveFilter] Отмена сохранения');
-            },
-            onEnter: function(name) {
-                if (name && name.trim()) {
-                    saveFilter(name.trim(), currentActivity);
-                } else {
-                    showMsg('Название не может быть пустым');
-                }
+        if (searchBtn.length) {
+            console.log('[SaveFilter] Кнопка найдена:', searchBtn.text());
+            
+            if (!searchBtn.hasClass('filter-save-hooked')) {
+                searchBtn.addClass('filter-save-hooked');
+                
+                searchBtn.on('click', function() {
+                    console.log('[SaveFilter] Кнопка "Начать поиск" нажата');
+                    
+                    setTimeout(function() {
+                        var activity = Lampa.Activity.active();
+                        console.log('[SaveFilter] Текущий activity:', activity.component, activity.url);
+                        
+                        if (activity && (activity.component === 'category_full' || activity.component === 'category')) {
+                            Lampa.Input.show({
+                                title: 'Сохранить фильтр',
+                                placeholder: 'Введите название...',
+                                onBack: function() {
+                                    console.log('[SaveFilter] Отмена сохранения');
+                                },
+                                onEnter: function(name) {
+                                    if (name && name.trim()) {
+                                        saveFilter(name.trim(), activity);
+                                    } else {
+                                        showMsg('Название не может быть пустым');
+                                    }
+                                }
+                            });
+                        }
+                    }, 1500);
+                });
             }
-        });
+        } else {
+            setTimeout(hookFilterApply, 1000);
+        }
     }
 
     // ==================== СОХРАНЕНИЕ ФИЛЬТРА ====================
@@ -141,14 +141,11 @@
     function updateFiltersMenu() {
         console.log('[SaveFilter] Обновление меню');
         
-        // Удаляем старые пункты
         $('.menu__item[data-action="saved_filters_section"]').remove();
         $('.menu__item[data-action="create_filter_btn"]').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
-        console.log('[SaveFilter] Найдено фильтров:', filters.length);
         
-        // Кнопка создания фильтра
         var createBtn = $(`
             <li class="menu__item selector" data-action="create_filter_btn">
                 <div class="menu__ico">
@@ -194,13 +191,11 @@
                 </div>
             `);
             
-            // Короткое нажатие — открытие
             item.on('click', function(e) {
                 e.stopPropagation();
                 openFilter(filter);
             });
             
-            // Долгое нажатие — удаление
             var holdTimer = null;
             item.on('mousedown', function() {
                 holdTimer = setTimeout(function() {
@@ -214,55 +209,11 @@
                 }
             });
             
-            // События Lampa для пульта
-            item.on('v-click', function(e) {
-                e.stopPropagation();
-                deleteFilter(filter.id, filter.name);
-            });
-            
             submenu.append(item);
         });
         
         section.append(submenu);
-        
-        var firstMenu = $('.menu .menu__list').first();
-        firstMenu.append(section);
-    }
-
-    // ==================== ПЕРЕХВАТ ПРИМЕНЕНИЯ ФИЛЬТРА ====================
-    
-    function hookFilterApply() {
-        // Следим за появлением окна фильтрации
-        Lampa.Listener.follow('selectbox', function(e) {
-            if (e.type === 'open') {
-                console.log('[SaveFilter] Окно фильтра открыто');
-                
-                setTimeout(function() {
-                    var applyBtn = $('.selectbox__footer .selector:contains("Начать поиск"), .selectbox__footer .selector:contains("Применить")');
-                    if (applyBtn.length && !applyBtn.hasClass('filter-save-hooked')) {
-                        applyBtn.addClass('filter-save-hooked');
-                        
-                        applyBtn.on('click', function() {
-                            console.log('[SaveFilter] Фильтр применен, ждем результат...');
-                            setTimeout(function() {
-                                var activity = Lampa.Activity.active();
-                                if (activity && (activity.component === 'category_full' || activity.component === 'category')) {
-                                    Lampa.Input.show({
-                                        title: 'Название фильтра',
-                                        placeholder: 'Введите название...',
-                                        onEnter: function(name) {
-                                            if (name && name.trim()) {
-                                                saveFilter(name.trim(), activity);
-                                            }
-                                        }
-                                    });
-                                }
-                            }, 1000);
-                        });
-                    }
-                }, 500);
-            }
-        });
+        $('.menu .menu__list').first().append(section);
     }
 
     // ==================== ЗАПУСК ====================
@@ -270,7 +221,6 @@
     function init() {
         console.log('[SaveFilter] Инициализация');
         updateFiltersMenu();
-        hookFilterApply();
         showMsg('Плагин загружен. Нажмите "Создать фильтр" в меню');
     }
     
