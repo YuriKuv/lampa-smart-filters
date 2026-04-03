@@ -11,6 +11,8 @@
         }
     }
 
+    // ==================== СОХРАНЕНИЕ ФИЛЬТРА ====================
+    
     function saveCurrentFilter() {
         var activity = Lampa.Activity.active();
         
@@ -38,6 +40,8 @@
         showMsg('Фильтр "' + name + '" сохранен');
     }
 
+    // ==================== ОТКРЫТИЕ ФИЛЬТРА ====================
+    
     function openFilter(filter) {
         Lampa.Activity.push({
             url: filter.url,
@@ -49,22 +53,37 @@
         });
     }
 
+    // ==================== УДАЛЕНИЕ ФИЛЬТРА ====================
+    
     function deleteFilter(filterId, filterName) {
-        if (confirm('Удалить фильтр "' + filterName + '"?')) {
-            var filters = Lampa.Storage.get(STORAGE_KEY, []);
-            var newFilters = filters.filter(function(f) { return f.id != filterId; });
-            Lampa.Storage.set(STORAGE_KEY, newFilters);
-            updateFiltersMenu();
-            showMsg('Фильтр "' + filterName + '" удален');
-        }
+        Lampa.Select.show({
+            title: 'Удалить фильтр?',
+            items: [
+                { title: 'Да', value: 'yes' },
+                { title: 'Нет', value: 'no' }
+            ],
+            onSelect: function(item) {
+                if (item.value === 'yes') {
+                    var filters = Lampa.Storage.get(STORAGE_KEY, []);
+                    var newFilters = filters.filter(function(f) { return f.id != filterId; });
+                    Lampa.Storage.set(STORAGE_KEY, newFilters);
+                    updateFiltersMenu();
+                    showMsg('Фильтр "' + filterName + '" удален');
+                }
+            }
+        });
     }
 
+    // ==================== МЕНЮ ====================
+    
     function updateFiltersMenu() {
+        // Удаляем старые пункты
         $('.menu__item[data-action="saved_filters_section"]').remove();
         $('.menu__item[data-action="save_filter_btn"]').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         
+        // Кнопка сохранения фильтра
         var saveBtn = $(`
             <li class="menu__item selector" data-action="save_filter_btn">
                 <div class="menu__ico">
@@ -106,17 +125,33 @@
                         </svg>
                     </div>
                     <div class="menu__text">${filter.name}</div>
-                    <div class="menu__delete" style="margin-left: auto; padding: 0 10px; color: #ff5555;">✕</div>
                 </div>
             `);
             
+            // Короткое нажатие — открытие фильтра
             item.on('click', function(e) {
-                if ($(e.target).hasClass('menu__delete')) {
-                    e.stopPropagation();
-                    deleteFilter(filter.id, filter.name);
-                    return;
-                }
+                e.stopPropagation();
                 openFilter(filter);
+            });
+            
+            // Долгое нажатие (800 мс) — удаление
+            var holdTimer = null;
+            item.on('mousedown', function() {
+                holdTimer = setTimeout(function() {
+                    deleteFilter(filter.id, filter.name);
+                    holdTimer = null;
+                }, 800);
+            }).on('mouseup mouseleave', function() {
+                if (holdTimer) {
+                    clearTimeout(holdTimer);
+                    holdTimer = null;
+                }
+            });
+            
+            // События для пульта
+            item.on('v-click', function(e) {
+                e.stopPropagation();
+                deleteFilter(filter.id, filter.name);
             });
             
             submenu.append(item);
@@ -124,8 +159,12 @@
         
         section.append(submenu);
         $('.menu .menu__list').first().append(section);
+        
+        console.log('[SaveFilter] Меню обновлено, фильтров:', filters.length);
     }
 
+    // ==================== ЗАПУСК ====================
+    
     function init() {
         console.log('[SaveFilter] Инициализация');
         updateFiltersMenu();
