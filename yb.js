@@ -89,26 +89,38 @@
         }
         
         var defaultName = getDefaultName(activity);
-        var name = prompt('Введите название закладки:', defaultName);
-        if (!name || !name.trim()) return;
         
-        var newFilter = {
-            id: Date.now(),
-            name: name.trim(),
-            url: normalizeUrl(activity),
-            component: activity.component || 'category',
-            source: activity.source || 'tmdb',
-            card_type: true,
-            page: 1
-        };
-        if (activity.genres) newFilter.genres = activity.genres;
-        if (activity.sort) newFilter.sort = activity.sort;
-        
-        var filters = Lampa.Storage.get(STORAGE_KEY, []);
-        filters.push(newFilter);
-        Lampa.Storage.set(STORAGE_KEY, filters);
-        updateFiltersMenu();
-        showMsg('✓ Закладка "' + name + '" сохранена');
+        Lampa.Input.show({
+            title: 'Сохранить закладку',
+            placeholder: 'Введите название',
+            value: defaultName,
+            onBack: function() {
+                console.log('[SaveFilter] Отмена сохранения');
+            },
+            onEnter: function(name) {
+                if (name && name.trim()) {
+                    var newFilter = {
+                        id: Date.now(),
+                        name: name.trim(),
+                        url: normalizeUrl(activity),
+                        component: activity.component || 'category',
+                        source: activity.source || 'tmdb',
+                        card_type: true,
+                        page: 1
+                    };
+                    if (activity.genres) newFilter.genres = activity.genres;
+                    if (activity.sort) newFilter.sort = activity.sort;
+                    
+                    var filters = Lampa.Storage.get(STORAGE_KEY, []);
+                    filters.push(newFilter);
+                    Lampa.Storage.set(STORAGE_KEY, filters);
+                    updateFiltersMenu();
+                    showMsg('✓ Закладка "' + name + '" сохранена');
+                } else if (name && !name.trim()) {
+                    showMsg('Название не может быть пустым');
+                }
+            }
+        });
     }
 
     // ==================== ОТКРЫТИЕ ====================
