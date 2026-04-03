@@ -12,6 +12,34 @@
         }
     }
 
+    // ==================== ПРОВЕРКА КОРНЕВОГО РАЗДЕЛА ====================
+    
+    function isRootSection(activity) {
+        // Список корневых разделов из левого меню
+        var rootActions = [
+            'main', 'feed', 'movie', 'cartoon', 'tv', 'myperson', 
+            'catalog', 'filter', 'relise', 'anime', 'favorite', 
+            'history', 'subscribes', 'timetable', 'mytorrents',
+            'settings', 'about', 'console', 'edit'
+        ];
+        
+        // Проверяем по action в URL
+        for (var i = 0; i < rootActions.length; i++) {
+            if (activity.url === rootActions[i]) {
+                return true;
+            }
+        }
+        
+        // Проверка для категорий без параметров
+        if (activity.component === 'category' && !activity.genres && !activity.sort) {
+            if (activity.url === 'movie' || activity.url === 'tv') {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
     // ==================== НОРМАЛИЗАЦИЯ ====================
     
     function normalizeUrl(activity) {
@@ -51,11 +79,20 @@
             showMsg('Не удалось определить текущую страницу');
             return;
         }
+        
+        // Проверяем, что это страница с контентом
         var validComponents = ['category', 'category_full', 'serial', 'movie', 'cartoon', 'anime', 'tv', 'catalog'];
         if (!validComponents.includes(activity.component) && activity.component.indexOf('category') === -1) {
             showMsg('Откройте раздел с контентом');
             return;
         }
+        
+        // Проверяем, не пытается ли пользователь сохранить корневой раздел
+        if (isRootSection(activity)) {
+            showMsg('❌ Нельзя сохранить основной раздел.\n\n✅ Для создания закладки:\n• Откройте подраздел через кнопку "Ещё"\n• Или примените фильтр (жанры, годы, язык)');
+            return;
+        }
+        
         var defaultName = getDefaultName(activity);
         var name = prompt('Введите название закладки:', defaultName);
         if (!name || !name.trim()) return;
@@ -76,7 +113,7 @@
         filters.push(newFilter);
         Lampa.Storage.set(STORAGE_KEY, filters);
         updateFiltersMenu();
-        showMsg('Закладка "' + name + '" сохранена');
+        showMsg('✓ Закладка "' + name + '" сохранена');
     }
 
     // ==================== ОТКРЫТИЕ ====================
@@ -117,10 +154,16 @@
     }
 
     function deleteAllFilters() {
+        var filters = Lampa.Storage.get(STORAGE_KEY, []);
+        if (filters.length === 0) {
+            showMsg('Нет сохраненных закладок');
+            return;
+        }
+        
         Lampa.Select.show({
             title: 'Удалить все закладки?',
             items: [
-                { title: 'Да, удалить все', value: 'yes' },
+                { title: 'Да, удалить все (' + filters.length + ')', value: 'yes' },
                 { title: 'Нет', value: 'no' }
             ],
             onSelect: function(item) {
@@ -251,6 +294,14 @@
         var menuList = $('.menu .menu__list').first();
         
         filters.forEach(function(filter) {
+            // Экранируем спецсимволы в названии
+            var safeName = filter.name.replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            });
+            
             var item = $(`
                 <li class="menu__item selector submenu-item" data-filter-id="${filter.id}">
                     <div class="menu__ico">
@@ -258,7 +309,7 @@
                             <path d="M4 6H20V8H4V6ZM6 11H18V13H6V11ZM10 16H14V18H10V16Z" fill="currentColor"/>
                         </svg>
                     </div>
-                    <div class="menu__text" style="white-space: normal; line-height: 1.3; padding-right: 10px;">${filter.name}</div>
+                    <div class="menu__text" style="white-space: normal; line-height: 1.3; padding-right: 10px;">${safeName}</div>
                 </li>
             `);
             
@@ -287,6 +338,8 @@
             
             menuList.append(item);
         });
+        
+        console.log('[SaveFilter] Меню обновлено, закладок:', filters.length);
     }
 
     // ==================== ЗАПУСК ====================
@@ -296,7 +349,7 @@
         applyButtonPosition();
         updateFiltersMenu();
         addSettings();
-        showMsg('Плагин загружен. Настройки в разделе "Интерфейс"');
+        showMsg('✓ Плагин загружен. Настройки в разделе "Интерфейс"');
     }
     
     if (typeof Lampa !== 'undefined') {
