@@ -164,7 +164,14 @@
             onSelect: function(item) {
                 if (item.value === 'yes') {
                     Lampa.Storage.set(STORAGE_KEY, []);
-                    updateFiltersMenu();
+                    $('.submenu-item').remove();
+                    $('[data-filter-id]').remove();
+                    
+                    // Принудительно обновляем меню
+                    if (typeof Lampa.Menu !== 'undefined' && Lampa.Menu.update) {
+                        Lampa.Menu.update();
+                    }
+                    
                     showMsg('Все закладки удалены');
                 }
             }
