@@ -5,7 +5,6 @@
 
     var STORAGE_KEY = 'user_filters_list';
     
-    // Маппинг жанров
     var GENRES_LIST = [
         "Боевик", "Приключения", "Мультфильм", "Комедия", "Криминал",
         "Документальный", "Драма", "Семейный", "Фэнтези", "История",
@@ -39,8 +38,45 @@
         }
     }
 
-    // ==================== ОКНО СОЗДАНИЯ ФИЛЬТРА ====================
-    
+    function openFilter(filter) {
+        console.log('[FilterCreator] Открываем фильтр:', filter);
+        
+        var queryParams = [];
+        
+        if (filter.genres && filter.genres.length > 0) {
+            queryParams.push('with_genres=' + filter.genres.join(','));
+        }
+        
+        if (filter.language && filter.language !== '') {
+            queryParams.push('with_original_language=' + filter.language);
+        }
+        
+        if (filter.yearFrom && filter.yearFrom > 1900) {
+            var yearParam = filter.type === 'movie' ? 'primary_release_date.gte' : 'first_air_date.gte';
+            queryParams.push(yearParam + '=' + filter.yearFrom + '-01-01');
+        }
+        
+        if (filter.yearTo && filter.yearTo > 1900) {
+            var yearParamTo = filter.type === 'movie' ? 'primary_release_date.lte' : 'first_air_date.lte';
+            queryParams.push(yearParamTo + '=' + filter.yearTo + '-12-31');
+        }
+        
+        queryParams.push('sort_by=popularity.desc');
+        queryParams.push('language=ru-RU');
+        
+        var url = (filter.type === 'movie' ? 'discover/movie' : 'discover/tv') + '?' + queryParams.join('&');
+        
+        console.log('[FilterCreator] URL:', url);
+        
+        Lampa.Activity.push({
+            url: url,
+            title: filter.name,
+            component: 'category',
+            source: 'tmdb',
+            page: 1
+        });
+    }
+
     function openFilterCreator() {
         var selectedType = 'movie';
         var selectedGenres = [];
@@ -178,75 +214,12 @@
         });
     }
 
-    // ==================== ОТКРЫТИЕ ФИЛЬТРА (ИСПРАВЛЕННАЯ ВЕРСИЯ 2) ====================
-    
-    function openFilter(filter) {
-        console.log('[FilterCreator] Открываем фильтр:', filter);
-        
-        // Определяем базовый URL
-        var baseUrl = filter.type === 'movie' ? 'discover/movie' : 'discover/tv';
-        
-        // Собираем параметры в объект, как это делает Lampa
-        var params = {
-            sort_by: 'popularity.desc',
-            language: 'ru-RU',
-            page: 1
-        };
-        
-        // Добавляем жанры (как строку через запятую)
-        if (filter.genres && filter.genres.length > 0) {
-            params.with_genres = filter.genres.join(',');
-        }
-        
-        // Добавляем язык
-        if (filter.language && filter.language !== '') {
-            params.with_original_language = filter.language;
-        }
-        
-        // Добавляем годы
-        if (filter.yearFrom) {
-            var dateField = filter.type === 'movie' ? 'primary_release_date.gte' : 'first_air_date.gte';
-            params[dateField] = filter.yearFrom + '-01-01';
-        }
-        
-        if (filter.yearTo) {
-            var dateFieldTo = filter.type === 'movie' ? 'primary_release_date.lte' : 'first_air_date.lte';
-            params[dateFieldTo] = filter.yearTo + '-12-31';
-        }
-        
-        // Формируем URL строку
-        var urlParams = [];
-        for (var key in params) {
-            urlParams.push(key + '=' + encodeURIComponent(params[key]));
-        }
-        var url = baseUrl + '?' + urlParams.join('&');
-        
-        console.log('[FilterCreator] URL:', url);
-        
-        // Открываем категорию
-        try {
-            Lampa.Activity.push({
-                url: url,
-                title: filter.name,
-                component: 'category',
-                source: 'tmdb',
-                page: 1
-            });
-        } catch (e) {
-            console.error('[FilterCreator] Ошибка:', e);
-            showMsg('Ошибка открытия: ' + e.message);
-        }
-    }
-    // ==================== ОБНОВЛЕНИЕ МЕНЮ (БЕЗ ДУБЛЕЙ) ====================
-    
     function updateFiltersMenu() {
-        // Удаляем только старые пункты, но не все
         $('.menu__item[data-action="user_filters_section"]').remove();
         $('.menu__item[data-action="create_filter_btn"]').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         
-        // Кнопка создания нового фильтра
         var createBtn = $(`
             <li class="menu__item selector" data-action="create_filter_btn">
                 <div class="menu__ico">➕</div>
@@ -281,24 +254,25 @@
                 </div>
             `);
             
-            // Обработчик клика (исправленный)
-            item.off('click').on('click', function(e) {
-                // Проверяем, кликнули ли на крестик
+            item.on('click', function(e) {
                 if ($(e.target).hasClass('menu__delete') || $(e.target).parent().hasClass('menu__delete')) {
                     e.stopPropagation();
-                    e.preventDefault();
                     var newFilters = filters.filter(function(f) { return f.id !== filter.id; });
                     Lampa.Storage.set(STORAGE_KEY, newFilters);
                     updateFiltersMenu();
                     showMsg('Фильтр "' + filter.name + '" удален');
-                    return false;
+                    return;
                 }
-                // Иначе открываем фильтр
                 openFilter(filter);
-                return false;
             });
-    // ==================== ЗАПУСК ====================
-    
+            
+            submenu.append(item);
+        });
+        
+        section.append(submenu);
+        $('.menu .menu__list').first().append(section);
+    }
+
     function init() {
         console.log('[FilterCreator] Инициализация');
         updateFiltersMenu();
