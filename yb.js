@@ -130,60 +130,11 @@
     // ==================== УДАЛЕНИЕ ====================
     
     function deleteFilter(filterId, filterName) {
-        Lampa.Select.show({
-            title: 'Удалить закладку?',
-            items: [
-                { title: 'Да', value: 'yes' },
-                { title: 'Нет', value: 'no' }
-            ],
-            onSelect: function(item) {
-                if (item.value === 'yes') {
-                    var filters = Lampa.Storage.get(STORAGE_KEY, []);
-                    var newFilters = filters.filter(function(f) { return f.id != filterId; });
-                    Lampa.Storage.set(STORAGE_KEY, newFilters);
-                    updateFiltersMenu();
-                    showMsg('Закладка "' + filterName + '" удалена');
-                }
-                // Закрываем диалог
-                $('.selectbox').remove();
-                $('body').focus();
-            },
-            onBack: function() {
-                $('.selectbox').remove();
-                $('body').focus();
-            }
-        });
-    }
-
-    function deleteAllFilters() {
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
-        if (filters.length === 0) {
-            showMsg('Нет сохраненных закладок');
-            return;
-        }
-        
-        Lampa.Select.show({
-            title: 'Удалить все закладки?',
-            items: [
-                { title: 'Да, удалить все (' + filters.length + ')', value: 'yes' },
-                { title: 'Нет', value: 'no' }
-            ],
-            onSelect: function(item) {
-                if (item.value === 'yes') {
-                    Lampa.Storage.set(STORAGE_KEY, []);
-                    $('.submenu-item').remove();
-                    $('[data-filter-id]').remove();
-                    showMsg('Все закладки удалены');
-                }
-                // Полностью удаляем диалог
-                $('.selectbox').remove();
-                $('body').focus();
-            },
-            onBack: function() {
-                $('.selectbox').remove();
-                $('body').focus();
-            }
-        });
+        var newFilters = filters.filter(function(f) { return f.id != filterId; });
+        Lampa.Storage.set(STORAGE_KEY, newFilters);
+        updateFiltersMenu();
+        showMsg('Закладка "' + filterName + '" удалена');
     }
 
     // ==================== КНОПКА В МЕНЮ ====================
@@ -275,26 +226,6 @@
             onChange: function(value) {
                 Lampa.Storage.set(POSITION_KEY, value);
                 applyButtonPosition();
-                $('.selectbox').remove();
-                $('body').focus();
-            }
-        });
-        
-        Lampa.SettingsApi.addParam({
-            component: 'interface',
-            param: {
-                name: 'clear_all_bookmarks',
-                type: 'trigger',
-                default: false
-            },
-            field: {
-                name: 'Удалить все созданные закладки',
-                description: 'Очистить список сохраненных закладок'
-            },
-            onChange: function(value) {
-                if (value) {
-                    deleteAllFilters();
-                }
             }
         });
     }
