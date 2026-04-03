@@ -1,83 +1,92 @@
 (function () {
     'use strict';
 
-    console.log('[FilterCreator] Плагин запущен');
+    console.log('[SaveFilter] Плагин запущен');
 
-    var STORAGE_KEY = 'user_filters_list';
+    var STORAGE_KEY = 'saved_filters_list';
     
-    var GENRES_LIST = [
-        "Боевик", "Приключения", "Мультфильм", "Комедия", "Криминал",
-        "Документальный", "Драма", "Семейный", "Фэнтези", "История",
-        "Ужасы", "Музыка", "Детектив", "Мелодрама", "Фантастика",
-        "Триллер", "Военный", "Вестерн"
-    ];
-    
+    // Маппинг жанров (название -> ID)
     var GENRES_MAP = {
         "Боевик": 28, "Приключения": 12, "Мультфильм": 16, "Комедия": 35,
         "Криминал": 80, "Документальный": 99, "Драма": 18, "Семейный": 10751,
         "Фэнтези": 14, "История": 36, "Ужасы": 27, "Музыка": 10402,
         "Детектив": 9648, "Мелодрама": 10749, "Фантастика": 878,
-        "Триллер": 53, "Военный": 10752, "Вестерн": 37
+        "ТВ фильм": 10770, "Триллер": 53, "Военный": 10752, "Вестерн": 37
     };
     
-    var LANGUAGES_LIST = [
-        "Русский", "Английский", "Японский", "Китайский", "Корейский",
-        "Французский", "Немецкий", "Испанский", "Итальянский"
-    ];
-    
-    var LANGUAGES_MAP = {
-        "Русский": "ru", "Английский": "en", "Японский": "ja",
-        "Китайский": "zh", "Корейский": "ko", "Французский": "fr",
-        "Немецкий": "de", "Испанский": "es", "Итальянский": "it"
-    };
+    var GENRES_REVERSE = {};
+    for (var g in GENRES_MAP) {
+        GENRES_REVERSE[GENRES_MAP[g]] = g;
+    }
 
     function showMsg(text) {
-        console.log('[FilterCreator]', text);
+        console.log('[SaveFilter]', text);
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
             Lampa.Noty.show(text);
         }
     }
 
+    // ==================== ОТКРЫТИЕ ФИЛЬТРА (ИСПРАВЛЕННАЯ ВЕРСИЯ) ====================
+    
     function openFilter(filter) {
-        console.log('[FilterCreator] Открываем фильтр:', filter);
+        console.log('[SaveFilter] Открываем фильтр:', filter);
         
-        var queryParams = [];
-        
-        if (filter.genres && filter.genres.length > 0) {
-            queryParams.push('with_genres=' + filter.genres.join(','));
-        }
-        
-        if (filter.language && filter.language !== '') {
-            queryParams.push('with_original_language=' + filter.language);
-        }
-        
-        if (filter.yearFrom && filter.yearFrom > 1900) {
-            var yearParam = filter.type === 'movie' ? 'primary_release_date.gte' : 'first_air_date.gte';
-            queryParams.push(yearParam + '=' + filter.yearFrom + '-01-01');
-        }
-        
-        if (filter.yearTo && filter.yearTo > 1900) {
-            var yearParamTo = filter.type === 'movie' ? 'primary_release_date.lte' : 'first_air_date.lte';
-            queryParams.push(yearParamTo + '=' + filter.yearTo + '-12-31');
-        }
-        
-        queryParams.push('sort_by=popularity.desc');
-        queryParams.push('language=ru-RU');
-        
-        var url = (filter.type === 'movie' ? 'discover/movie' : 'discover/tv') + '?' + queryParams.join('&');
-        
-        console.log('[FilterCreator] URL:', url);
-        
-        Lampa.Activity.push({
-            url: url,
-            title: filter.name,
-            component: 'category',
-            source: 'tmdb',
+        // Создаем объект params как это делает Lampa
+        var params = {
+            sort_by: 'popularity.desc',
+            language: 'ru-RU',
             page: 1
-        });
+        };
+        
+        // Добавляем жанры
+        if (filter.genres && filter.genres.length > 0) {
+            params.with_genres = filter.genres.join(',');
+        }
+        
+        // Добавляем язык
+        if (filter.language) {
+            params.with_original_language = filter.language;
+        }
+        
+        // Добавляем годы
+        if (filter.yearFrom) {
+            var dateField = filter.type === 'movie' ? 'primary_release_date.gte' : 'first_air_date.gte';
+            params[dateField] = filter.yearFrom + '-01-01';
+        }
+        
+        if (filter.yearTo) {
+            var dateFieldTo = filter.type === 'movie' ? 'primary_release_date.lte' : 'first_air_date.lte';
+            params[dateFieldTo] = filter.yearTo + '-12-31';
+        }
+        
+        // Формируем URL строку из params
+        var urlParams = [];
+        for (var key in params) {
+            urlParams.push(key + '=' + encodeURIComponent(params[key]));
+        }
+        
+        var url = (filter.type === 'movie' ? 'discover/movie' : 'discover/tv') + '?' + urlParams.join('&');
+        
+        console.log('[SaveFilter] URL:', url);
+        
+        // Используем Lampa.Controller.category для открытия
+        try {
+            Lampa.Activity.push({
+                url: url,
+                title: filter.name,
+                component: 'category',
+                source: 'tmdb',
+                page: 1
+            });
+        } catch (e) {
+            console.error('[SaveFilter] Ошибка:', e);
+            showMsg('Ошибка открытия: ' + e.message);
+        }
     }
 
-    function openFilterCreator() {
+    // ==================== ДИАЛОГ СОЗДАНИЯ ФИЛЬТРА ====================
+    
+    function openCreateDialog() {
         var selectedType = 'movie';
         var selectedGenres = [];
         var selectedLanguage = '';
@@ -88,10 +97,7 @@
             var container = $('#filter_genres_selected');
             if (container.length) {
                 var names = selectedGenres.map(function(id) {
-                    for (var name in GENRES_MAP) {
-                        if (GENRES_MAP[name] === id) return name;
-                    }
-                    return id;
+                    return GENRES_REVERSE[id] || id;
                 });
                 container.text(names.length ? '✓ ' + names.join(', ') : 'Не выбраны');
             }
@@ -117,7 +123,7 @@
                     <div style="font-size: 20px; margin-bottom: 15px; text-align: center;">➕ Создать фильтр</div>
                     
                     <div style="margin-bottom: 15px;">
-                        <div style="margin-bottom: 5px; color: #aaa;">Тип контента</div>
+                        <div style="margin-bottom: 5px; color: #aaa;">Тип</div>
                         <div style="display: flex; gap: 10px;">
                             <div class="filter_type_btn" data-type="movie" style="flex:1; padding: 8px; text-align: center; background: #4CAF50; border-radius: 6px; cursor: pointer;">🎬 Фильмы</div>
                             <div class="filter_type_btn" data-type="tv" style="flex:1; padding: 8px; text-align: center; background: #333; border-radius: 6px; cursor: pointer;">📺 Сериалы</div>
@@ -127,7 +133,7 @@
                     <div style="margin-bottom: 15px;">
                         <div style="margin-bottom: 5px; color: #aaa;">Жанры</div>
                         <div id="filter_genres_list" style="display: flex; flex-wrap: wrap; gap: 8px; max-height: 150px; overflow-y: auto; padding: 5px; background: #0d0d1a; border-radius: 8px;">
-                            ${GENRES_LIST.map(function(g) { 
+                            ${Object.keys(GENRES_MAP).map(function(g) { 
                                 return '<div class="genre_item" data-genre="' + g + '" style="padding: 5px 10px; background: #2a2a3e; border-radius: 20px; cursor: pointer;">' + g + '</div>';
                             }).join('')}
                         </div>
@@ -138,7 +144,15 @@
                         <div style="margin-bottom: 5px; color: #aaa;">Язык оригинала</div>
                         <select id="filter_language" style="width: 100%; padding: 8px; background: #2a2a3e; color: white; border: none; border-radius: 6px;">
                             <option value="">Любой</option>
-                            ${LANGUAGES_LIST.map(function(l) { return '<option value="' + LANGUAGES_MAP[l] + '">' + l + '</option>'; }).join('')}
+                            <option value="ru">Русский</option>
+                            <option value="en">Английский</option>
+                            <option value="ja">Японский</option>
+                            <option value="zh">Китайский</option>
+                            <option value="ko">Корейский</option>
+                            <option value="fr">Французский</option>
+                            <option value="de">Немецкий</option>
+                            <option value="es">Испанский</option>
+                            <option value="it">Итальянский</option>
                         </select>
                     </div>
                     
@@ -214,12 +228,15 @@
         });
     }
 
+    // ==================== МЕНЮ ====================
+    
     function updateFiltersMenu() {
-        $('.menu__item[data-action="user_filters_section"]').remove();
+        $('.menu__item[data-action="saved_filters_section"]').remove();
         $('.menu__item[data-action="create_filter_btn"]').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         
+        // Кнопка создания фильтра
         var createBtn = $(`
             <li class="menu__item selector" data-action="create_filter_btn">
                 <div class="menu__ico">➕</div>
@@ -229,7 +246,7 @@
         
         createBtn.on('click', function(e) {
             e.stopPropagation();
-            openFilterCreator();
+            openCreateDialog();
         });
         
         $('.menu .menu__list').first().append(createBtn);
@@ -237,7 +254,7 @@
         if (filters.length === 0) return;
         
         var section = $(`
-            <li class="menu__item selector" data-action="user_filters_section">
+            <li class="menu__item selector" data-action="saved_filters_section">
                 <div class="menu__ico">📁</div>
                 <div class="menu__text">📁 Мои фильтры</div>
             </li>
@@ -255,15 +272,15 @@
             `);
             
             item.on('click', function(e) {
-                if ($(e.target).hasClass('menu__delete') || $(e.target).parent().hasClass('menu__delete')) {
+                if ($(e.target).hasClass('menu__delete')) {
                     e.stopPropagation();
                     var newFilters = filters.filter(function(f) { return f.id !== filter.id; });
                     Lampa.Storage.set(STORAGE_KEY, newFilters);
                     updateFiltersMenu();
-                    showMsg('Фильтр "' + filter.name + '" удален');
-                    return;
+                    showMsg('Фильтр удален');
+                } else {
+                    openFilter(filter);
                 }
-                openFilter(filter);
             });
             
             submenu.append(item);
@@ -273,8 +290,10 @@
         $('.menu .menu__list').first().append(section);
     }
 
+    // ==================== ЗАПУСК ====================
+    
     function init() {
-        console.log('[FilterCreator] Инициализация');
+        console.log('[SaveFilter] Инициализация');
         updateFiltersMenu();
         showMsg('Плагин загружен. Нажмите "➕ Создать фильтр" в меню');
     }
