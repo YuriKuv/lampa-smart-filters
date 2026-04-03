@@ -11,15 +11,10 @@
         }
     }
 
-    // ==================== НОРМАЛИЗАЦИЯ URL ====================
-    
     function normalizeUrl(activity) {
-        // Если URL уже содержит discover/ — оставляем как есть
         if (activity.url && activity.url.indexOf('discover/') === 0) {
             return activity.url;
         }
-        
-        // Если есть genres (для Мультфильмов, Каталога и т.д.)
         if (activity.genres) {
             var type = 'movie';
             if (activity.url === 'tv' || activity.component === 'tv') {
@@ -27,8 +22,6 @@
             }
             return 'discover/' + type + '?with_genres=' + activity.genres;
         }
-        
-        // Если есть sort (сортировка)
         if (activity.sort) {
             var sortType = 'movie';
             if (activity.url === 'tv') {
@@ -36,31 +29,16 @@
             }
             return 'discover/' + sortType + '?sort_by=' + activity.sort;
         }
-        
-        // Если это просто "movie" или "tv"
-        if (activity.url === 'movie') {
-            return 'discover/movie';
-        }
-        if (activity.url === 'tv') {
-            return 'discover/tv';
-        }
-        
-        // Если URL начинается с "keyword/" (как в Аниме)
-        if (activity.url && activity.url.indexOf('keyword/') === 0) {
-            return activity.url;
-        }
-        
+        if (activity.url === 'movie') return 'discover/movie';
+        if (activity.url === 'tv') return 'discover/tv';
+        if (activity.url && activity.url.indexOf('keyword/') === 0) return activity.url;
         return activity.url;
     }
 
-    // ==================== ПОЛУЧЕНИЕ НАЗВАНИЯ ПО УМОЛЧАНИЮ ====================
-    
     function getDefaultName(activity) {
         if (activity.title) {
-            // Убираем " - TMDB" из названия
             return activity.title.replace(' - TMDB', '');
         }
-        
         if (activity.genres === 16) return 'Мультфильмы';
         if (activity.genres === 28) return 'Боевики';
         if (activity.genres === 35) return 'Комедии';
@@ -69,31 +47,23 @@
         if (activity.component === 'anime') return 'Аниме';
         if (activity.component === 'tv') return 'Сериалы';
         if (activity.url === 'movie') return 'Фильмы';
-        
         return 'Моя закладка';
     }
 
-    // ==================== СОХРАНЕНИЕ ЗАКЛАДКИ ====================
-    
     function saveCurrentFilter() {
         var activity = Lampa.Activity.active();
-        
         if (!activity) {
             showMsg('Не удалось определить текущую страницу');
             return;
         }
-        
-        // Проверяем, что это страница с контентом
         var validComponents = ['category', 'category_full', 'serial', 'movie', 'cartoon', 'anime', 'tv', 'catalog'];
         if (!validComponents.includes(activity.component) && activity.component.indexOf('category') === -1) {
             showMsg('Откройте раздел с контентом');
             return;
         }
-        
         var defaultName = getDefaultName(activity);
         var name = prompt('Введите название закладки:', defaultName);
         if (!name || !name.trim()) return;
-        
         var newFilter = {
             id: Date.now(),
             name: name.trim(),
@@ -103,22 +73,8 @@
             card_type: true,
             page: 1
         };
-        
-        // Сохраняем жанры если есть (важно для Каталога и Мультфильмов)
-        if (activity.genres) {
-            newFilter.genres = activity.genres;
-        }
-        
-        // Сохраняем оригинальный ID жанра если есть
-        if (activity.id) {
-            newFilter.id_genre = activity.id;
-        }
-        
-        // Сохраняем sort если есть
-        if (activity.sort) {
-            newFilter.sort = activity.sort;
-        }
-        
+        if (activity.genres) newFilter.genres = activity.genres;
+        if (activity.sort) newFilter.sort = activity.sort;
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         filters.push(newFilter);
         Lampa.Storage.set(STORAGE_KEY, filters);
@@ -126,11 +82,8 @@
         showMsg('Закладка "' + name + '" сохранена');
     }
 
-    // ==================== ОТКРЫТИЕ ЗАКЛАДКИ ====================
-    
     function openFilter(filter) {
         console.log('[SaveFilter] Открываем закладку:', filter);
-        
         var openParams = {
             url: filter.url,
             title: filter.name,
@@ -139,23 +92,11 @@
             card_type: true,
             page: 1
         };
-        
-        // Добавляем жанры если есть (ключевой параметр для каталога)
-        if (filter.genres) {
-            openParams.genres = filter.genres;
-        }
-        
-        // Добавляем sort если есть
-        if (filter.sort) {
-            openParams.sort = filter.sort;
-        }
-        
-        console.log('[SaveFilter] Параметры открытия:', openParams);
+        if (filter.genres) openParams.genres = filter.genres;
+        if (filter.sort) openParams.sort = filter.sort;
         Lampa.Activity.push(openParams);
     }
 
-    // ==================== УДАЛЕНИЕ ЗАКЛАДКИ ====================
-    
     function deleteFilter(filterId, filterName) {
         Lampa.Select.show({
             title: 'Удалить закладку?',
@@ -175,11 +116,8 @@
         });
     }
 
-    // ==================== МЕНЮ ====================
-    
     function updateFiltersMenu() {
         $('.menu__item[data-action="save_filter_btn"]').remove();
-        $('.menu__item[data-action="saved_filters_section"]').remove();
         $('.submenu-item').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
@@ -191,7 +129,7 @@
                         <path d="M17 3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.1 21 21 20.1 21 19V7L17 3ZM12 19C10.34 19 9 17.66 9 16C9 14.34 10.34 13 12 13C13.66 13 15 14.34 15 16C15 17.66 13.66 19 12 19ZM15 9H5V5H15V9Z" fill="currentColor"/>
                     </svg>
                 </div>
-                <div class="menu__text">Сохранить закладку</div>
+                <div class="menu__text">📌 Сохранить закладку</div>
             </li>
         `);
         
@@ -199,33 +137,22 @@
             saveCurrentFilter();
         });
         
-        $('.menu .menu__list').first().append(saveBtn);
+        var menuList = $('.menu .menu__list').first();
+        menuList.append(saveBtn);
         
         if (filters.length === 0) return;
         
-        var section = $(`
-            <li class="menu__item selector" data-action="saved_filters_section">
-                <div class="menu__ico">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M4 6H20V8H4V6ZM6 11H18V13H6V11ZM10 16H14V18H10V16Z" fill="currentColor"/>
-                    </svg>
-                </div>
-                <div class="menu__text">Мои закладки</div>
-            </li>
-        `);
-        
-        var submenu = $('<div class="menu__submenu"></div>');
-        
+        // Добавляем закладки прямо в меню, без отдельного раздела
         filters.forEach(function(filter) {
             var item = $(`
-                <div class="menu__item selector submenu-item" data-filter-id="${filter.id}">
+                <li class="menu__item selector submenu-item" data-filter-id="${filter.id}">
                     <div class="menu__ico">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M4 6H20V8H4V6ZM6 11H18V13H6V11ZM10 16H14V18H10V16Z" fill="currentColor"/>
                         </svg>
                     </div>
                     <div class="menu__text">${filter.name}</div>
-                </div>
+                </li>
             `);
             
             item.on('click', function(e) {
@@ -251,17 +178,12 @@
                 deleteFilter(filter.id, filter.name);
             });
             
-            submenu.append(item);
+            menuList.append(item);
         });
-        
-        section.append(submenu);
-        $('.menu .menu__list').first().append(section);
         
         console.log('[SaveFilter] Меню обновлено, закладок:', filters.length);
     }
 
-    // ==================== ЗАПУСК ====================
-    
     function init() {
         console.log('[SaveFilter] Инициализация');
         updateFiltersMenu();
