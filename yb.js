@@ -144,15 +144,13 @@
                     updateFiltersMenu();
                     showMsg('Закладка "' + filterName + '" удалена');
                 }
-                // Возвращаем фокус
-                setTimeout(function() {
-                    $('[data-action="save_filter_btn"]').focus();
-                }, 100);
+                // Закрываем диалог
+                $('.selectbox').remove();
+                $('body').focus();
             },
             onBack: function() {
-                setTimeout(function() {
-                    $('[data-action="save_filter_btn"]').focus();
-                }, 100);
+                $('.selectbox').remove();
+                $('body').focus();
             }
         });
     }
@@ -177,16 +175,13 @@
                     $('[data-filter-id]').remove();
                     showMsg('Все закладки удалены');
                 }
-                // Возвращаем фокус после закрытия диалога
-                setTimeout(function() {
-                    $('[data-action="save_filter_btn"]').focus();
-                }, 100);
+                // Полностью удаляем диалог
+                $('.selectbox').remove();
+                $('body').focus();
             },
             onBack: function() {
-                // При отмене тоже возвращаем фокус
-                setTimeout(function() {
-                    $('[data-action="save_filter_btn"]').focus();
-                }, 100);
+                $('.selectbox').remove();
+                $('body').focus();
             }
         });
     }
@@ -280,6 +275,8 @@
             onChange: function(value) {
                 Lampa.Storage.set(POSITION_KEY, value);
                 applyButtonPosition();
+                $('.selectbox').remove();
+                $('body').focus();
             }
         });
         
