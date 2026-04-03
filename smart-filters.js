@@ -281,28 +281,22 @@
                 </div>
             `);
             
-            // Обработчик клика
-            item.on('click', function(e) {
-                // Если кликнули на крестик - удаляем
+            // Обработчик клика (исправленный)
+            item.off('click').on('click', function(e) {
+                // Проверяем, кликнули ли на крестик
                 if ($(e.target).hasClass('menu__delete') || $(e.target).parent().hasClass('menu__delete')) {
                     e.stopPropagation();
+                    e.preventDefault();
                     var newFilters = filters.filter(function(f) { return f.id !== filter.id; });
                     Lampa.Storage.set(STORAGE_KEY, newFilters);
-                    updateFiltersMenu(); // Перестраиваем меню
+                    updateFiltersMenu();
                     showMsg('Фильтр "' + filter.name + '" удален');
-                    return;
+                    return false;
                 }
                 // Иначе открываем фильтр
                 openFilter(filter);
+                return false;
             });
-            
-            submenu.append(item);
-        });
-        
-        section.append(submenu);
-        $('.menu .menu__list').first().append(section);
-    }
-
     // ==================== ЗАПУСК ====================
     
     function init() {
