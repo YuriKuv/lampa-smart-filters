@@ -4,6 +4,8 @@
     console.log('[SaveFilter] Плагин запущен');
 
     var STORAGE_KEY = 'saved_filters_list';
+    var holdTimer = null;
+    var currentFilterId = null;
 
     function showMsg(text) {
         console.log('[SaveFilter]', text);
@@ -70,28 +72,26 @@
     function deleteFilter(filterId, filterName) {
         console.log('[SaveFilter] deleteFilter вызван для:', filterId, filterName);
         
-        var filters = Lampa.Storage.get(STORAGE_KEY, []);
-        console.log('[SaveFilter] Было фильтров:', filters.length);
-        
-        var newFilters = filters.filter(function(f) { 
-            return f.id != filterId; 
+        Lampa.Select.show({
+            title: 'Удалить фильтр?',
+            items: [
+                { title: 'Да', value: 'yes' },
+                { title: 'Нет', value: 'no' }
+            ],
+            onSelect: function(item) {
+                if (item.value === 'yes') {
+                    var filters = Lampa.Storage.get(STORAGE_KEY, []);
+                    var newFilters = filters.filter(function(f) { 
+                        return f.id != filterId; 
+                    });
+                    Lampa.Storage.set(STORAGE_KEY, newFilters);
+                    updateFiltersMenu();
+                    showMsg('Фильтр "' + filterName + '" удален');
+                }
+            }
         });
-        
-        Lampa.Storage.set(STORAGE_KEY, newFilters);
-        console.log('[SaveFilter] Стало фильтров:', newFilters.length);
-        
-        // Удаляем элементы из DOM напрямую
-        $('.submenu-item[data-filter-id="' + filterId + '"]').remove();
-        
-        // Проверяем, остались ли еще фильтры
-        var remainingFilters = Lampa.Storage.get(STORAGE_KEY, []);
-        if (remainingFilters.length === 0) {
-            // Если фильтров нет, удаляем весь раздел
-            $('.menu__item[data-action="saved_filters_section"]').remove();
-        }
-        
-        showMsg('Фильтр "' + filterName + '" удален');
     }
+
     // ==================== МЕНЮ ====================
     
     function updateFiltersMenu() {
@@ -147,22 +147,48 @@
                         </svg>
                     </div>
                     <div class="menu__text">${filter.name}</div>
-                    <div class="menu__delete" style="margin-left: auto; padding: 0 10px;">✕</div>
                 </div>
             `);
             
-            // Обработчик для пункта фильтра
+            // Обработчик нажатия (открытие)
             item.on('click', function(e) {
-                // Проверяем, кликнули ли на крестик
-                if ($(e.target).hasClass('menu__delete') || $(e.target).parent().hasClass('menu__delete')) {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    console.log('[SaveFilter] Удаляем фильтр:', filter.id, filter.name);
-                    deleteFilter(filter.id, filter.name);
-                    return false;
-                }
+                e.stopPropagation();
+                // Если есть активный таймер долгого нажатия — не открываем
+                if (holdTimer) return;
                 openFilter(filter);
-                return false;
+            });
+            
+            // Обработчик начала долгого нажатия (для телевизора с пультом)
+            item.on('v-click', function(e) {
+                e.stopPropagation();
+                console.log('[SaveFilter] Долгое нажатие на фильтр:', filter.name);
+                deleteFilter(filter.id, filter.name);
+            });
+            
+            // Альтернативный способ: событие hold (если есть в Lampa)
+            item.on('hover:hold', function(e) {
+                e.stopPropagation();
+                console.log('[SaveFilter] hover:hold на фильтр:', filter.name);
+                deleteFilter(filter.id, filter.name);
+            });
+            
+            // Обработка таймером для обычного click + удержание
+            item.on('mousedown', function(e) {
+                currentFilterId = filter.id;
+                holdTimer = setTimeout(function() {
+                    if (currentFilterId === filter.id) {
+                        console.log('[SaveFilter] Удержание на фильтр:', filter.name);
+                        deleteFilter(filter.id, filter.name);
+                    }
+                    holdTimer = null;
+                    currentFilterId = null;
+                }, 800);
+            }).on('mouseup mouseleave', function() {
+                if (holdTimer) {
+                    clearTimeout(holdTimer);
+                    holdTimer = null;
+                    currentFilterId = null;
+                }
             });
             
             submenu.append(item);
