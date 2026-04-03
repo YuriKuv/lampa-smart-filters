@@ -144,6 +144,15 @@
                     updateFiltersMenu();
                     showMsg('Закладка "' + filterName + '" удалена');
                 }
+                // Возвращаем фокус
+                setTimeout(function() {
+                    $('[data-action="save_filter_btn"]').focus();
+                }, 100);
+            },
+            onBack: function() {
+                setTimeout(function() {
+                    $('[data-action="save_filter_btn"]').focus();
+                }, 100);
             }
         });
     }
@@ -166,12 +175,18 @@
                     Lampa.Storage.set(STORAGE_KEY, []);
                     $('.submenu-item').remove();
                     $('[data-filter-id]').remove();
-                    
-                    // Закрываем левое меню
-                    $('.wrap__left').removeClass('wrap__left--show').addClass('wrap__left--hidden');
-                    
                     showMsg('Все закладки удалены');
                 }
+                // Возвращаем фокус после закрытия диалога
+                setTimeout(function() {
+                    $('[data-action="save_filter_btn"]').focus();
+                }, 100);
+            },
+            onBack: function() {
+                // При отмене тоже возвращаем фокус
+                setTimeout(function() {
+                    $('[data-action="save_filter_btn"]').focus();
+                }, 100);
             }
         });
     }
