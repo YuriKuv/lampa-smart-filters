@@ -55,7 +55,6 @@
     function openFilter(filter) {
         console.log('[SaveFilter] Открываем фильтр:', filter);
         
-        // Используем точные параметры из сохраненного фильтра
         Lampa.Activity.push({
             url: filter.url,
             title: filter.name,
@@ -65,6 +64,20 @@
             page: 1,
             params: filter.params || {}
         });
+    }
+
+    // ==================== УДАЛЕНИЕ ФИЛЬТРА ====================
+    
+    function deleteFilter(filterId, filterName) {
+        var filters = Lampa.Storage.get(STORAGE_KEY, []);
+        var newFilters = filters.filter(function(f) { 
+            return f.id != filterId; 
+        });
+        Lampa.Storage.set(STORAGE_KEY, newFilters);
+        
+        // Перестраиваем меню
+        updateFiltersMenu();
+        showMsg('Фильтр "' + filterName + '" удален');
     }
 
     // ==================== МЕНЮ ====================
@@ -119,23 +132,26 @@
                 </div>
             `);
             
+            // Обработчик клика
             item.on('click', function(e) {
-                if ($(e.target).hasClass('menu__delete')) {
+                // Если кликнули на крестик или на его родителя
+                if ($(e.target).hasClass('menu__delete') || $(e.target).parent().hasClass('menu__delete')) {
                     e.stopPropagation();
-                    var newFilters = filters.filter(function(f) { return f.id !== filter.id; });
-                    Lampa.Storage.set(STORAGE_KEY, newFilters);
-                    updateFiltersMenu();
-                    showMsg('Фильтр удален');
-                } else {
-                    openFilter(filter);
+                    deleteFilter(filter.id, filter.name);
+                    return;
                 }
+                // Иначе открываем фильтр
+                openFilter(filter);
             });
             
             submenu.append(item);
         });
         
         section.append(submenu);
-        $('.menu .menu__list').first().append(section);
+        
+        // Добавляем в конец первого меню
+        var firstMenu = $('.menu .menu__list').first();
+        firstMenu.append(section);
     }
 
     // ==================== ЗАПУСК ====================
