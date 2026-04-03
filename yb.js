@@ -15,7 +15,6 @@
     // ==================== ПРОВЕРКА КОРНЕВОГО РАЗДЕЛА ====================
     
     function isRootSection(activity) {
-        // Список корневых разделов из левого меню
         var rootActions = [
             'main', 'feed', 'movie', 'cartoon', 'tv', 'myperson', 
             'catalog', 'filter', 'relise', 'anime', 'favorite', 
@@ -23,14 +22,12 @@
             'settings', 'about', 'console', 'edit'
         ];
         
-        // Проверяем по action в URL
         for (var i = 0; i < rootActions.length; i++) {
             if (activity.url === rootActions[i]) {
                 return true;
             }
         }
         
-        // Проверка для категорий без параметров
         if (activity.component === 'category' && !activity.genres && !activity.sort) {
             if (activity.url === 'movie' || activity.url === 'tv') {
                 return true;
@@ -80,14 +77,12 @@
             return;
         }
         
-        // Проверяем, что это страница с контентом
         var validComponents = ['category', 'category_full', 'serial', 'movie', 'cartoon', 'anime', 'tv', 'catalog'];
         if (!validComponents.includes(activity.component) && activity.component.indexOf('category') === -1) {
             showMsg('Откройте раздел с контентом');
             return;
         }
         
-        // Проверяем, не пытается ли пользователь сохранить корневой раздел
         if (isRootSection(activity)) {
             showMsg('❌ Нельзя сохранить основной раздел.\n\n✅ Для создания закладки:\n• Откройте подраздел через кнопку "Ещё"\n• Или примените фильтр (жанры, годы, язык)');
             return;
@@ -176,7 +171,7 @@
         });
     }
 
-    // ==================== КНОПКИ ====================
+    // ==================== КНОПКА В МЕНЮ (ФИКСИРОВАННОЕ МЕСТО) ====================
     
     var menuButton = null;
     
@@ -198,8 +193,20 @@
             saveCurrentFilter();
         });
         
-        var menuList = $('.menu .menu__list').first();
-        menuList.append(menuButton);
+        // Добавляем кнопку в menu__list 1 (где Настройки), в самое начало этого списка
+        var settingsList = $('.menu .menu__list').eq(1);
+        
+        if (settingsList.length) {
+            // Вставляем в начало списка настроек
+            settingsList.prepend(menuButton);
+            // Добавляем разделитель перед кнопкой (опционально)
+            if (settingsList.find('.menu__split').length === 0) {
+                settingsList.before('<div class="menu__split"></div>');
+            }
+        } else {
+            // Fallback — добавляем в конец первого списка
+            $('.menu .menu__list').first().append(menuButton);
+        }
     }
 
     function addButtonToHeader() {
@@ -223,6 +230,12 @@
     function removeButtonFromMenu() {
         $('[data-action="save_filter_btn"]').remove();
         menuButton = null;
+        // Удаляем лишние разделители
+        $('.menu__split').each(function() {
+            if ($(this).next('.menu__split').length) {
+                $(this).remove();
+            }
+        });
     }
 
     function removeButtonFromHeader() {
@@ -249,7 +262,7 @@
                 name: 'bookmark_position',
                 type: 'select',
                 values: {
-                    'menu': 'В левом меню',
+                    'menu': 'В левом меню (перед Настройками)',
                     'header': 'В верхней панели'
                 },
                 default: 'menu'
@@ -286,58 +299,62 @@
     // ==================== ОБНОВЛЕНИЕ МЕНЮ ЗАКЛАДОК ====================
     
     function updateFiltersMenu() {
+        // Удаляем только закладки, но не кнопку сохранения
         $('.menu__item.submenu-item').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         if (filters.length === 0) return;
         
-        var menuList = $('.menu .menu__list').first();
+        // Добавляем закладки после кнопки сохранения
+        var targetList = $('.menu .menu__list').eq(1);
+        var saveButton = targetList.find('[data-action="save_filter_btn"]');
         
-        filters.forEach(function(filter) {
-            // Экранируем спецсимволы в названии
-            var safeName = filter.name.replace(/[&<>]/g, function(m) {
-                if (m === '&') return '&amp;';
-                if (m === '<') return '&lt;';
-                if (m === '>') return '&gt;';
-                return m;
-            });
-            
-            var item = $(`
-                <li class="menu__item selector submenu-item" data-filter-id="${filter.id}">
-                    <div class="menu__ico">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M4 6H20V8H4V6ZM6 11H18V13H6V11ZM10 16H14V18H10V16Z" fill="currentColor"/>
-                        </svg>
-                    </div>
-                    <div class="menu__text" style="white-space: normal; line-height: 1.3; padding-right: 10px;">${safeName}</div>
-                </li>
-            `);
-            
-            item.on('click', function(e) {
-                e.stopPropagation();
-                openFilter(filter);
-            });
-            
-            var holdTimer = null;
-            item.on('mousedown', function() {
-                holdTimer = setTimeout(function() {
+        if (saveButton.length) {
+            saveButton.after(filters.map(function(filter) {
+                var safeName = filter.name.replace(/[&<>]/g, function(m) {
+                    if (m === '&') return '&amp;';
+                    if (m === '<') return '&lt;';
+                    if (m === '>') return '&gt;';
+                    return m;
+                });
+                
+                var item = $(`
+                    <li class="menu__item selector submenu-item" data-filter-id="${filter.id}">
+                        <div class="menu__ico">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M4 6H20V8H4V6ZM6 11H18V13H6V11ZM10 16H14V18H10V16Z" fill="currentColor"/>
+                            </svg>
+                        </div>
+                        <div class="menu__text" style="white-space: normal; line-height: 1.3; padding-right: 10px;">${safeName}</div>
+                    </li>
+                `);
+                
+                item.on('click', function(e) {
+                    e.stopPropagation();
+                    openFilter(filter);
+                });
+                
+                var holdTimer = null;
+                item.on('mousedown', function() {
+                    holdTimer = setTimeout(function() {
+                        deleteFilter(filter.id, filter.name);
+                        holdTimer = null;
+                    }, 800);
+                }).on('mouseup mouseleave', function() {
+                    if (holdTimer) {
+                        clearTimeout(holdTimer);
+                        holdTimer = null;
+                    }
+                });
+                
+                item.on('v-click', function(e) {
+                    e.stopPropagation();
                     deleteFilter(filter.id, filter.name);
-                    holdTimer = null;
-                }, 800);
-            }).on('mouseup mouseleave', function() {
-                if (holdTimer) {
-                    clearTimeout(holdTimer);
-                    holdTimer = null;
-                }
-            });
-            
-            item.on('v-click', function(e) {
-                e.stopPropagation();
-                deleteFilter(filter.id, filter.name);
-            });
-            
-            menuList.append(item);
-        });
+                });
+                
+                return item;
+            }));
+        }
         
         console.log('[SaveFilter] Меню обновлено, закладок:', filters.length);
     }
@@ -349,7 +366,7 @@
         applyButtonPosition();
         updateFiltersMenu();
         addSettings();
-        showMsg('✓ Плагин загружен. Настройки в разделе "Интерфейс"');
+        showMsg('✓ Плагин загружен. Кнопка "Сохранить закладку" — в левом меню перед Настройками');
     }
     
     if (typeof Lampa !== 'undefined') {
