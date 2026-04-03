@@ -130,40 +130,101 @@
     // ==================== УДАЛЕНИЕ ====================
     
     function deleteFilter(filterId, filterName) {
-        var filters = Lampa.Storage.get(STORAGE_KEY, []);
-        var newFilters = filters.filter(function(f) { return f.id != filterId; });
-        Lampa.Storage.set(STORAGE_KEY, newFilters);
-        updateFiltersMenu();
-        showMsg('Закладка "' + filterName + '" удалена');
+        Lampa.Select.show({
+            title: 'Удалить закладку?',
+            items: [
+                { title: 'Да', value: 'yes' },
+                { title: 'Нет', value: 'no' }
+            ],
+            onSelect: function(item) {
+                if (item.value === 'yes') {
+                    var filters = Lampa.Storage.get(STORAGE_KEY, []);
+                    var newFilters = filters.filter(function(f) { return f.id != filterId; });
+                    Lampa.Storage.set(STORAGE_KEY, newFilters);
+                    updateFiltersMenu();
+                    showMsg('Закладка "' + filterName + '" удалена');
+                }
+            }
+        });
     }
 
-    // ==================== КНОПКА В МЕНЮ ====================
+    function deleteAllFilters() {
+        var filters = Lampa.Storage.get(STORAGE_KEY, []);
+        if (filters.length === 0) {
+            showMsg('Нет сохраненных закладок');
+            return;
+        }
+        
+        Lampa.Select.show({
+            title: 'Удалить все закладки?',
+            items: [
+                { title: 'Да, удалить все (' + filters.length + ')', value: 'yes' },
+                { title: 'Нет', value: 'no' }
+            ],
+            onSelect: function(item) {
+                if (item.value === 'yes') {
+                    Lampa.Storage.set(STORAGE_KEY, []);
+                    updateFiltersMenu();
+                    showMsg('✓ Все закладки удалены');
+                }
+            }
+        });
+    }
+
+    // ==================== КНОПКИ В ЛЕВОМ МЕНЮ ====================
     
     var menuButton = null;
+    var clearAllButton = null;
     
-    function addButtonToMenu() {
-        if (menuButton && menuButton.length) return;
+    function addButtonsToMenu() {
+        // Кнопка "Сохранить закладку"
+        if (!menuButton || !menuButton.length) {
+            menuButton = $(`
+                <li class="menu__item selector" data-action="save_filter_btn">
+                    <div class="menu__ico">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M17 3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.1 21 21 20.1 21 19V7L17 3ZM12 19C10.34 19 9 17.66 9 16C9 14.34 10.34 13 12 13C13.66 13 15 14.34 15 16C15 17.66 13.66 19 12 19ZM15 9H5V5H15V9Z" fill="currentColor"/>
+                        </svg>
+                    </div>
+                    <div class="menu__text">Сохранить закладку</div>
+                </li>
+            `);
+            
+            menuButton.on('click', function() {
+                saveCurrentFilter();
+            });
+        }
         
-        menuButton = $(`
-            <li class="menu__item selector" data-action="save_filter_btn">
-                <div class="menu__ico">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M17 3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.1 21 21 20.1 21 19V7L17 3ZM12 19C10.34 19 9 17.66 9 16C9 14.34 10.34 13 12 13C13.66 13 15 14.34 15 16C15 17.66 13.66 19 12 19ZM15 9H5V5H15V9Z" fill="currentColor"/>
-                    </svg>
-                </div>
-                <div class="menu__text">Сохранить закладку</div>
-            </li>
-        `);
+        // Кнопка "Удалить все закладки"
+        if (!clearAllButton || !clearAllButton.length) {
+            clearAllButton = $(`
+                <li class="menu__item selector" data-action="clear_all_bookmarks_btn">
+                    <div class="menu__ico">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="currentColor"/>
+                        </svg>
+                    </div>
+                    <div class="menu__text">🗑 Удалить все закладки</div>
+                </li>
+            `);
+            
+            clearAllButton.on('click', function() {
+                deleteAllFilters();
+            });
+        }
         
-        menuButton.on('click', function() {
-            saveCurrentFilter();
-        });
-        
+        // Добавляем в список с Настройками (индекс 1) в начало
         var settingsList = $('.menu .menu__list').eq(1);
         if (settingsList.length) {
+            // Очищаем старые кнопки
+            settingsList.find('[data-action="save_filter_btn"]').remove();
+            settingsList.find('[data-action="clear_all_bookmarks_btn"]').remove();
+            // Добавляем новые
+            settingsList.prepend(clearAllButton);
             settingsList.prepend(menuButton);
         } else {
             $('.menu .menu__list').first().append(menuButton);
+            $('.menu .menu__list').first().append(clearAllButton);
         }
     }
 
@@ -185,9 +246,11 @@
         $('.head__actions').append(bookmarkBtn);
     }
 
-    function removeButtonFromMenu() {
+    function removeButtonsFromMenu() {
         $('[data-action="save_filter_btn"]').remove();
+        $('[data-action="clear_all_bookmarks_btn"]').remove();
         menuButton = null;
+        clearAllButton = null;
     }
 
     function removeButtonFromHeader() {
@@ -196,10 +259,10 @@
 
     function applyButtonPosition() {
         var position = Lampa.Storage.get(POSITION_KEY, 'menu');
-        removeButtonFromMenu();
+        removeButtonsFromMenu();
         removeButtonFromHeader();
         if (position === 'menu') {
-            addButtonToMenu();
+            addButtonsToMenu();
         } else if (position === 'header') {
             addButtonToHeader();
         }
@@ -233,12 +296,13 @@
     // ==================== ОБНОВЛЕНИЕ МЕНЮ ЗАКЛАДОК ====================
     
     function updateFiltersMenu() {
+        // Удаляем старые закладки
         $('.submenu-item').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
-        
         if (filters.length === 0) return;
         
+        // Добавляем закладки в ОСНОВНОЙ список (индекс 0)
         var mainList = $('.menu .menu__list').eq(0);
         if (!mainList.length) return;
         
@@ -297,7 +361,7 @@
         applyButtonPosition();
         updateFiltersMenu();
         addSettings();
-        showMsg('✓ Плагин загружен');
+        showMsg('✓ Плагин загружен. Кнопки в левом меню, над Настройками');
     }
     
     if (typeof Lampa !== 'undefined') {
