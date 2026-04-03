@@ -272,7 +272,7 @@
                 default: false
             },
             field: {
-                name: 'Удалить все закладки',
+                name: 'Удалить все созданные закладки',
                 description: 'Очистить список сохраненных закладок'
             },
             onChange: function(value) {
@@ -351,7 +351,6 @@
         applyButtonPosition();
         updateFiltersMenu();
         addSettings();
-        showMsg('✓ Плагин загружен. Кнопка над Настройками, закладки в основном меню');
     }
     
     if (typeof Lampa !== 'undefined') {
