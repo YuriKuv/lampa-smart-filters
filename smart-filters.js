@@ -19,13 +19,22 @@
             return activity.url;
         }
         
-        // Если это раздел с жанрами (как Мультфильмы)
+        // Если есть genres (для Мультфильмов, Каталога и т.д.)
         if (activity.genres) {
             var type = 'movie';
             if (activity.url === 'tv' || activity.component === 'tv') {
                 type = 'tv';
             }
             return 'discover/' + type + '?with_genres=' + activity.genres;
+        }
+        
+        // Если есть sort (сортировка)
+        if (activity.sort) {
+            var sortType = 'movie';
+            if (activity.url === 'tv') {
+                sortType = 'tv';
+            }
+            return 'discover/' + sortType + '?sort_by=' + activity.sort;
         }
         
         // Если это просто "movie" или "tv"
@@ -36,12 +45,32 @@
             return 'discover/tv';
         }
         
-        // Если есть sort параметр
-        if (activity.sort) {
-            return 'discover/movie?sort_by=' + activity.sort;
+        // Если URL начинается с "keyword/" (как в Аниме)
+        if (activity.url && activity.url.indexOf('keyword/') === 0) {
+            return activity.url;
         }
         
         return activity.url;
+    }
+
+    // ==================== ПОЛУЧЕНИЕ НАЗВАНИЯ ПО УМОЛЧАНИЮ ====================
+    
+    function getDefaultName(activity) {
+        if (activity.title) {
+            // Убираем " - TMDB" из названия
+            return activity.title.replace(' - TMDB', '');
+        }
+        
+        if (activity.genres === 16) return 'Мультфильмы';
+        if (activity.genres === 28) return 'Боевики';
+        if (activity.genres === 35) return 'Комедии';
+        if (activity.genres === 27) return 'Ужасы';
+        if (activity.genres === 18) return 'Драмы';
+        if (activity.component === 'anime') return 'Аниме';
+        if (activity.component === 'tv') return 'Сериалы';
+        if (activity.url === 'movie') return 'Фильмы';
+        
+        return 'Моя закладка';
     }
 
     // ==================== СОХРАНЕНИЕ ЗАКЛАДКИ ====================
@@ -55,44 +84,39 @@
         }
         
         // Проверяем, что это страница с контентом
-        var validComponents = ['category', 'category_full', 'serial', 'movie', 'cartoon', 'anime', 'tv'];
+        var validComponents = ['category', 'category_full', 'serial', 'movie', 'cartoon', 'anime', 'tv', 'catalog'];
         if (!validComponents.includes(activity.component) && activity.component.indexOf('category') === -1) {
-            showMsg('Откройте раздел с контентом (Фильмы, Сериалы, Мультфильмы, Аниме)');
+            showMsg('Откройте раздел с контентом');
             return;
         }
         
-        // Определяем название по умолчанию
-        var defaultName = activity.title || 
-                         (activity.genres === 16 ? 'Мультфильмы' :
-                          activity.component === 'anime' ? 'Аниме' : 
-                          activity.component === 'tv' ? 'Сериалы' : 'Моя закладка');
-        
+        var defaultName = getDefaultName(activity);
         var name = prompt('Введите название закладки:', defaultName);
         if (!name || !name.trim()) return;
-        
-        // Нормализуем URL для сохранения
-        var normalizedUrl = normalizeUrl(activity);
         
         var newFilter = {
             id: Date.now(),
             name: name.trim(),
-            url: normalizedUrl,
-            original_url: activity.url, // сохраняем оригинал на всякий случай
-            title: activity.title,
+            url: normalizeUrl(activity),
             component: activity.component || 'category',
             source: activity.source || 'tmdb',
-            card_type: activity.card_type !== undefined ? activity.card_type : true,
-            page: activity.page || 1
+            card_type: true,
+            page: 1
         };
         
-        // Сохраняем жанры если есть
+        // Сохраняем жанры если есть (важно для Каталога и Мультфильмов)
         if (activity.genres) {
             newFilter.genres = activity.genres;
         }
         
-        // Сохраняем params если есть
-        if (activity.params && Object.keys(activity.params).length > 0) {
-            newFilter.params = activity.params;
+        // Сохраняем оригинальный ID жанра если есть
+        if (activity.id) {
+            newFilter.id_genre = activity.id;
+        }
+        
+        // Сохраняем sort если есть
+        if (activity.sort) {
+            newFilter.sort = activity.sort;
         }
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
@@ -112,18 +136,18 @@
             title: filter.name,
             component: filter.component || 'category',
             source: filter.source || 'tmdb',
-            card_type: filter.card_type !== undefined ? filter.card_type : true,
-            page: filter.page || 1
+            card_type: true,
+            page: 1
         };
         
-        // Добавляем жанры если есть
+        // Добавляем жанры если есть (ключевой параметр для каталога)
         if (filter.genres) {
             openParams.genres = filter.genres;
         }
         
-        // Добавляем params если есть
-        if (filter.params && Object.keys(filter.params).length > 0) {
-            openParams.params = filter.params;
+        // Добавляем sort если есть
+        if (filter.sort) {
+            openParams.sort = filter.sort;
         }
         
         console.log('[SaveFilter] Параметры открытия:', openParams);
@@ -154,14 +178,12 @@
     // ==================== МЕНЮ ====================
     
     function updateFiltersMenu() {
-        // Полностью удаляем ВСЕ наши пункты меню
         $('.menu__item[data-action="save_filter_btn"]').remove();
         $('.menu__item[data-action="saved_filters_section"]').remove();
         $('.submenu-item').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         
-        // Кнопка сохранения текущей страницы
         var saveBtn = $(`
             <li class="menu__item selector" data-action="save_filter_btn">
                 <div class="menu__ico">
@@ -206,13 +228,11 @@
                 </div>
             `);
             
-            // Короткое нажатие — открытие
             item.on('click', function(e) {
                 e.stopPropagation();
                 openFilter(filter);
             });
             
-            // Долгое нажатие — удаление
             var holdTimer = null;
             item.on('mousedown', function() {
                 holdTimer = setTimeout(function() {
@@ -226,7 +246,6 @@
                 }
             });
             
-            // Событие для пульта
             item.on('v-click', function(e) {
                 e.stopPropagation();
                 deleteFilter(filter.id, filter.name);
