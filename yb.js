@@ -167,10 +167,8 @@
                     $('.submenu-item').remove();
                     $('[data-filter-id]').remove();
                     
-                    // Принудительно обновляем меню
-                    if (typeof Lampa.Menu !== 'undefined' && Lampa.Menu.update) {
-                        Lampa.Menu.update();
-                    }
+                    // Закрываем левое меню
+                    $('.wrap__left').removeClass('wrap__left--show').addClass('wrap__left--hidden');
                     
                     showMsg('Все закладки удалены');
                 }
