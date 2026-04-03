@@ -4,6 +4,7 @@
     console.log('[SaveFilter] Плагин запущен');
 
     var STORAGE_KEY = 'saved_filters_list';
+    var isHooked = false;
 
     function showMsg(text) {
         console.log('[SaveFilter]', text);
@@ -12,37 +13,18 @@
         }
     }
 
-    // ==================== СОХРАНЕНИЕ ТЕКУЩЕГО ФИЛЬТРА ====================
+    // ==================== СОХРАНЕНИЕ ФИЛЬТРА ====================
     
-    function saveCurrentFilter() {
-        var activity = Lampa.Activity.active();
-        
-        if (!activity) {
-            showMsg('Не удалось определить текущую страницу');
-            return;
-        }
-        
-        // Проверяем, что это страница с фильтрацией
-        if (activity.component !== 'category_full' && activity.component !== 'category') {
-            showMsg('Откройте раздел Фильмы или Сериалы и примените фильтр');
-            return;
-        }
-        
-        var name = prompt('Введите название фильтра:', activity.title || 'Мой фильтр');
-        if (!name || !name.trim()) {
-            showMsg('Название не может быть пустым');
-            return;
-        }
-        
+    function saveFilter(name, activity) {
         var newFilter = {
             id: Date.now(),
-            name: name.trim(),
+            name: name,
             url: activity.url,
             title: activity.title,
             component: activity.component,
             source: activity.source || 'tmdb',
             card_type: activity.card_type || true,
-            page: 1
+            page: activity.page || 1
         };
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
@@ -70,40 +52,108 @@
     // ==================== УДАЛЕНИЕ ФИЛЬТРА ====================
     
     function deleteFilter(filterId, filterName) {
-        var filters = Lampa.Storage.get(STORAGE_KEY, []);
-        var newFilters = filters.filter(function(f) { return f.id != filterId; });
-        Lampa.Storage.set(STORAGE_KEY, newFilters);
-        updateFiltersMenu();
-        showMsg('Фильтр "' + filterName + '" удален');
+        Lampa.Select.show({
+            title: 'Удалить фильтр?',
+            items: [
+                { title: 'Да', value: 'yes' },
+                { title: 'Нет', value: 'no' }
+            ],
+            onSelect: function(item) {
+                if (item.value === 'yes') {
+                    var filters = Lampa.Storage.get(STORAGE_KEY, []);
+                    var newFilters = filters.filter(function(f) { return f.id != filterId; });
+                    Lampa.Storage.set(STORAGE_KEY, newFilters);
+                    updateFiltersMenu();
+                    showMsg('Фильтр "' + filterName + '" удален');
+                }
+            }
+        });
+    }
+
+    // ==================== ПЕРЕХВАТ НАЖАТИЯ "НАЧАТЬ ПОИСК" ====================
+    
+    function hookSearchButton() {
+        if (isHooked) return;
+        
+        // Слушаем клики по всему документу
+        $(document).on('click', function(e) {
+            var text = $(e.target).text().trim();
+            
+            if (text === 'Начать поиск') {
+                console.log('[SaveFilter] Перехвачен клик "Начать поиск"');
+                
+                // Ждем применения фильтра (1.5 секунды)
+                setTimeout(function() {
+                    var activity = Lampa.Activity.active();
+                    
+                    if (activity && (activity.component === 'category_full' || activity.component === 'category')) {
+                        // Показываем диалог сохранения
+                        Lampa.Input.show({
+                            title: 'Сохранить фильтр',
+                            placeholder: 'Введите название...',
+                            onBack: function() {
+                                console.log('[SaveFilter] Отмена сохранения');
+                            },
+                            onEnter: function(name) {
+                                if (name && name.trim()) {
+                                    saveFilter(name.trim(), activity);
+                                } else {
+                                    showMsg('Название не может быть пустым');
+                                }
+                            }
+                        });
+                    } else {
+                        console.log('[SaveFilter] Activity не найден, повтор через 0.5с');
+                        setTimeout(function() {
+                            var activity2 = Lampa.Activity.active();
+                            if (activity2) {
+                                Lampa.Input.show({
+                                    title: 'Сохранить фильтр',
+                                    placeholder: 'Введите название...',
+                                    onEnter: function(name) {
+                                        if (name && name.trim()) {
+                                            saveFilter(name.trim(), activity2);
+                                        }
+                                    }
+                                });
+                            }
+                        }, 500);
+                    }
+                }, 1500);
+            }
+        });
+        
+        isHooked = true;
+        console.log('[SaveFilter] Перехват "Начать поиск" активирован');
     }
 
     // ==================== МЕНЮ ====================
     
     function updateFiltersMenu() {
-        // Удаляем старые пункты
         $('.menu__item[data-action="saved_filters_section"]').remove();
         $('.menu__item[data-action="save_filter_btn"]').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         
-        // Кнопка сохранения текущего фильтра
-        var saveBtn = $(`
+        // Кнопка "Создать фильтр" открывает штатный фильтр
+        var createBtn = $(`
             <li class="menu__item selector" data-action="save_filter_btn">
                 <div class="menu__ico">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M17 3H5C3.89 3 3 3.9 3 5V19C3 20.1 3.89 21 5 21H19C20.1 21 21 20.1 21 19V7L17 3ZM12 19C10.34 19 9 17.66 9 16C9 14.34 10.34 13 12 13C13.66 13 15 14.34 15 16C15 17.66 13.66 19 12 19ZM15 9H5V5H15V9Z" fill="currentColor"/>
+                        <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" fill="currentColor"/>
                     </svg>
                 </div>
-                <div class="menu__text">Сохранить фильтр</div>
+                <div class="menu__text">Создать фильтр</div>
             </li>
         `);
         
-        saveBtn.on('click', function(e) {
+        createBtn.on('click', function(e) {
             e.stopPropagation();
-            saveCurrentFilter();
+            // Открываем пункт меню "Фильтр"
+            $('.menu__item[data-action="filter"]').trigger('click');
         });
         
-        $('.menu .menu__list').first().append(saveBtn);
+        $('.menu .menu__list').first().append(createBtn);
         
         if (filters.length === 0) return;
         
@@ -134,7 +184,6 @@
             `);
             
             item.on('click', function(e) {
-                // Если кликнули на крестик
                 if ($(e.target).hasClass('menu__delete')) {
                     e.stopPropagation();
                     deleteFilter(filter.id, filter.name);
@@ -155,7 +204,8 @@
     function init() {
         console.log('[SaveFilter] Инициализация');
         updateFiltersMenu();
-        showMsg('Плагин загружен. Примените фильтр, затем нажмите "Сохранить фильтр" в меню');
+        hookSearchButton();
+        showMsg('Плагин загружен. Нажмите "Создать фильтр" в меню');
     }
     
     if (typeof Lampa !== 'undefined') {
