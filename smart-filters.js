@@ -178,50 +178,65 @@
         });
     }
 
-    // ==================== ОТКРЫТИЕ ФИЛЬТРА (ИСПРАВЛЕННАЯ ВЕРСИЯ) ====================
+    // ==================== ОТКРЫТИЕ ФИЛЬТРА (ИСПРАВЛЕННАЯ ВЕРСИЯ 2) ====================
     
     function openFilter(filter) {
         console.log('[FilterCreator] Открываем фильтр:', filter);
         
-        // Формируем параметры для URL
-        var urlParams = [];
+        // Определяем базовый URL
+        var baseUrl = filter.type === 'movie' ? 'discover/movie' : 'discover/tv';
         
+        // Собираем параметры в объект, как это делает Lampa
+        var params = {
+            sort_by: 'popularity.desc',
+            language: 'ru-RU',
+            page: 1
+        };
+        
+        // Добавляем жанры (как строку через запятую)
         if (filter.genres && filter.genres.length > 0) {
-            urlParams.push('with_genres=' + filter.genres.join(','));
+            params.with_genres = filter.genres.join(',');
         }
         
-        if (filter.language) {
-            urlParams.push('with_original_language=' + filter.language);
+        // Добавляем язык
+        if (filter.language && filter.language !== '') {
+            params.with_original_language = filter.language;
         }
         
+        // Добавляем годы
         if (filter.yearFrom) {
             var dateField = filter.type === 'movie' ? 'primary_release_date.gte' : 'first_air_date.gte';
-            urlParams.push(dateField + '=' + filter.yearFrom + '-01-01');
+            params[dateField] = filter.yearFrom + '-01-01';
         }
         
         if (filter.yearTo) {
             var dateFieldTo = filter.type === 'movie' ? 'primary_release_date.lte' : 'first_air_date.lte';
-            urlParams.push(dateFieldTo + '=' + filter.yearTo + '-12-31');
+            params[dateFieldTo] = filter.yearTo + '-12-31';
         }
         
-        // Добавляем базовые параметры
-        urlParams.push('sort_by=popularity.desc');
-        urlParams.push('language=ru-RU');
-        
-        var url = (filter.type === 'movie' ? 'discover/movie' : 'discover/tv') + '?' + urlParams.join('&');
+        // Формируем URL строку
+        var urlParams = [];
+        for (var key in params) {
+            urlParams.push(key + '=' + encodeURIComponent(params[key]));
+        }
+        var url = baseUrl + '?' + urlParams.join('&');
         
         console.log('[FilterCreator] URL:', url);
         
-        // Правильный вызов Activity.push
-        Lampa.Activity.push({
-            url: url,
-            title: filter.name,
-            component: 'category',
-            source: 'tmdb',
-            page: 1
-        });
+        // Открываем категорию
+        try {
+            Lampa.Activity.push({
+                url: url,
+                title: filter.name,
+                component: 'category',
+                source: 'tmdb',
+                page: 1
+            });
+        } catch (e) {
+            console.error('[FilterCreator] Ошибка:', e);
+            showMsg('Ошибка открытия: ' + e.message);
+        }
     }
-
     // ==================== ОБНОВЛЕНИЕ МЕНЮ (БЕЗ ДУБЛЕЙ) ====================
     
     function updateFiltersMenu() {
