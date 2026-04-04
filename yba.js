@@ -1,91 +1,139 @@
-
 ```javascript
-(function () {
+// Lampa Bookmarks Plugin
+// Версия 2.0 - Кросс-платформенная
+(function() {
     'use strict';
-
-    const STORAGE_KEY = 'saved_filters_list';
-    const PLUGIN_NAME = 'BookmarksPlugin';
     
-    // Проверяем доступность API
-    function isLampaAvailable() {
-        return window.Lampa && Lampa.Storage && Lampa.Activity;
-    }
+    console.log('[Bookmarks] Plugin loading...');
     
-    function showMsg(text) {
-        if (window.Lampa && Lampa.Noty) {
-            Lampa.Noty.show(text);
-        } else {
-            console.log('[Bookmarks]', text);
+    // Ждем полной загрузки Lampa
+    function waitForLampa(callback) {
+        if (window.Lampa && window.Lampa.Storage) {
+            callback();
+            return;
         }
+        
+        let attempts = 0;
+        const maxAttempts = 30; // 30 секунд максимум
+        
+        const interval = setInterval(function() {
+            attempts++;
+            
+            if (window.Lampa && window.Lampa.Storage) {
+                clearInterval(interval);
+                callback();
+            } else if (attempts >= maxAttempts) {
+                clearInterval(interval);
+                console.error('[Bookmarks] Lampa not found after', maxAttempts, 'seconds');
+            }
+        }, 1000);
     }
     
-    function showInput(placeholder, callback) {
-        // Для Android TV используем встроенный Input Lampa
-        if (Lampa.Input && Lampa.Input.edit) {
-            Lampa.Input.edit({
-                title: 'Название закладки',
-                value: placeholder || '',
-                free: true,
-                nosave: true
-            }, function (new_value) {
-                if (callback && typeof callback === 'function') {
-                    callback(new_value || '');
-                }
-            }, function () {
-                if (Lampa.Controller && Lampa.Controller.toggle) {
-                    Lampa.Controller.toggle('content');
-                }
-            });
-        } else {
-            // Fallback для браузеров
-            const name = prompt('Название закладки:', placeholder || '');
-            if (name !== null && callback) {
-                callback(name);
+    // Основной код плагина
+    function initPlugin() {
+        console.log('[Bookmarks] Lampa found, initializing plugin...');
+        
+        const STORAGE_KEY = 'lampa_bookmarks_v2';
+        let isInitialized = false;
+        
+        // Безопасный доступ к API
+        function getStorage() {
+            try {
+                return Lampa.Storage.get(STORAGE_KEY, []);
+            } catch (e) {
+                console.error('[Bookmarks] Storage error:', e);
+                return [];
             }
         }
-    }
-    
-    function isRootSection(activity) {
-        if (!activity || !activity.url) return true;
         
-        const rootActions = [
-            'main', 'feed', 'movie', 'cartoon', 'tv', 'myperson', 
-            'catalog', 'filter', 'relise', 'anime', 'favorite', 
-            'history', 'subscribes', 'timetable', 'mytorrents', 
-            'settings', 'about', 'console', 'edit', 'search'
-        ];
-        return rootActions.includes(activity.url);
-    }
-    
-    function getCurrentActivity() {
-        if (!Lampa.Activity || !Lampa.Activity.active) return null;
-        return Lampa.Activity.active();
-    }
-    
-    function saveCurrentFilter() {
-        if (!isLampaAvailable()) {
-            showMsg('Lampa API недоступно');
-            return;
+        function setStorage(data) {
+            try {
+                Lampa.Storage.set(STORAGE_KEY, data);
+                return true;
+            } catch (e) {
+                console.error('[Bookmarks] Storage set error:', e);
+                return false;
+            }
         }
         
-        const activity = getCurrentActivity();
-        
-        if (!activity || isRootSection(activity)) {
-            showMsg('Нельзя сохранить этот раздел');
-            return;
+        function showMessage(text) {
+            try {
+                if (Lampa.Noty && Lampa.Noty.show) {
+                    Lampa.Noty.show(text);
+                } else {
+                    console.log('[Bookmarks]', text);
+                }
+            } catch (e) {
+                console.log('[Bookmarks]', text);
+            }
         }
         
-        const defaultName = activity.title || 'Новая закладка';
+        function showInputDialog(title, defaultValue, callback) {
+            try {
+                if (Lampa.Input && Lampa.Input.edit) {
+                    Lampa.Input.edit({
+                        title: title,
+                        value: defaultValue || '',
+                        free: true,
+                        nosave: true
+                    }, function(value) {
+                        if (callback) callback(value || '');
+                    });
+                } else {
+                    // Fallback для браузеров
+                    const result = prompt(title, defaultValue || '');
+                    if (callback) callback(result || '');
+                }
+            } catch (e) {
+                console.error('[Bookmarks] Input error:', e);
+                if (callback) callback(defaultValue || '');
+            }
+        }
         
-        showInput(defaultName, function(name) {
-            if (!name || !name.trim()) {
-                showMsg('Название не может быть пустым');
+        function getCurrentActivity() {
+            try {
+                if (Lampa.Activity && Lampa.Activity.active) {
+                    return Lampa.Activity.active();
+                }
+                return null;
+            } catch (e) {
+                console.error('[Bookmarks] Activity error:', e);
+                return null;
+            }
+        }
+        
+        function isSaveableActivity(activity) {
+            if (!activity || !activity.url) return false;
+            
+            // Не сохраняем корневые разделы
+            const nonSaveable = [
+                'main', 'feed', 'catalog', 'search', 
+                'settings', 'about', 'console', 'edit',
+                'favorite', 'history', 'subscribes'
+            ];
+            
+            return !nonSaveable.includes(activity.url);
+        }
+        
+        // Основные функции
+        function saveBookmark() {
+            const activity = getCurrentActivity();
+            
+            if (!isSaveableActivity(activity)) {
+                showMessage('Этот раздел нельзя сохранить как закладку');
                 return;
             }
             
-            try {
-                const filters = Lampa.Storage.get(STORAGE_KEY, []);
-                const newFilter = {
+            const defaultName = activity.title || 'Без названия';
+            
+            showInputDialog('Название закладки', defaultName, function(name) {
+                if (!name || !name.trim()) {
+                    showMessage('Название не может быть пустым');
+                    return;
+                }
+                
+                const bookmarks = getStorage();
+                const newBookmark = {
                     id: Date.now(),
                     name: name.trim(),
                     url: activity.url || '',
@@ -94,365 +142,441 @@
                     genres: activity.genres || [],
                     sort: activity.sort || '',
                     page: activity.page || 1,
-                    timestamp: Date.now()
+                    time: new Date().toLocaleString()
                 };
                 
-                // Проверяем на дубликаты
-                const isDuplicate = filters.some(f => 
-                    f.url === newFilter.url && 
-                    JSON.stringify(f.genres) === JSON.stringify(newFilter.genres) &&
-                    f.sort === newFilter.sort
-                );
+                bookmarks.push(newBookmark);
                 
-                if (isDuplicate) {
-                    showMsg('Такая закладка уже существует');
+                if (setStorage(bookmarks)) {
+                    showMessage('Закладка сохранена: ' + name.trim());
+                    updateBookmarksMenu();
+                } else {
+                    showMessage('Ошибка сохранения');
+                }
+            });
+        }
+        
+        function loadBookmark(bookmark) {
+            try {
+                Lampa.Activity.push({
+                    url: bookmark.url,
+                    title: bookmark.name,
+                    component: bookmark.component,
+                    source: bookmark.source,
+                    genres: bookmark.genres,
+                    sort: bookmark.sort,
+                    page: bookmark.page || 1
+                });
+            } catch (e) {
+                console.error('[Bookmarks] Load error:', e);
+                showMessage('Ошибка загрузки закладки');
+            }
+        }
+        
+        function deleteBookmark(bookmarkId) {
+            const bookmarks = getStorage();
+            const newBookmarks = bookmarks.filter(b => b.id !== bookmarkId);
+            
+            if (setStorage(newBookmarks)) {
+                showMessage('Закладка удалена');
+                updateBookmarksMenu();
+            }
+        }
+        
+        function confirmDelete(bookmark, callback) {
+            try {
+                if (Lampa.Select && Lampa.Select.show) {
+                    Lampa.Select.show({
+                        title: 'Удалить "' + bookmark.name + '"?',
+                        items: [
+                            { title: 'Отмена', value: 'cancel' },
+                            { title: 'Удалить', value: 'delete' }
+                        ],
+                        onSelect: function(result) {
+                            if (result.value === 'delete' && callback) {
+                                callback();
+                            }
+                        }
+                    });
+                } else {
+                    if (confirm('Удалить "' + bookmark.name + '"?')) {
+                        if (callback) callback();
+                    }
+                }
+            } catch (e) {
+                console.error('[Bookmarks] Confirm error:', e);
+                if (confirm('Удалить "' + bookmark.name + '"?')) {
+                    if (callback) callback();
+                }
+            }
+        }
+        
+        // Работа с меню
+        function createBookmarkElement(bookmark) {
+            const element = document.createElement('div');
+            element.className = 'selector focusable';
+            element.tabIndex = 0;
+            element.setAttribute('data-id', bookmark.id);
+            element.setAttribute('data-name', bookmark.name);
+            
+            element.innerHTML = `
+                <div class="bookmark-item" style="
+                    padding: 12px 16px;
+                    display: flex;
+                    align-items: center;
+                    color: #fff;
+                    font-size: 16px;
+                    border-bottom: 1px solid rgba(255,255,255,0.1);
+                ">
+                    <span style="margin-right: 10px;">📌</span>
+                    <span>${escapeHtml(bookmark.name)}</span>
+                </div>
+            `;
+            
+            // Обработчики событий
+            element.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                loadBookmark(bookmark);
+            });
+            
+            element.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    loadBookmark(bookmark);
+                } else if (e.key === 'Delete' || e.key === 'Backspace') {
+                    e.preventDefault();
+                    confirmDelete(bookmark, function() {
+                        deleteBookmark(bookmark.id);
+                    });
+                }
+            });
+            
+            // Долгое нажатие для TV
+            let longPressTimer;
+            element.addEventListener('mousedown', function() {
+                longPressTimer = setTimeout(function() {
+                    confirmDelete(bookmark, function() {
+                        deleteBookmark(bookmark.id);
+                    });
+                }, 1000);
+            });
+            
+            element.addEventListener('mouseup', function() {
+                clearTimeout(longPressTimer);
+            });
+            
+            element.addEventListener('mouseleave', function() {
+                clearTimeout(longPressTimer);
+            });
+            
+            return element;
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function updateBookmarksMenu() {
+            try {
+                // Удаляем старое меню закладок
+                const oldMenu = document.getElementById('bookmarks-menu-container');
+                if (oldMenu && oldMenu.parentNode) {
+                    oldMenu.parentNode.removeChild(oldMenu);
+                }
+                
+                const bookmarks = getStorage();
+                if (bookmarks.length === 0) return;
+                
+                // Ищем основное меню
+                const mainMenu = document.querySelector('.menu__body, .menu-body, [class*="menu"]');
+                if (!mainMenu) {
+                    // Пробуем позже
+                    setTimeout(updateBookmarksMenu, 1000);
                     return;
                 }
                 
-                filters.push(newFilter);
-                Lampa.Storage.set(STORAGE_KEY, filters);
-                updateFiltersMenu();
-                showMsg('Закладка сохранена: ' + name.trim());
-            } catch (error) {
-                console.error('[Bookmarks] Save error:', error);
-                showMsg('Ошибка сохранения');
+                // Создаем контейнер для закладок
+                const container = document.createElement('div');
+                container.id = 'bookmarks-menu-container';
+                container.style.cssText = `
+                    margin-top: 20px;
+                    padding: 0 16px;
+                `;
+                
+                // Заголовок
+                const title = document.createElement('div');
+                title.textContent = '📚 Закладки';
+                title.style.cssText = `
+                    color: #888;
+                    font-size: 14px;
+                    margin-bottom: 10px;
+                    padding-left: 16px;
+                    opacity: 0.7;
+                `;
+                container.appendChild(title);
+                
+                // Добавляем закладки
+                bookmarks.forEach(bookmark => {
+                    container.appendChild(createBookmarkElement(bookmark));
+                });
+                
+                // Вставляем в меню
+                mainMenu.appendChild(container);
+                
+            } catch (e) {
+                console.error('[Bookmarks] Menu update error:', e);
             }
-        });
-    }
-    
-    function loadFilter(filter) {
-        if (!isLampaAvailable()) return;
+        }
         
-        try {
-            Lampa.Activity.push({
-                url: filter.url,
-                title: filter.name,
-                component: filter.component || 'category',
-                source: filter.source || 'tmdb',
-                genres: filter.genres || [],
-                sort: filter.sort || '',
-                page: filter.page || 1
-            });
-        } catch (error) {
-            console.error('[Bookmarks] Load error:', error);
-            showMsg('Ошибка загрузки закладки');
-        }
-    }
-    
-    function deleteFilter(filterId) {
-        try {
-            const filters = Lampa.Storage.get(STORAGE_KEY, []);
-            const updatedFilters = filters.filter(f => f.id !== filterId);
-            Lampa.Storage.set(STORAGE_KEY, updatedFilters);
-            updateFiltersMenu();
-            showMsg('Закладка удалена');
-        } catch (error) {
-            console.error('[Bookmarks] Delete error:', error);
-            showMsg('Ошибка удаления');
-        }
-    }
-    
-    function showDeleteConfirm(filter, callback) {
-        if (Lampa.Select && Lampa.Select.show) {
-            Lampa.Select.show({
-                title: 'Удалить "' + filter.name + '"?',
-                items: [
-                    { title: 'Отмена', value: 'cancel' },
-                    { title: 'Удалить', value: 'delete' }
-                ],
-                onSelect: function(selected) {
-                    if (selected.value === 'delete' && callback) {
-                        callback();
-                    }
+        function addSaveButton() {
+            try {
+                // Добавляем кнопку через API Lampa если доступно
+                if (Lampa.Menu && Lampa.Menu.add) {
+                    Lampa.Menu.add({
+                        title: 'Сохранить закладку',
+                        action: saveBookmark,
+                        group: 'tools'
+                    });
+                    return true;
                 }
-            });
-        } else {
-            // Fallback для браузеров
-            if (confirm('Удалить "' + filter.name + '"?')) {
-                callback();
-            }
-        }
-    }
-    
-    function createMenuItem(filter) {
-        // Создаем элемент меню безопасным способом
-        const li = document.createElement('li');
-        li.className = 'menu__item selector bookmark-item';
-        li.setAttribute('data-id', filter.id);
-        li.setAttribute('data-name', filter.name);
-        
-        const titleDiv = document.createElement('div');
-        titleDiv.className = 'menu__item-title';
-        titleDiv.textContent = filter.name;
-        
-        li.appendChild(titleDiv);
-        
-        // Обработчики событий для Android TV
-        li.addEventListener('click', function(e) {
-            if (e.type === 'click' || (e.detail && e.detail.key === 'Enter')) {
-                loadFilter(filter);
-            }
-        });
-        
-        // Долгое нажатие для удаления
-        let longPressTimer;
-        li.addEventListener('mousedown', function() {
-            longPressTimer = setTimeout(function() {
-                showDeleteConfirm(filter, function() {
-                    deleteFilter(filter.id);
-                });
-            }, 1000);
-        });
-        
-        li.addEventListener('mouseup', function() {
-            clearTimeout(longPressTimer);
-        });
-        
-        li.addEventListener('mouseleave', function() {
-            clearTimeout(longPressTimer);
-        });
-        
-        // Для TV remote control
-        li.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') {
-                loadFilter(filter);
-            } else if (e.key === 'Delete' || e.key === 'Backspace') {
-                showDeleteConfirm(filter, function() {
-                    deleteFilter(filter.id);
-                });
-            }
-        });
-        
-        return li;
-    }
-    
-    function updateFiltersMenu() {
-        if (!isLampaAvailable()) return;
-        
-        try {
-            // Удаляем старые элементы закладок
-            const oldItems = document.querySelectorAll('.bookmark-item, .bookmarks-separator');
-            oldItems.forEach(item => {
-                if (item.parentNode) {
-                    item.parentNode.removeChild(item);
-                }
-            });
-            
-            const filters = Lampa.Storage.get(STORAGE_KEY, []);
-            if (filters.length === 0) return;
-            
-            // Ищем меню
-            const menuList = document.querySelector('.menu .menu__list');
-            if (!menuList) {
-                // Пробуем найти меню позже
-                setTimeout(updateFiltersMenu, 1000);
-                return;
-            }
-            
-            // Добавляем разделитель
-            const separator = document.createElement('li');
-            separator.className = 'menu__item menu__item--separator bookmarks-separator';
-            const separatorTitle = document.createElement('div');
-            separatorTitle.className = 'menu__item-title';
-            separatorTitle.textContent = 'Закладки';
-            separator.appendChild(separatorTitle);
-            menuList.appendChild(separator);
-            
-            // Добавляем закладки
-            filters.forEach(filter => {
-                const menuItem = createMenuItem(filter);
-                menuList.appendChild(menuItem);
-            });
-            
-            // Обновляем фокус меню
-            if (Lampa.Menu && Lampa.Menu.update) {
-                Lampa.Menu.update();
-            }
-            
-        } catch (error) {
-            console.error('[Bookmarks] Menu update error:', error);
-        }
-    }
-    
-    function addMenuButton() {
-        if (!isLampaAvailable()) return;
-        
-        try {
-            // Добавляем кнопку в меню действий (три точки)
-            if (Lampa.Menu && Lampa.Menu.add) {
-                Lampa.Menu.add({
-                    title: 'Сохранить закладку',
-                    action: saveCurrentFilter,
-                    group: 'bookmarks',
-                    icon: 'bookmark'
-                });
-            }
-            
-            // Альтернативно добавляем в основное меню
-            const menuObserver = new MutationObserver(function(mutations) {
-                mutations.forEach(function(mutation) {
-                    if (mutation.addedNodes.length) {
-                        const mainMenu = document.querySelector('.menu .menu__list');
-                        if (mainMenu && !document.querySelector('.bookmark-save-btn')) {
-                            const saveBtn = document.createElement('li');
-                            saveBtn.className = 'menu__item selector bookmark-save-btn';
-                            saveBtn.innerHTML = '<div class="menu__item-title">Сохранить закладку</div>';
-                            
-                            saveBtn.addEventListener('click', saveCurrentFilter);
-                            saveBtn.addEventListener('keydown', function(e) {
-                                if (e.key === 'Enter') saveCurrentFilter();
-                            });
-                            
-                            // Вставляем после "Избранное" или в конец
-                            const favoriteItem = document.querySelector('.menu__item[data-action="favorite"]');
-                            if (favoriteItem && favoriteItem.parentNode === mainMenu) {
-                                mainMenu.insertBefore(saveBtn, favoriteItem.nextSibling);
-                            } else {
-                                mainMenu.appendChild(saveBtn);
+                
+                // Альтернативный способ - добавляем в DOM
+                const observer = new MutationObserver(function(mutations) {
+                    mutations.forEach(function(mutation) {
+                        if (mutation.addedNodes.length) {
+                            const actionMenu = document.querySelector('.actions-menu, .menu-actions, [class*="action"]');
+                            if (actionMenu && !document.getElementById('bookmark-save-btn')) {
+                                const button = document.createElement('div');
+                                button.id = 'bookmark-save-btn';
+                                button.className = 'selector focusable';
+                                button.tabIndex = 0;
+                                button.innerHTML = `
+                                    <div style="padding: 12px 16px; color: #4CAF50; font-size: 16px;">
+                                        💾 Сохранить закладку
+                                    </div>
+                                `;
+                                
+                                button.addEventListener('click', saveBookmark);
+                                button.addEventListener('keydown', function(e) {
+                                    if (e.key === 'Enter') saveBookmark();
+                                });
+                                
+                                actionMenu.appendChild(button);
                             }
                         }
-                    }
+                    });
                 });
-            });
-            
-            // Начинаем наблюдение
-            menuObserver.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-            
-        } catch (error) {
-            console.error('[Bookmarks] Menu button error:', error);
-        }
-    }
-    
-    function init() {
-        console.log('[Bookmarks] Initializing...');
-        
-        if (!isLampaAvailable()) {
-            // Ждем загрузки Lampa
-            const checkInterval = setInterval(function() {
-                if (isLampaAvailable()) {
-                    clearInterval(checkInterval);
-                    startPlugin();
-                }
-            }, 1000);
-            
-            // Таймаут на случай если Lampa не загрузится
-            setTimeout(function() {
-                clearInterval(checkInterval);
-                if (!isLampaAvailable()) {
-                    console.error('[Bookmarks] Lampa not found');
-                }
-            }, 10000);
-        } else {
-            startPlugin();
-        }
-    }
-    
-    function startPlugin() {
-        console.log('[Bookmarks] Starting plugin...');
-        
-        // Ждем полной загрузки DOM
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                setTimeout(setupPlugin, 1000);
-            });
-        } else {
-            setTimeout(setupPlugin, 1000);
-        }
-    }
-    
-    function setupPlugin() {
-        try {
-            addMenuButton();
-            updateFiltersMenu();
-            
-            // Обновляем меню при изменении хранилища
-            if (Lampa.Listener && Lampa.Listener.follow) {
-                Lampa.Listener.follow('storage', function(e) {
-                    if (e.key === STORAGE_KEY) {
-                        updateFiltersMenu();
-                    }
-                });
+                
+                observer.observe(document.body, { childList: true, subtree: true });
+                
+                return true;
+                
+            } catch (e) {
+                console.error('[Bookmarks] Button error:', e);
+                return false;
             }
+        }
+        
+        function injectStyles() {
+            const styleId = 'bookmarks-plugin-styles';
+            if (document.getElementById(styleId)) return;
             
-            // Обновляем меню при открытии меню
-            document.addEventListener('menu:open', updateFiltersMenu);
+            const style = document.createElement('style');
+            style.id = styleId;
+            style.textContent = `
+                .bookmark-item:hover, 
+                .bookmark-item:focus {
+                    background-color: rgba(255, 152, 0, 0.1);
+                }
+                
+                #bookmark-save-btn:hover,
+                #bookmark-save-btn:focus {
+                    background-color: rgba(76, 175, 80, 0.1);
+                }
+                
+                .selector.focusable:focus {
+                    outline: 2px solid #ff9800;
+                    outline-offset: -2px;
+                }
+            `;
             
-            // Периодически проверяем наличие меню
-            const menuCheckInterval = setInterval(function() {
-                const menuList = document.querySelector('.menu .menu__list');
-                if (menuList) {
-                    updateFiltersMenu();
+            document.head.appendChild(style);
+        }
+        
+        // Инициализация
+        function initialize() {
+            if (isInitialized) return;
+            
+            console.log('[Bookmarks] Starting initialization...');
+            
+            injectStyles();
+            addSaveButton();
+            
+            // Обновляем меню при открытии
+            document.addEventListener('menu:open', updateBookmarksMenu);
+            document.addEventListener('menu:show', updateBookmarksMenu);
+            
+            // Периодически проверяем и обновляем
+            let checkCount = 0;
+            const checkInterval = setInterval(function() {
+                checkCount++;
+                updateBookmarksMenu();
+                
+                if (checkCount >= 6) { // 30 секунд
+                    clearInterval(checkInterval);
                 }
             }, 5000);
             
-            // Останавливаем проверку через 30 секунд
-            setTimeout(function() {
-                clearInterval(menuCheckInterval);
-            }, 30000);
+            // Обновляем при изменении хранилища
+            if (Lampa.Listener && Lampa.Listener.follow) {
+                Lampa.Listener.follow('storage', function(e) {
+                    if (e.key === STORAGE_KEY) {
+                        updateBookmarksMenu();
+                    }
+                });
+            }
             
+            isInitialized = true;
             console.log('[Bookmarks] Plugin initialized successfully');
-            showMsg('Плагин закладок загружен');
-            
-        } catch (error) {
-            console.error('[Bookmarks] Setup error:', error);
+            showMessage('Плагин закладок активирован');
         }
+        
+        // Запускаем инициализацию после загрузки DOM
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                setTimeout(initialize, 2000);
+            });
+        } else {
+            setTimeout(initialize, 2000);
+        }
+        
+        // Экспортируем API для отладки
+        window.BookmarksAPI = {
+            save: saveBookmark,
+            list: getStorage,
+            clear: function() {
+                setStorage([]);
+                updateBookmarksMenu();
+                showMessage('Все закладки удалены');
+            },
+            refresh: updateBookmarksMenu
+        };
     }
     
     // Запускаем плагин
-    init();
-    
-    // Экспортируем API для отладки
-    window.BookmarksPlugin = {
-        save: saveCurrentFilter,
-        updateMenu: updateFiltersMenu,
-        getFilters: function() {
-            return Lampa.Storage.get(STORAGE_KEY, []);
-        },
-        clearFilters: function() {
-            Lampa.Storage.set(STORAGE_KEY, []);
-            updateFiltersMenu();
-            showMsg('Все закладки удалены');
-        }
-    };
+    waitForLampa(initPlugin);
     
 })();
 ```
 
-**Ключевые изменения для работы на Android TV:**
-
-1. **Безопасное создание DOM элементов** - используем `document.createElement` вместо jQuery/`$()`
-2. **Универсальные обработчики событий** - `addEventListener` вместо `.on()`
-3. **Поддержка TV remote** - обработка клавиш `Enter`, `Delete`, `Backspace`
-4. **Долгое нажатие** - реализовано через `setTimeout` для TV пультов
-5. **MutationObserver** - для динамического обнаружения меню
-6. **Проверки доступности API** - безопасные проверки всех методов Lampa
-7. **Fallback-решения** - работают даже если некоторые API недоступны
-8. **Интервальные проверки** - для TV где DOM может загружаться асинхронно
-9. **Отладка** - консоль логи для отслеживания работы плагина
-
-**Дополнительный CSS для стилизации (добавьте в начало скрипта или отдельно):**
+**Упрощенная версия (если выше не работает):**
 
 ```javascript
-// Добавьте этот код в начало функции init() или setupPlugin()
-const style = document.createElement('style');
-style.textContent = `
-    .bookmark-item .menu__item-title {
-        color: #ff9800;
+// Минимальная версия плагина закладок для Lampa
+try {
+    console.log('Bookmarks plugin starting...');
+    
+    // Ждем Lampa
+    const checkLampa = setInterval(() => {
+        if (window.Lampa && Lampa.Storage) {
+            clearInterval(checkLampa);
+            startBookmarks();
+        }
+    }, 500);
+    
+    function startBookmarks() {
+        const STORAGE_KEY = 'my_bookmarks';
+        
+        // Простая функция сохранения
+        function saveBookmark() {
+            try {
+                const activity = Lampa.Activity.active();
+                if (!activity || !activity.url) return;
+                
+                const name = prompt('Название закладки:', activity.title || 'Закладка');
+                if (!name) return;
+                
+                const bookmarks = Lampa.Storage.get(STORAGE_KEY, []);
+                bookmarks.push({
+                    id: Date.now(),
+                    name: name,
+                    url: activity.url,
+                    title: activity.title,
+                    time: new Date().toLocaleString()
+                });
+                
+                Lampa.Storage.set(STORAGE_KEY, bookmarks);
+                
+                if (Lampa.Noty) {
+                    Lampa.Noty.show('Сохранено: ' + name);
+                } else {
+                    alert('Сохранено: ' + name);
+                }
+            } catch (e) {
+                console.error('Bookmark save error:', e);
+            }
+        }
+        
+        // Добавляем кнопку в меню
+        function addButton() {
+            // Ищем меню и добавляем кнопку
+            const observer = new MutationObserver(() => {
+                const menu = document.querySelector('.menu__list, .menu-list');
+                if (menu && !document.querySelector('#bookmark-btn')) {
+                    const btn = document.createElement('li');
+                    btn.id = 'bookmark-btn';
+                    btn.innerHTML = '<div>💾 Сохранить закладку</div>';
+                    btn.style.cssText = 'padding: 10px; color: #4CAF50;';
+                    btn.onclick = saveBookmark;
+                    menu.appendChild(btn);
+                }
+            });
+            
+            observer.observe(document.body, { childList: true, subtree: true });
+        }
+        
+        // Запускаем
+        setTimeout(addButton, 2000);
+        console.log('Bookmarks plugin loaded');
     }
-    .bookmark-item:hover .menu__item-title,
-    .bookmark-item:focus .menu__item-title {
-        color: #ff5722;
-    }
-    .bookmarks-separator .menu__item-title {
-        color: #888;
-        font-size: 0.9em;
-        opacity: 0.7;
-    }
-    .bookmark-save-btn .menu__item-title {
-        color: #4caf50;
-    }
-`;
-document.head.appendChild(style);
+    
+    // Таймаут на случай ошибки
+    setTimeout(() => {
+        clearInterval(checkLampa);
+    }, 10000);
+    
+} catch (e) {
+    console.error('Bookmarks plugin fatal error:', e);
+}
+```
+
+**Инструкция по установке:**
+
+1. **Для Android TV через браузер:**
+   - Откройте Lampa
+   - Нажмите "Настройки" → "Консоль"
+   - Вставьте код в консоль и нажмите Enter
+
+2. **Для постоянной установки:**
+   - Создайте файл `bookmarks.js` с кодом
+   - Добавьте в `index.html` Lampa:
+   ```html
+   <script src="bookmarks.js"></script>
+   ```
+
+3. **Проверка работы:**
+   - Откройте любой фильм или сериал
+   - Нажмите "Меню" (три точки)
+   - Должна появиться кнопка "Сохранить закладку"
+
+**Если все еще возникает "Script error":**
+1. Убедитесь что Lampa полностью загружена
+2. Попробуйте добавить скрипт через `setTimeout`:
+```javascript
+setTimeout(function() {
+    // Весь код плагина здесь
+}, 5000);
+```
