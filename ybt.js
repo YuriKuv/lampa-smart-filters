@@ -24,19 +24,33 @@
             free: true,
             nosave: true
         }, function(newValue) {
-            // Возвращаем фокус после закрытия клавиатуры
-            setTimeout(function() {
-                if (returnElement && returnElement.length) {
-                    Lampa.Nav.focus(returnElement);
-                }
-            }, 100);
+            // --- ПОДТВЕРЖДЕНИЕ ---
+            isSaving = false;
             
             if (newValue && newValue.trim()) {
                 callback(newValue.trim());
-            } else if (newValue !== null && newValue !== undefined && newValue !== '') {
-                showMsg('Название не может быть пустым');
-                showInputDialog(title, defaultValue, callback, returnElement);
             }
+            
+            // Возвращаем фокус
+            setTimeout(function() {
+                if (returnElement && returnElement.length && document.body.contains(returnElement[0])) {
+                    Lampa.Nav.focus(returnElement);
+                } else {
+                    Lampa.Nav.force();
+                }
+            }, 200);
+        }, function() {
+            // --- ОТМЕНА (кнопка "Назад") ---
+            isSaving = false;
+            
+            // Возвращаем фокус
+            setTimeout(function() {
+                if (returnElement && returnElement.length && document.body.contains(returnElement[0])) {
+                    Lampa.Nav.focus(returnElement);
+                } else {
+                    Lampa.Nav.force();
+                }
+            }, 200);
         });
     }
 
@@ -123,14 +137,12 @@
             var exists = filters.some(function(f) { return f.name === name && f.url === newFilter.url; });
             if (exists) {
                 showMsg('Закладка с таким названием уже существует');
-                isSaving = false;
                 return;
             }
             filters.push(newFilter);
             Lampa.Storage.set(STORAGE_KEY, filters);
             updateFiltersMenu();
             showMsg('Закладка "' + name + '" сохранена');
-            isSaving = false;
         }, buttonElement);
     }
 
@@ -169,7 +181,12 @@
                 // Возвращаем фокус
                 setTimeout(function() {
                     Lampa.Nav.force();
-                }, 100);
+                }, 200);
+            },
+            onBack: function() {
+                setTimeout(function() {
+                    Lampa.Nav.force();
+                }, 200);
             }
         });
     }
@@ -193,10 +210,14 @@
                     updateFiltersMenu();
                     showMsg('Все закладки удалены');
                 }
-                // Возвращаем фокус
                 setTimeout(function() {
                     Lampa.Nav.force();
-                }, 100);
+                }, 200);
+            },
+            onBack: function() {
+                setTimeout(function() {
+                    Lampa.Nav.force();
+                }, 200);
             }
         });
     }
