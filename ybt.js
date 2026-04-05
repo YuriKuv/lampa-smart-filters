@@ -8,6 +8,7 @@
     var POSITION_CLEAR_KEY = 'bookmark_clear_position';
     
     var isSaving = false;
+    var currentSaveButton = null; // Сохраняем ссылку на кнопку
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
@@ -15,38 +16,32 @@
         }
     }
 
-    // ==================== ВОЗВРАТ ФОКУСА ====================
+    // ==================== НАТИВНЫЙ ДИАЛОГ ВВОДА С ВОЗВРАТОМ ФОКУСА ====================
     
-    function returnFocus() {
-        setTimeout(function() {
-            // Возвращаем фокус на кнопку "Сохранить закладку" или в контент
-            var saveBtn = $('[data-action="save_filter_btn"], [data-action="save_bookmark_header"]').first();
-            if (saveBtn.length && saveBtn.is(':visible')) {
-                Lampa.Nav.focus(saveBtn[0]);
-            } else {
-                // Если кнопка не найдена, возвращаем фокус на контент
-                Lampa.Controller.enable();
-            }
-        }, 200);
-    }
-
-    // ==================== НАТИВНЫЙ ДИАЛОГ ВВОДА ====================
-    
-    function showInputDialog(title, defaultValue, callback) {
+    function showInputDialog(title, defaultValue, callback, returnElement) {
         Lampa.Input.edit({
             value: defaultValue,
             title: title,
             free: true,
             nosave: true
         }, function(newValue) {
+            // Возвращаем фокус на элемент, с которого пришли
+            if (returnElement && returnElement.length) {
+                setTimeout(function() {
+                    Lampa.Nav.focus(returnElement);
+                }, 100);
+            } else {
+                // Если не знаем, на что вернуть фокус — используем force()
+                setTimeout(function() {
+                    Lampa.Nav.force();
+                }, 100);
+            }
+            
             if (newValue && newValue.trim()) {
                 callback(newValue.trim());
-                returnFocus();
             } else if (newValue !== null && newValue !== undefined) {
                 showMsg('Название не может быть пустым');
-                showInputDialog(title, defaultValue, callback);
-            } else {
-                returnFocus();
+                showInputDialog(title, defaultValue, callback, returnElement);
             }
         });
     }
@@ -91,7 +86,7 @@
 
     // ==================== СОХРАНЕНИЕ ====================
     
-    function saveCurrentFilter() {
+    function saveCurrentFilter(buttonElement) {
         if (isSaving) return;
         isSaving = true;
         
@@ -99,6 +94,12 @@
         if (!activity) {
             showMsg('Не удалось определить текущую страницу');
             isSaving = false;
+            // Возвращаем фокус на кнопку
+            if (buttonElement && buttonElement.length) {
+                setTimeout(function() {
+                    Lampa.Nav.focus(buttonElement);
+                }, 100);
+            }
             return;
         }
         
@@ -106,12 +107,22 @@
         if (!validComponents.includes(activity.component) && activity.component.indexOf('category') === -1) {
             showMsg('Откройте раздел с контентом');
             isSaving = false;
+            if (buttonElement && buttonElement.length) {
+                setTimeout(function() {
+                    Lampa.Nav.focus(buttonElement);
+                }, 100);
+            }
             return;
         }
         
         if (isRootSection(activity)) {
             showMsg('Нельзя сохранить основной раздел. Откройте подраздел через кнопку "Ещё" или примените фильтр');
             isSaving = false;
+            if (buttonElement && buttonElement.length) {
+                setTimeout(function() {
+                    Lampa.Nav.focus(buttonElement);
+                }, 100);
+            }
             return;
         }
         
@@ -142,7 +153,7 @@
             updateFiltersMenu();
             showMsg('Закладка "' + name + '" сохранена');
             isSaving = false;
-        });
+        }, buttonElement);
     }
 
     // ==================== ОТКРЫТИЕ ====================
@@ -177,6 +188,10 @@
                     updateFiltersMenu();
                     showMsg('Закладка "' + filterName + '" удалена');
                 }
+                // Возвращаем фокус
+                setTimeout(function() {
+                    Lampa.Nav.force();
+                }, 100);
             }
         });
     }
@@ -200,6 +215,10 @@
                     updateFiltersMenu();
                     showMsg('Все закладки удалены');
                 }
+                // Возвращаем фокус
+                setTimeout(function() {
+                    Lampa.Nav.force();
+                }, 100);
             }
         });
     }
@@ -224,7 +243,8 @@
         `);
         
         saveButton.on('hover:enter', function() {
-            saveCurrentFilter();
+            // Передаём кнопку для возврата фокуса
+            saveCurrentFilter(saveButton);
         });
         
         var settingsList = $('.menu .menu__list').eq(1);
@@ -273,7 +293,7 @@
         `);
         
         bookmarkBtn.on('hover:enter', function() {
-            saveCurrentFilter();
+            saveCurrentFilter(bookmarkBtn);
         });
         
         $('.head__actions').append(bookmarkBtn);
