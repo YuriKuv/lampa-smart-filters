@@ -8,6 +8,7 @@
     var POSITION_CLEAR_KEY = 'bookmark_clear_position';
     
     var isDialogOpen = false;
+    var isSaving = false;
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
@@ -34,12 +35,13 @@
                 callback(result.trim());
             } else if (result !== null) {
                 showMsg('Название не может быть пустым');
+                isDialogOpen = false;
                 showInputDialog(title, defaultValue, callback);
             }
             return;
         }
         
-        // Для Android TV создаем кастомный диалог с событиями Lampa
+        // Для Android TV создаем кастомный диалог
         var dialogId = 'custom_input_dialog_' + Date.now();
         
         var dialogHtml = `
@@ -103,19 +105,16 @@
         var overlay = $('#overlay_' + dialogId);
         var inputField = $('#input_field_' + dialogId);
         
-        // Фокус на поле
         setTimeout(function() {
             inputField.focus();
         }, 200);
         
-        // Функция закрытия
         function closeDialog() {
             dialog.remove();
             overlay.remove();
             isDialogOpen = false;
         }
         
-        // Обработчик сохранения (событие hover:enter для пульта)
         $('#ok_btn_' + dialogId).on('hover:enter', function() {
             var value = inputField.val().trim();
             if (value) {
@@ -127,12 +126,10 @@
             }
         });
         
-        // Обработчик отмены
         $('#cancel_btn_' + dialogId).on('hover:enter', function() {
             closeDialog();
         });
         
-        // Клик для мыши
         $('#ok_btn_' + dialogId).on('click', function() {
             var value = inputField.val().trim();
             if (value) {
@@ -148,7 +145,6 @@
             closeDialog();
         });
         
-        // Enter на поле ввода
         inputField.on('keypress', function(e) {
             if (e.which === 13) {
                 var value = inputField.val().trim();
@@ -161,7 +157,6 @@
             }
         });
         
-        // Клик по оверлею
         overlay.on('click', function() {
             closeDialog();
         });
@@ -208,20 +203,27 @@
     // ==================== СОХРАНЕНИЕ ====================
     
     function saveCurrentFilter() {
+        // Предотвращаем повторный вызов
+        if (isSaving) return;
+        isSaving = true;
+        
         var activity = Lampa.Activity.active();
         if (!activity) {
             showMsg('Не удалось определить текущую страницу');
+            isSaving = false;
             return;
         }
         
         var validComponents = ['category', 'category_full', 'serial', 'movie', 'cartoon', 'anime', 'tv', 'catalog'];
         if (!validComponents.includes(activity.component) && activity.component.indexOf('category') === -1) {
             showMsg('Откройте раздел с контентом');
+            isSaving = false;
             return;
         }
         
         if (isRootSection(activity)) {
             showMsg('Нельзя сохранить основной раздел. Откройте подраздел через кнопку "Ещё" или примените фильтр');
+            isSaving = false;
             return;
         }
         
@@ -244,12 +246,14 @@
             var exists = filters.some(function(f) { return f.name === name && f.url === newFilter.url; });
             if (exists) {
                 showMsg('Закладка с таким названием уже существует');
+                isSaving = false;
                 return;
             }
             filters.push(newFilter);
             Lampa.Storage.set(STORAGE_KEY, filters);
             updateFiltersMenu();
             showMsg('Закладка "' + name + '" сохранена');
+            isSaving = false;
         });
     }
 
@@ -335,7 +339,8 @@
             saveCurrentFilter();
         });
         
-        saveButton.on('click', function() {
+        saveButton.on('click', function(e) {
+            e.stopPropagation();
             saveCurrentFilter();
         });
         
@@ -363,7 +368,8 @@
             deleteAllFilters();
         });
         
-        clearButton.on('click', function() {
+        clearButton.on('click', function(e) {
+            e.stopPropagation();
             deleteAllFilters();
         });
         
@@ -392,7 +398,8 @@
             saveCurrentFilter();
         });
         
-        bookmarkBtn.on('click', function() {
+        bookmarkBtn.on('click', function(e) {
+            e.stopPropagation();
             saveCurrentFilter();
         });
         
@@ -414,7 +421,8 @@
             deleteAllFilters();
         });
         
-        clearBtn.on('click', function() {
+        clearBtn.on('click', function(e) {
+            e.stopPropagation();
             deleteAllFilters();
         });
         
