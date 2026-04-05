@@ -7,9 +7,9 @@
     var POSITION_SAVE_KEY = 'bookmark_save_position';
     var POSITION_CLEAR_KEY = 'bookmark_clear_position';
     
-    var isDialogOpen = false;
     var isSaving = false;
-    var currentDialogId = null;
+    var pendingCallback = null;
+    var pendingTitle = null;
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
@@ -19,135 +19,82 @@
         }
     }
 
-    // ==================== КАСТОМНЫЙ ДИАЛОГ ====================
+    // ==================== ДИАЛОГ ВВОДА ДЛЯ ANDROID TV ====================
     
-    function showCustomDialog(title, defaultValue, callback) {
-        if (isDialogOpen) {
-            // Если диалог уже открыт, не открываем новый
-            return;
-        }
-        isDialogOpen = true;
+    function showAndroidInputDialog(title, defaultValue, callback) {
+        pendingCallback = callback;
+        pendingTitle = title;
         
-        var dialogId = 'bookmark_dialog_' + Date.now();
-        currentDialogId = dialogId;
-        
-        var dialogHtml = `
-            <div id="${dialogId}" style="
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                width: 85%;
-                max-width: 500px;
-                background: #1a1a2e;
-                border-radius: 12px;
-                z-index: 100000;
-                color: white;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-                padding: 20px;
-            ">
-                <div style="font-size: 20px; margin-bottom: 15px; text-align: center;">${title}</div>
-                <input type="text" id="input_${dialogId}" placeholder="${defaultValue}" value="${defaultValue}" style="
-                    width: 100%;
-                    padding: 12px;
-                    background: #2a2a3e;
-                    color: white;
-                    border: 2px solid #4CAF50;
-                    border-radius: 8px;
-                    font-size: 16px;
-                    margin-bottom: 15px;
-                    box-sizing: border-box;
-                ">
-                <div style="display: flex; gap: 10px;">
-                    <div id="save_${dialogId}" class="selector" style="
-                        flex: 1;
-                        padding: 10px;
-                        text-align: center;
-                        background: #4CAF50;
-                        border-radius: 6px;
-                    ">✅ Сохранить</div>
-                    <div id="cancel_${dialogId}" class="selector" style="
-                        flex: 1;
-                        padding: 10px;
-                        text-align: center;
-                        background: #555;
-                        border-radius: 6px;
-                    ">❌ Отмена</div>
-                </div>
-            </div>
-            <div id="overlay_${dialogId}" style="
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0,0,0,0.7);
-                z-index: 99999;
-            "></div>
-        `;
-        
-        $('body').append(dialogHtml);
-        
-        var dialog = $('#' + dialogId);
-        var overlay = $('#overlay_' + dialogId);
-        var inputField = $('#input_' + dialogId);
-        
-        // Функция закрытия диалога
-        function closeDialog() {
-            if (currentDialogId === dialogId) {
-                dialog.remove();
-                overlay.remove();
-                isDialogOpen = false;
-                currentDialogId = null;
-            }
-        }
-        
-        // Фокус на поле ввода
-        setTimeout(function() {
-            inputField.focus();
-        }, 200);
-        
-        // Сохранение
-        $('#save_' + dialogId).on('hover:enter', function(e) {
-            e.stopPropagation();
-            var value = inputField.val().trim();
-            if (value) {
-                closeDialog();
-                callback(value);
-            } else {
-                showMsg('Название не может быть пустым');
-                inputField.focus();
-            }
-        });
-        
-        // Отмена
-        $('#cancel_' + dialogId).on('hover:enter', function(e) {
-            e.stopPropagation();
-            closeDialog();
-        });
-        
-        // Enter на поле ввода
-        inputField.on('keypress', function(e) {
-            if (e.which === 13) {
-                var value = inputField.val().trim();
-                if (value) {
-                    closeDialog();
-                    callback(value);
-                } else {
-                    showMsg('Название не может быть пустым');
+        // Сначала показываем диалог выбора действия
+        Lampa.Select.show({
+            title: title,
+            items: [
+                { title: '✏️ Ввести название: ' + defaultValue, value: 'input', isInput: true },
+                { title: '✅ Сохранить', value: 'save' },
+                { title: '❌ Отмена', value: 'cancel' }
+            ],
+            onSelect: function(item) {
+                if (item.value === 'cancel') {
+                    pendingCallback = null;
+                    return;
                 }
+                if (item.value === 'save') {
+                    if (defaultValue && defaultValue.trim()) {
+                        if (pendingCallback) {
+                            pendingCallback(defaultValue.trim());
+                            pendingCallback = null;
+                        }
+                    } else {
+                        showMsg('Название не может быть пустым');
+                        showAndroidInputDialog(title, defaultValue, callback);
+                    }
+                }
+                if (item.value === 'input') {
+                    // Открываем клавиатуру для ввода текста
+                    if (typeof Lampa !== 'undefined' && Lampa.Keyboard) {
+                        Lampa.Keyboard.show({
+                            title: title,
+                            value: defaultValue,
+                            onKey: function(value) {
+                                defaultValue = value;
+                                // Обновляем пункт меню
+                                var newItems = [
+                                    { title: '✏️ Ввести название: ' + (value || defaultValue), value: 'input', isInput: true },
+                                    { title: '✅ Сохранить', value: 'save' },
+                                    { title: '❌ Отмена', value: 'cancel' }
+                                ];
+                                Lampa.Select.update(newItems);
+                            },
+                            onEnter: function(value) {
+                                defaultValue = value;
+                                if (pendingCallback) {
+                                    pendingCallback(value.trim());
+                                    pendingCallback = null;
+                                }
+                            },
+                            onBack: function() {
+                                // Возвращаемся к диалогу
+                            }
+                        });
+                    }
+                }
+            },
+            onBack: function() {
+                pendingCallback = null;
             }
         });
-        
-        // Клик по оверлею (для мыши)
-        overlay.on('click', function() {
-            closeDialog();
-        });
-        
-        // Предотвращаем закрытие при клике на диалог
-        dialog.on('click', function(e) {
-            e.stopPropagation();
-        });
+    }
+
+    // ==================== ДИАЛОГ ДЛЯ БРАУЗЕРА ====================
+    
+    function showBrowserInputDialog(title, defaultValue, callback) {
+        var result = prompt(title, defaultValue);
+        if (result !== null && result.trim()) {
+            callback(result.trim());
+        } else if (result !== null) {
+            showMsg('Название не может быть пустым');
+            showBrowserInputDialog(title, defaultValue, callback);
+        }
     }
 
     // ==================== УНИВЕРСАЛЬНЫЙ ДИАЛОГ ====================
@@ -156,15 +103,9 @@
         var isAndroid = Lampa.Platform && Lampa.Platform.is('android');
         
         if (isAndroid) {
-            showCustomDialog(title, defaultValue, callback);
+            showAndroidInputDialog(title, defaultValue, callback);
         } else {
-            var result = prompt(title, defaultValue);
-            if (result !== null && result.trim()) {
-                callback(result.trim());
-            } else if (result !== null) {
-                showMsg('Название не может быть пустым');
-                showInputDialog(title, defaultValue, callback);
-            }
+            showBrowserInputDialog(title, defaultValue, callback);
         }
     }
 
