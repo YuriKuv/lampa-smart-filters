@@ -15,119 +15,231 @@
         }
     }
 
-    // ==================== УНИВЕРСАЛЬНЫЙ ДИАЛОГ ВВОДА ====================
+    // ==================== ГЕНЕРАЦИЯ УМНЫХ НАЗВАНИЙ ====================
     
-    function showInputDialog(title, defaultName, callback) {
-        // Определяем платформу
-        var isAndroidTV = typeof window !== 'undefined' && 
-                          window.navigator && 
-                          window.navigator.userAgent && 
-                          (window.navigator.userAgent.indexOf('Android') !== -1) &&
-                          (window.navigator.userAgent.indexOf('Mobile') === -1);
+    function generateSmartNames(activity) {
+        var names = [];
+        var baseName = '';
         
-        console.log('[SaveFilter] isAndroidTV:', isAndroidTV);
+        // 1. Определяем тип контента
+        var type = '';
+        if (activity.component === 'tv' || (activity.url && activity.url.indexOf('tv') !== -1)) {
+            type = 'сериалы';
+        } else if (activity.component === 'cartoon') {
+            type = 'мультфильмы';
+        } else if (activity.component === 'anime') {
+            type = 'аниме';
+        } else {
+            type = 'фильмы';
+        }
         
-        // Для Android TV используем простой список с предустановками + системный диалог
-        if (isAndroidTV) {
-            var items = [
-                { title: '✏️ ' + defaultName, value: defaultName },
-                { title: '📝 Ввести своё название...', value: 'custom' },
-                { title: '❌ Отмена', value: 'cancel' }
-            ];
-            
-            // Добавляем последние использованные названия
-            var lastNames = Lampa.Storage.get('last_bookmark_names', []);
-            for (var i = 0; i < Math.min(lastNames.length, 3); i++) {
-                items.push({ title: '🔁 ' + lastNames[i], value: lastNames[i] });
+        // 2. Определяем раздел из title
+        if (activity.title) {
+            var cleanTitle = activity.title.replace(' - TMDB', '');
+            if (cleanTitle !== 'Фильмы' && cleanTitle !== 'Сериалы' && cleanTitle !== 'Мультфильмы') {
+                names.push(cleanTitle);
+                names.push(cleanTitle + ' (' + type + ')');
+            }
+        }
+        
+        // 3. Если есть жанры, добавляем варианты с жанрами
+        if (activity.genres) {
+            var genreNames = getGenreNames(activity.genres);
+            if (genreNames) {
+                names.push(genreNames);
+                names.push(genreNames + ' ' + type);
+                names.push('Лучшие ' + genreNames.toLowerCase());
+                names.push('Новые ' + genreNames.toLowerCase());
+            }
+        }
+        
+        // 4. Если есть годы
+        if (activity.url) {
+            var yearMatch = activity.url.match(/(?:primary_release_year|air_date|first_air_date)[=:](\d{4})/);
+            if (yearMatch) {
+                var year = yearMatch[1];
+                if (names.length > 0) {
+                    names.push(names[0] + ' ' + year);
+                }
+                names.push(type.charAt(0).toUpperCase() + type.slice(1) + ' ' + year);
+                names.push('Новинки ' + year);
             }
             
-            Lampa.Select.show({
-                title: title,
-                items: items,
-                onSelect: function(item) {
-                    if (item.value === 'cancel') {
-                        console.log('[SaveFilter] Отмена');
-                        return;
+            // Диапазон годов
+            var yearFromMatch = activity.url.match(/(?:primary_release_date|air_date)\.gte=(\d{4})/);
+            var yearToMatch = activity.url.match(/(?:primary_release_date|air_date)\.lte=(\d{4})/);
+            if (yearFromMatch && yearToMatch) {
+                names.push(type + ' ' + yearFromMatch[1] + '-' + yearToMatch[1]);
+            }
+        }
+        
+        // 5. Если есть язык
+        if (activity.url && activity.url.indexOf('with_original_language=') !== -1) {
+            var langMatch = activity.url.match(/with_original_language=([a-z]+)/);
+            if (langMatch) {
+                var langName = getLanguageName(langMatch[1]);
+                if (langName) {
+                    names.push(langName + ' ' + type);
+                    if (names.length > 0 && names[0] !== langName + ' ' + type) {
+                        names.push(langName);
                     }
-                    
-                    if (item.value === 'custom') {
-                        // Используем системный диалог Android TV
-                        if (typeof Lampa !== 'undefined' && Lampa.Android && Lampa.Android.dialog) {
-                            Lampa.Android.dialog({
-                                title: title,
-                                text: '',
-                                type: 'text',
-                                callback: function(value) {
-                                    if (value && value.trim()) {
-                                        callback(value.trim());
-                                        saveToLastNames(value.trim());
-                                    } else if (value !== null) {
-                                        showMsg('Название не может быть пустым');
-                                        showInputDialog(title, defaultName, callback);
-                                    }
-                                }
-                            });
-                        } else {
-                            // Fallback через prompt
-                            var result = prompt(title, defaultName);
-                            if (result && result.trim()) {
-                                callback(result.trim());
-                                saveToLastNames(result.trim());
-                            } else if (result !== null) {
-                                showMsg('Название не может быть пустым');
-                                showInputDialog(title, defaultName, callback);
-                            }
-                        }
-                    } else {
-                        callback(item.value);
-                        saveToLastNames(item.value);
-                    }
-                },
-                onBack: function() {
-                    console.log('[SaveFilter] Диалог закрыт');
-                }
-            });
-        } 
-        // Для браузера и других платформ используем Lampa.Input
-        else {
-            if (typeof Lampa !== 'undefined' && Lampa.Input && Lampa.Input.show) {
-                Lampa.Input.show({
-                    title: title,
-                    placeholder: defaultName,
-                    value: defaultName,
-                    onBack: function() {
-                        console.log('[SaveFilter] Диалог закрыт');
-                    },
-                    onEnter: function(value) {
-                        if (value && value.trim()) {
-                            callback(value.trim());
-                            saveToLastNames(value.trim());
-                        } else {
-                            showMsg('Название не может быть пустым');
-                            showInputDialog(title, defaultName, callback);
-                        }
-                    }
-                });
-            } else {
-                // Самый последний fallback
-                var result = prompt(title, defaultName);
-                if (result && result.trim()) {
-                    callback(result.trim());
-                    saveToLastNames(result.trim());
-                } else if (result !== null) {
-                    showMsg('Название не может быть пустым');
-                    showInputDialog(title, defaultName, callback);
                 }
             }
         }
+        
+        // 6. Если есть сортировка
+        if (activity.sort) {
+            var sortNames = {
+                'popularity.desc': 'Популярные',
+                'vote_average.desc': 'Лучшие по рейтингу',
+                'vote_count.desc': 'Самые обсуждаемые',
+                'revenue.desc': 'Кассовые',
+                'primary_release_date.desc': 'Новинки'
+            };
+            if (sortNames[activity.sort]) {
+                names.push(sortNames[activity.sort] + ' ' + type);
+            }
+        }
+        
+        // 7. Из URL
+        if (activity.url) {
+            if (activity.url.indexOf('now_playing') !== -1) {
+                names.push('Сейчас в кино');
+                names.push('Сейчас смотрят');
+            }
+            if (activity.url.indexOf('popular') !== -1) {
+                names.push('Популярное');
+            }
+            if (activity.url.indexOf('top_rated') !== -1) {
+                names.push('Топ рейтинга');
+            }
+            if (activity.url.indexOf('upcoming') !== -1) {
+                names.push('Скоро выйдут');
+            }
+        }
+        
+        // Удаляем дубликаты
+        var uniqueNames = [];
+        for (var i = 0; i < names.length; i++) {
+            if (uniqueNames.indexOf(names[i]) === -1 && names[i]) {
+                uniqueNames.push(names[i]);
+            }
+        }
+        
+        // Ограничиваем количество предложений (не более 6)
+        return uniqueNames.slice(0, 6);
     }
     
-    function saveToLastNames(name) {
-        var lastNames = Lampa.Storage.get('last_bookmark_names', []);
-        lastNames = lastNames.filter(function(n) { return n !== name; });
-        lastNames.unshift(name);
-        lastNames = lastNames.slice(0, 5);
-        Lampa.Storage.set('last_bookmark_names', lastNames);
+    function getGenreNames(genreIds) {
+        var genreMap = {
+            28: 'Боевики', 12: 'Приключения', 16: 'Мультфильмы',
+            35: 'Комедии', 80: 'Криминал', 99: 'Документальные',
+            18: 'Драмы', 10751: 'Семейные', 14: 'Фэнтези',
+            36: 'Исторические', 27: 'Ужасы', 10402: 'Музыкальные',
+            9648: 'Детективы', 10749: 'Мелодрамы', 878: 'Фантастика',
+            10770: 'ТВ фильмы', 53: 'Триллеры', 10752: 'Военные', 37: 'Вестерны'
+        };
+        
+        if (typeof genreIds === 'number') {
+            return genreMap[genreIds] || null;
+        }
+        
+        if (Array.isArray(genreIds) && genreIds.length > 0) {
+            var names = [];
+            for (var i = 0; i < genreIds.length; i++) {
+                if (genreMap[genreIds[i]]) {
+                    names.push(genreMap[genreIds[i]]);
+                }
+            }
+            return names.join(', ');
+        }
+        
+        return null;
+    }
+    
+    function getLanguageName(code) {
+        var langMap = {
+            'ru': 'Русские', 'en': 'Английские', 'ja': 'Японские',
+            'zh': 'Китайские', 'ko': 'Корейские', 'fr': 'Французские',
+            'de': 'Немецкие', 'es': 'Испанские', 'it': 'Итальянские'
+        };
+        return langMap[code] || null;
+    }
+
+    // ==================== ДИАЛОГ С ВЫБОРОМ НАЗВАНИЯ ====================
+    
+    function showInputDialog(title, defaultName, activity, callback) {
+        // Генерируем умные предложения
+        var suggestions = generateSmartNames(activity);
+        
+        // Создаем список с предложениями
+        var items = [];
+        
+        // Добавляем умные предложения
+        for (var i = 0; i < suggestions.length; i++) {
+            items.push({ title: '📌 ' + suggestions[i], value: suggestions[i] });
+        }
+        
+        // Добавляем разделитель и вариант с произвольным названием
+        items.push({ title: '──────────', value: 'separator', disabled: true });
+        items.push({ title: '✏️ Ввести своё название', value: 'custom' });
+        items.push({ title: '❌ Отмена', value: 'cancel' });
+        
+        Lampa.Select.show({
+            title: title,
+            items: items,
+            onSelect: function(item) {
+                if (item.value === 'cancel') {
+                    console.log('[SaveFilter] Отмена');
+                    return;
+                }
+                
+                if (item.value === 'custom') {
+                    // Для ввода своего названия
+                    showCustomInputDialog(title, defaultName, callback);
+                } else if (item.value !== 'separator') {
+                    callback(item.value);
+                }
+            },
+            onBack: function() {
+                console.log('[SaveFilter] Диалог закрыт');
+            }
+        });
+    }
+    
+    function showCustomInputDialog(title, defaultName, callback) {
+        // Пытаемся использовать Lampa.Input если доступен
+        if (typeof Lampa !== 'undefined' && Lampa.Input && Lampa.Input.show) {
+            Lampa.Input.show({
+                title: title,
+                placeholder: defaultName,
+                value: defaultName,
+                onEnter: function(value) {
+                    if (value && value.trim()) {
+                        callback(value.trim());
+                    } else {
+                        showMsg('Название не может быть пустым');
+                        showCustomInputDialog(title, defaultName, callback);
+                    }
+                },
+                onBack: function() {
+                    // Возвращаемся к выбору предложений
+                    var activity = Lampa.Activity.active();
+                    if (activity) {
+                        showInputDialog(title, defaultName, activity, callback);
+                    }
+                }
+            });
+        } else {
+            // Fallback для платформ без Lampa.Input
+            var result = prompt(title, defaultName);
+            if (result && result.trim()) {
+                callback(result.trim());
+            } else if (result !== null) {
+                showMsg('Название не может быть пустым');
+                showCustomInputDialog(title, defaultName, callback);
+            }
+        }
     }
 
     // ==================== ПРОВЕРКА КОРНЕВОГО РАЗДЕЛА ====================
@@ -174,15 +286,14 @@
     }
 
     function getDefaultName(activity) {
+        var suggestions = generateSmartNames(activity);
+        if (suggestions.length > 0) {
+            return suggestions[0];
+        }
         if (activity.title) return activity.title.replace(' - TMDB', '');
         if (activity.genres === 16) return 'Мультфильмы';
-        if (activity.genres === 28) return 'Боевики';
-        if (activity.genres === 35) return 'Комедии';
-        if (activity.genres === 27) return 'Ужасы';
-        if (activity.genres === 18) return 'Драмы';
         if (activity.component === 'anime') return 'Аниме';
         if (activity.component === 'tv') return 'Сериалы';
-        if (activity.url === 'movie') return 'Фильмы';
         return 'Моя закладка';
     }
 
@@ -212,7 +323,7 @@
         
         var defaultName = getDefaultName(activity);
         
-        showInputDialog('Сохранить закладку', defaultName, function(name) {
+        showInputDialog('Сохранить закладку', defaultName, activity, function(name) {
             console.log('[SaveFilter] Сохраняем закладку:', name);
             
             var newFilter = {
@@ -228,6 +339,7 @@
             if (activity.sort) newFilter.sort = activity.sort;
             
             var filters = Lampa.Storage.get(STORAGE_KEY, []);
+            // Проверяем, нет ли уже такой закладки
             var exists = filters.some(function(f) { return f.name === name && f.url === newFilter.url; });
             if (exists) {
                 showMsg('Закладка с таким названием уже существует');
