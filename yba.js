@@ -15,15 +15,35 @@
         }
     }
 
-    // ==================== ДИАЛОГ С ВВОДОМ ТЕКСТА ====================
+    // ==================== ВЫЗОВ СИСТЕМНОЙ КЛАВИАТУРЫ ====================
     
-    function showInputDialog(title, defaultName, callback) {
-        // Пробуем использовать Lampa.Input (работает на Android TV)
-        if (typeof Lampa !== 'undefined' && Lampa.Input && Lampa.Input.show) {
+    function showKeyboard(title, defaultName, callback) {
+        // Метод 1: Lampa.Keyboard (работает на Android TV)
+        if (typeof Lampa !== 'undefined' && Lampa.Keyboard && Lampa.Keyboard.show) {
+            console.log('[SaveFilter] Используем Lampa.Keyboard');
+            Lampa.Keyboard.show({
+                title: title,
+                value: defaultName || '',
+                onKey: function(value) {
+                    if (value && value.trim()) {
+                        callback(value.trim());
+                    } else if (value !== null && value !== undefined) {
+                        showMsg('Название не может быть пустым');
+                        showKeyboard(title, defaultName, callback);
+                    }
+                },
+                onBack: function() {
+                    console.log('[SaveFilter] Клавиатура закрыта');
+                }
+            });
+        }
+        // Метод 2: Lampa.Input (альтернативный)
+        else if (typeof Lampa !== 'undefined' && Lampa.Input && Lampa.Input.show) {
+            console.log('[SaveFilter] Используем Lampa.Input');
             Lampa.Input.show({
                 title: title,
-                placeholder: defaultName,
-                value: defaultName,
+                placeholder: defaultName || '',
+                value: defaultName || '',
                 onBack: function() {
                     console.log('[SaveFilter] Диалог закрыт');
                 },
@@ -32,63 +52,20 @@
                         callback(value.trim());
                     } else {
                         showMsg('Название не может быть пустым');
-                        // Повторно открываем диалог
-                        showInputDialog(title, defaultName, callback);
+                        showKeyboard(title, defaultName, callback);
                     }
-                }
-            });
-        } 
-        // Альтернативный метод через Lampa.Select с keyboard
-        else if (typeof Lampa !== 'undefined' && Lampa.Select) {
-            Lampa.Select.show({
-                title: title,
-                items: [
-                    { title: '📝 ' + (defaultName || 'Введите название'), value: 'input_field', keyboard: true },
-                    { title: '✅ Сохранить', value: 'save' },
-                    { title: '❌ Отмена', value: 'cancel' }
-                ],
-                onKeyboard: function(value) {
-                    // Обновляем отображение при вводе
-                    this.items[0].title = '📝 ' + (value || defaultName || 'Введите название');
-                    this.update();
-                    this.tempValue = value;
-                },
-                onSelect: function(item) {
-                    if (item.value === 'save') {
-                        var inputValue = this.tempValue || defaultName || '';
-                        if (inputValue && inputValue.trim()) {
-                            callback(inputValue.trim());
-                        } else {
-                            showMsg('Название не может быть пустым');
-                        }
-                    } else if (item.value === 'input_field') {
-                        // Активируем клавиатуру
-                        if (Lampa.Keyboard && Lampa.Keyboard.show) {
-                            Lampa.Keyboard.show({
-                                title: title,
-                                value: defaultName || '',
-                                onKey: function(value) {
-                                    this.tempValue = value;
-                                    this.items[0].title = '📝 ' + (value || defaultName || 'Введите название');
-                                    this.update();
-                                }.bind(this)
-                            });
-                        }
-                    }
-                }.bind(this),
-                onBack: function() {
-                    console.log('[SaveFilter] Диалог закрыт');
                 }
             });
         }
-        // Последний шанс - обычный prompt (для браузера)
+        // Метод 3: prompt для браузера
         else {
+            console.log('[SaveFilter] Используем prompt');
             var result = prompt(title, defaultName);
             if (result && result.trim()) {
                 callback(result.trim());
             } else if (result !== null) {
                 showMsg('Название не может быть пустым');
-                showInputDialog(title, defaultName, callback);
+                showKeyboard(title, defaultName, callback);
             }
         }
     }
@@ -175,7 +152,7 @@
         
         var defaultName = getDefaultName(activity);
         
-        showInputDialog('Сохранить закладку', defaultName, function(name) {
+        showKeyboard('Сохранить закладку', defaultName, function(name) {
             console.log('[SaveFilter] Сохраняем закладку:', name);
             
             var newFilter = {
@@ -191,7 +168,6 @@
             if (activity.sort) newFilter.sort = activity.sort;
             
             var filters = Lampa.Storage.get(STORAGE_KEY, []);
-            // Проверяем, нет ли уже такой закладки
             var exists = filters.some(function(f) { return f.name === name && f.url === newFilter.url; });
             if (exists) {
                 showMsg('Закладка с таким названием уже существует');
