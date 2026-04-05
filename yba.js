@@ -6,8 +6,6 @@
     var STORAGE_KEY = 'saved_filters_list';
     var POSITION_SAVE_KEY = 'bookmark_save_position';
     var POSITION_CLEAR_KEY = 'bookmark_clear_position';
-    
-    var currentCallback = null;
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
@@ -17,139 +15,42 @@
         }
     }
 
-    // ==================== КЛАВИАТУРА Lampa ====================
+    // ==================== УНИВЕРСАЛЬНЫЙ ВВОД ====================
     
-    function showKeyboardDialog(title, placeholder, callback) {
-        currentCallback = callback;
-        
-        // Создаем временный HTML для диалога с клавиатурой
-        var dialogHtml = `
-            <div id="bookmark_keyboard_dialog" style="
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                width: 90%;
-                max-width: 600px;
-                background: #1a1a2e;
-                border-radius: 12px;
-                z-index: 100000;
-                color: white;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-                padding: 20px;
-            ">
-                <div style="font-size: 20px; margin-bottom: 15px; text-align: center;">${title}</div>
-                <div id="bookmark_input_display" style="
-                    width: 100%;
-                    padding: 12px;
-                    background: #2a2a3e;
-                    border-radius: 8px;
-                    font-size: 16px;
-                    margin-bottom: 15px;
-                    min-height: 45px;
-                    word-break: break-all;
-                ">${placeholder}</div>
-                <div style="display: flex; gap: 10px;">
-                    <div id="bookmark_ok_btn" style="
-                        flex: 1;
-                        padding: 10px;
-                        text-align: center;
-                        background: #4CAF50;
-                        border-radius: 6px;
-                        cursor: pointer;
-                    ">✅ Сохранить</div>
-                    <div id="bookmark_cancel_btn" style="
-                        flex: 1;
-                        padding: 10px;
-                        text-align: center;
-                        background: #555;
-                        border-radius: 6px;
-                        cursor: pointer;
-                    ">❌ Отмена</div>
-                </div>
-            </div>
-            <div id="bookmark_overlay" style="
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0,0,0,0.7);
-                z-index: 99999;
-            "></div>
-        `;
-        
-        $('body').append(dialogHtml);
-        
-        var currentValue = placeholder || '';
-        $('#bookmark_input_display').text(currentValue);
-        
-        // Запускаем клавиатуру Lampa
-        if (typeof Lampa !== 'undefined' && Lampa.Keyboard) {
-            Lampa.Keyboard.show({
-                title: title,
-                value: currentValue,
-                onKey: function(value) {
-                    currentValue = value;
-                    $('#bookmark_input_display').text(value || placeholder);
-                },
-                onEnter: function(value) {
-                    currentValue = value;
-                    $('#bookmark_input_display').text(value || placeholder);
-                    $('#bookmark_ok_btn').trigger('click');
-                },
-                onBack: function() {
-                    // Просто закрываем
-                }
-            });
-        } else if (typeof Keybord !== 'undefined') {
-            // Альтернативный способ через Keybord
-            var keyboard = new Keybord({
-                layout: 'search',
-                value: currentValue
-            });
-            keyboard.create();
-            keyboard.listener.follow('change', function(event) {
-                currentValue = event.value;
-                $('#bookmark_input_display').text(event.value || placeholder);
-            });
-            keyboard.listener.follow('enter', function(event) {
-                currentValue = event.value;
-                $('#bookmark_ok_btn').trigger('click');
-            });
-            keyboard.toggle();
-        } else {
-            // Fallback для браузера
-            var result = prompt(title, placeholder);
-            if (result !== null) {
-                currentValue = result;
-                $('#bookmark_ok_btn').trigger('click');
+    function showInputDialog(title, placeholder, callback) {
+        // Пытаемся использовать Lampa.Input
+        if (typeof Lampa !== 'undefined' && Lampa.Input && Lampa.Input.show) {
+            try {
+                Lampa.Input.show({
+                    title: title,
+                    placeholder: placeholder,
+                    value: placeholder || '',
+                    onBack: function() {
+                        console.log('[SaveFilter] Отмена ввода');
+                    },
+                    onEnter: function(value) {
+                        if (value && value.trim()) {
+                            callback(value.trim());
+                        } else {
+                            showMsg('Название не может быть пустым');
+                            showInputDialog(title, placeholder, callback);
+                        }
+                    }
+                });
                 return;
+            } catch(e) {
+                console.log('[SaveFilter] Lampa.Input error:', e);
             }
         }
         
-        // Обработчик OK
-        $('#bookmark_ok_btn').off('click').on('click', function() {
-            var value = currentValue.trim();
-            if (value) {
-                $('#bookmark_keyboard_dialog, #bookmark_overlay').remove();
-                if (currentCallback) {
-                    currentCallback(value);
-                    currentCallback = null;
-                }
-            } else {
-                showMsg('Название не может быть пустым');
-            }
-        });
-        
-        // Обработчик Cancel
-        $('#bookmark_cancel_btn, #bookmark_overlay').off('click').on('click', function() {
-            $('#bookmark_keyboard_dialog, #bookmark_overlay').remove();
-            if (typeof Lampa !== 'undefined' && Lampa.Keyboard) {
-                Lampa.Keyboard.close();
-            }
-            currentCallback = null;
-        });
+        // Fallback: используем стандартный prompt
+        var result = prompt(title, placeholder);
+        if (result !== null && result.trim()) {
+            callback(result.trim());
+        } else if (result !== null) {
+            showMsg('Название не может быть пустым');
+            showInputDialog(title, placeholder, callback);
+        }
     }
 
     // ==================== ОПРЕДЕЛЕНИЕ ТИПА КОНТЕНТА ====================
@@ -321,7 +222,7 @@
             onSelect: function(item) {
                 if (item.value === 'cancel') return;
                 if (item.value === 'custom') {
-                    showKeyboardDialog(title, suggestions[0] || 'Моя закладка', callback);
+                    showInputDialog(title, suggestions[0] || 'Моя закладка', callback);
                 } else if (item.value !== 'separator') {
                     callback(item.value);
                 }
