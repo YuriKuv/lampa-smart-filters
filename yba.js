@@ -97,7 +97,6 @@
         var dialog = $('#custom_input_dialog');
         var overlay = $('#custom_input_overlay');
         
-        // Предотвращаем всплытие
         dialog.on('click', function(e) {
             e.stopPropagation();
         });
@@ -107,12 +106,10 @@
             overlay.remove();
         });
         
-        // Фокус на поле
         setTimeout(function() {
             inputField.focus();
         }, 200);
         
-        // Обработчик OK
         $('#custom_input_ok').on('click', function() {
             var value = inputField.val().trim();
             if (value) {
@@ -125,13 +122,11 @@
             }
         });
         
-        // Обработчик Cancel
         $('#custom_input_cancel').on('click', function() {
             dialog.remove();
             overlay.remove();
         });
         
-        // Enter
         inputField.on('keypress', function(e) {
             if (e.which === 13) {
                 $('#custom_input_ok').trigger('click');
@@ -139,184 +134,10 @@
         });
     }
 
-    // ==================== ОПРЕДЕЛЕНИЕ ТИПА КОНТЕНТА ====================
+    // ==================== ДИАЛОГ ВВОДА НАЗВАНИЯ ====================
     
-    function getContentType(activity) {
-        if (activity.component === 'tv') return 'сериалы';
-        if (activity.component === 'cartoon') return 'мультфильмы';
-        if (activity.component === 'anime') return 'аниме';
-        if (activity.url && activity.url.indexOf('discover/tv') !== -1) return 'сериалы';
-        if (activity.genres === 16) return 'мультфильмы';
-        return 'фильмы';
-    }
-
-    // ==================== ПОЛУЧЕНИЕ ВСЕХ ПАРАМЕТРОВ ФИЛЬТРА ====================
-    
-    function getAllFilterParams(activity) {
-        var url = activity.url || '';
-        var params = {
-            genres: [],
-            year: null,
-            yearFrom: null,
-            yearTo: null,
-            language: null
-        };
-        
-        if (activity.genres) {
-            params.genres = Array.isArray(activity.genres) ? activity.genres : [activity.genres];
-        }
-        var genreMatch = url.match(/with_genres=([\d,]+)/);
-        if (genreMatch) {
-            var ids = genreMatch[1].split(',').map(Number);
-            for (var i = 0; i < ids.length; i++) {
-                if (params.genres.indexOf(ids[i]) === -1) params.genres.push(ids[i]);
-            }
-        }
-        
-        var yearMatch = url.match(/(?:primary_release_year|air_date|first_air_date)[=:](\d{4})/);
-        if (yearMatch) params.year = yearMatch[1];
-        
-        var yearFromMatch = url.match(/(?:primary_release_date|first_air_date)\.gte=(\d{4})/);
-        var yearToMatch = url.match(/(?:primary_release_date|first_air_date)\.lte=(\d{4})/);
-        if (yearFromMatch && yearToMatch) {
-            params.yearFrom = yearFromMatch[1];
-            params.yearTo = yearToMatch[1];
-        }
-        
-        var langMatch = url.match(/with_original_language=([a-z]+)/);
-        if (langMatch) params.language = langMatch[1];
-        
-        return params;
-    }
-    
-    function getGenreNames(genreIds) {
-        var genreMap = {
-            28: 'Боевики', 12: 'Приключения', 16: 'Мультфильмы',
-            35: 'Комедии', 80: 'Криминал', 99: 'Документальные',
-            18: 'Драмы', 10751: 'Семейные', 14: 'Фэнтези',
-            36: 'Исторические', 27: 'Ужасы', 10402: 'Музыкальные',
-            9648: 'Детективы', 10749: 'Мелодрамы', 878: 'Фантастика',
-            10770: 'ТВ фильмы', 53: 'Триллеры', 10752: 'Военные', 37: 'Вестерны'
-        };
-        if (!genreIds || genreIds.length === 0) return [];
-        var names = [];
-        for (var i = 0; i < genreIds.length; i++) {
-            if (genreMap[genreIds[i]]) names.push(genreMap[genreIds[i]]);
-        }
-        return names;
-    }
-    
-    function getLanguageName(code) {
-        var langMap = {
-            'ru': 'Русские', 'en': 'Английские', 'ja': 'Японские',
-            'zh': 'Китайские', 'ko': 'Корейские', 'fr': 'Французские',
-            'de': 'Немецкие', 'es': 'Испанские', 'it': 'Итальянские'
-        };
-        return langMap[code] || null;
-    }
-
-    // ==================== ГЕНЕРАЦИЯ НАЗВАНИЙ ====================
-    
-    function generateAllNames(activity) {
-        var type = getContentType(activity);
-        var params = getAllFilterParams(activity);
-        var genreNames = getGenreNames(params.genres);
-        var languageName = getLanguageName(params.language);
-        var typeCapitalized = type.charAt(0).toUpperCase() + type.slice(1);
-        
-        var names = [];
-        
-        if (activity.title && activity.title !== 'Фильмы - TMDB' && activity.title !== 'Сериалы - TMDB') {
-            var sectionName = activity.title.replace(' - TMDB', '');
-            names.push(sectionName);
-        }
-        
-        if (genreNames.length === 1) {
-            names.push(genreNames[0]);
-            names.push(genreNames[0] + ' ' + type);
-            names.push('Лучшие ' + genreNames[0].toLowerCase());
-            names.push('Популярные ' + genreNames[0].toLowerCase());
-        } else if (genreNames.length >= 2) {
-            names.push(genreNames.join(', '));
-            names.push(genreNames.join(', ') + ' ' + type);
-        }
-        
-        if (params.year) {
-            names.push(typeCapitalized + ' ' + params.year);
-            names.push('Новинки ' + params.year);
-            if (genreNames.length === 1) {
-                names.push(genreNames[0] + ' ' + params.year);
-            }
-        }
-        
-        if (params.yearFrom && params.yearTo) {
-            var range = params.yearFrom + '–' + params.yearTo;
-            names.push(typeCapitalized + ' ' + range);
-            if (genreNames.length === 1) {
-                names.push(genreNames[0] + ' ' + range);
-            }
-        }
-        
-        if (languageName) {
-            names.push(languageName + ' ' + typeCapitalized);
-            names.push(languageName);
-            if (params.year) {
-                names.push(languageName + ' ' + typeCapitalized + ' ' + params.year);
-            }
-            if (genreNames.length === 1) {
-                names.push(languageName + ' ' + genreNames[0]);
-            }
-        }
-        
-        if (params.year && languageName && genreNames.length === 1) {
-            names.push(languageName + ' ' + genreNames[0] + ' ' + params.year);
-        }
-        
-        if (activity.url) {
-            if (activity.url.indexOf('now_playing') !== -1) names.push('Сейчас в кино');
-            if (activity.url.indexOf('popular') !== -1) names.push('Популярные ' + type);
-            if (activity.url.indexOf('top_rated') !== -1) names.push('Лучшие ' + type);
-        }
-        
-        var uniqueNames = [];
-        for (var i = 0; i < names.length; i++) {
-            if (uniqueNames.indexOf(names[i]) === -1 && names[i] && names[i].length < 60) {
-                uniqueNames.push(names[i]);
-            }
-        }
-        
-        return uniqueNames.slice(0, 12);
-    }
-
-    // ==================== ДИАЛОГ ВЫБОРА ====================
-    
-    function showSelectionDialog(title, activity, callback) {
-        var suggestions = generateAllNames(activity);
-        var items = [];
-        
-        for (var i = 0; i < suggestions.length; i++) {
-            items.push({ title: '📌 ' + suggestions[i], value: suggestions[i] });
-        }
-        
-        items.push({ title: '──────────', value: 'separator', disabled: true });
-        items.push({ title: '✏️ Ввести своё название', value: 'custom' });
-        items.push({ title: '❌ Отмена', value: 'cancel' });
-        
-        Lampa.Select.show({
-            title: title,
-            items: items,
-            onSelect: function(item) {
-                if (item.value === 'cancel') return;
-                if (item.value === 'custom') {
-                    showCustomInputDialog(title, suggestions[0] || 'Моя закладка', callback);
-                } else if (item.value !== 'separator') {
-                    callback(item.value);
-                }
-            },
-            onBack: function() {
-                console.log('[SaveFilter] Диалог закрыт');
-            }
-        });
+    function showInputDialog(title, defaultName, callback) {
+        showCustomInputDialog(title, defaultName, callback);
     }
 
     // ==================== ПРОВЕРКА КОРНЕВОГО РАЗДЕЛА ====================
@@ -340,7 +161,7 @@
         return false;
     }
 
-    // ==================== НОРМАЛИЗАЦИЯ ====================
+    // ==================== НОРМАЛИЗАЦИЯ URL ====================
     
     function normalizeUrl(activity) {
         if (activity.url && activity.url.indexOf('discover/') === 0) return activity.url;
@@ -377,7 +198,9 @@
             return;
         }
         
-        showSelectionDialog('Сохранить закладку', activity, function(name) {
+        var defaultName = (activity.title || 'Моя закладка').replace(' - TMDB', '');
+        
+        showInputDialog('Сохранить закладку', defaultName, function(name) {
             var newFilter = {
                 id: Date.now(),
                 name: name,
@@ -713,7 +536,6 @@
         applyButtonPositions();
         updateFiltersMenu();
         addSettings();
-        showMsg('Плагин загружен. Настройки в разделе "Интерфейс"');
     }
     
     if (typeof Lampa !== 'undefined') {
