@@ -15,42 +15,106 @@
         }
     }
 
-    // ==================== УНИВЕРСАЛЬНЫЙ ВВОД ====================
+    // ==================== КАСТОМНЫЙ ДИАЛОГ С ПОЛЕМ ВВОДА ====================
     
-    function showInputDialog(title, placeholder, callback) {
-        // Пытаемся использовать Lampa.Input
-        if (typeof Lampa !== 'undefined' && Lampa.Input && Lampa.Input.show) {
-            try {
-                Lampa.Input.show({
-                    title: title,
-                    placeholder: placeholder,
-                    value: placeholder || '',
-                    onBack: function() {
-                        console.log('[SaveFilter] Отмена ввода');
-                    },
-                    onEnter: function(value) {
-                        if (value && value.trim()) {
-                            callback(value.trim());
-                        } else {
-                            showMsg('Название не может быть пустым');
-                            showInputDialog(title, placeholder, callback);
-                        }
-                    }
-                });
-                return;
-            } catch(e) {
-                console.log('[SaveFilter] Lampa.Input error:', e);
-            }
+    function showCustomInputDialog(title, placeholder, callback) {
+        // Создаем HTML диалог
+        var dialogHtml = `
+            <div id="custom_input_dialog" style="
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 85%;
+                max-width: 500px;
+                background: #1a1a2e;
+                border-radius: 12px;
+                z-index: 100000;
+                color: white;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+                padding: 20px;
+            ">
+                <div style="font-size: 20px; margin-bottom: 15px; text-align: center;">${title}</div>
+                <input type="text" id="custom_input_field" placeholder="${placeholder}" value="${placeholder}" style="
+                    width: 100%;
+                    padding: 12px;
+                    background: #2a2a3e;
+                    color: white;
+                    border: 2px solid #4CAF50;
+                    border-radius: 8px;
+                    font-size: 16px;
+                    margin-bottom: 15px;
+                    box-sizing: border-box;
+                ">
+                <div style="display: flex; gap: 10px;">
+                    <div id="custom_input_ok" style="
+                        flex: 1;
+                        padding: 10px;
+                        text-align: center;
+                        background: #4CAF50;
+                        border-radius: 6px;
+                        cursor: pointer;
+                    ">✅ Сохранить</div>
+                    <div id="custom_input_cancel" style="
+                        flex: 1;
+                        padding: 10px;
+                        text-align: center;
+                        background: #555;
+                        border-radius: 6px;
+                        cursor: pointer;
+                    ">❌ Отмена</div>
+                </div>
+            </div>
+            <div id="custom_input_overlay" style="
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.7);
+                z-index: 99999;
+            "></div>
+        `;
+        
+        $('body').append(dialogHtml);
+        
+        // Фокусируемся на поле ввода
+        var inputField = $('#custom_input_field');
+        inputField.focus();
+        
+        // На Android TV принудительно вызываем клавиатуру
+        if (Lampa.Platform && Lampa.Platform.is('android')) {
+            inputField.click();
+            // Дополнительная попытка вызвать клавиатуру
+            setTimeout(function() {
+                inputField.focus();
+                inputField.click();
+            }, 100);
         }
         
-        // Fallback: используем стандартный prompt
-        var result = prompt(title, placeholder);
-        if (result !== null && result.trim()) {
-            callback(result.trim());
-        } else if (result !== null) {
-            showMsg('Название не может быть пустым');
-            showInputDialog(title, placeholder, callback);
-        }
+        // Обработчик OK
+        $('#custom_input_ok').on('click', function() {
+            var value = inputField.val().trim();
+            if (value) {
+                $('#custom_input_dialog, #custom_input_overlay').remove();
+                callback(value);
+            } else {
+                showMsg('Название не может быть пустым');
+                inputField.focus();
+            }
+        });
+        
+        // Обработчик Cancel
+        $('#custom_input_cancel, #custom_input_overlay').on('click', function() {
+            $('#custom_input_dialog, #custom_input_overlay').remove();
+        });
+        
+        // Обработка нажатия Enter
+        inputField.on('keypress', function(e) {
+            if (e.which === 13) {
+                $('#custom_input_ok').trigger('click');
+            }
+        });
     }
 
     // ==================== ОПРЕДЕЛЕНИЕ ТИПА КОНТЕНТА ====================
@@ -222,7 +286,7 @@
             onSelect: function(item) {
                 if (item.value === 'cancel') return;
                 if (item.value === 'custom') {
-                    showInputDialog(title, suggestions[0] || 'Моя закладка', callback);
+                    showCustomInputDialog(title, suggestions[0] || 'Моя закладка', callback);
                 } else if (item.value !== 'separator') {
                     callback(item.value);
                 }
