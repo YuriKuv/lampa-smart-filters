@@ -8,104 +8,43 @@
     var POSITION_CLEAR_KEY = 'bookmark_clear_position';
     
     var isSaving = false;
-    var pendingCallback = null;
-    var pendingTitle = null;
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
             Lampa.Noty.show(text);
-        } else {
-            console.log('[SaveFilter]', text);
         }
     }
 
-    // ==================== ДИАЛОГ ВВОДА ДЛЯ ANDROID TV ====================
-    
-    function showAndroidInputDialog(title, defaultValue, callback) {
-        pendingCallback = callback;
-        pendingTitle = title;
-        
-        // Сначала показываем диалог выбора действия
-        Lampa.Select.show({
-            title: title,
-            items: [
-                { title: '✏️ Ввести название: ' + defaultValue, value: 'input', isInput: true },
-                { title: '✅ Сохранить', value: 'save' },
-                { title: '❌ Отмена', value: 'cancel' }
-            ],
-            onSelect: function(item) {
-                if (item.value === 'cancel') {
-                    pendingCallback = null;
-                    return;
-                }
-                if (item.value === 'save') {
-                    if (defaultValue && defaultValue.trim()) {
-                        if (pendingCallback) {
-                            pendingCallback(defaultValue.trim());
-                            pendingCallback = null;
-                        }
-                    } else {
-                        showMsg('Название не может быть пустым');
-                        showAndroidInputDialog(title, defaultValue, callback);
-                    }
-                }
-                if (item.value === 'input') {
-                    // Открываем клавиатуру для ввода текста
-                    if (typeof Lampa !== 'undefined' && Lampa.Keyboard) {
-                        Lampa.Keyboard.show({
-                            title: title,
-                            value: defaultValue,
-                            onKey: function(value) {
-                                defaultValue = value;
-                                // Обновляем пункт меню
-                                var newItems = [
-                                    { title: '✏️ Ввести название: ' + (value || defaultValue), value: 'input', isInput: true },
-                                    { title: '✅ Сохранить', value: 'save' },
-                                    { title: '❌ Отмена', value: 'cancel' }
-                                ];
-                                Lampa.Select.update(newItems);
-                            },
-                            onEnter: function(value) {
-                                defaultValue = value;
-                                if (pendingCallback) {
-                                    pendingCallback(value.trim());
-                                    pendingCallback = null;
-                                }
-                            },
-                            onBack: function() {
-                                // Возвращаемся к диалогу
-                            }
-                        });
-                    }
-                }
-            },
-            onBack: function() {
-                pendingCallback = null;
-            }
-        });
-    }
-
-    // ==================== ДИАЛОГ ДЛЯ БРАУЗЕРА ====================
-    
-    function showBrowserInputDialog(title, defaultValue, callback) {
-        var result = prompt(title, defaultValue);
-        if (result !== null && result.trim()) {
-            callback(result.trim());
-        } else if (result !== null) {
-            showMsg('Название не может быть пустым');
-            showBrowserInputDialog(title, defaultValue, callback);
-        }
-    }
-
-    // ==================== УНИВЕРСАЛЬНЫЙ ДИАЛОГ ====================
+    // ==================== ДИАЛОГ ВВОДА (НАТИВНЫЙ) ====================
     
     function showInputDialog(title, defaultValue, callback) {
-        var isAndroid = Lampa.Platform && Lampa.Platform.is('android');
-        
-        if (isAndroid) {
-            showAndroidInputDialog(title, defaultValue, callback);
+        // Используем нативный Lampa.Input
+        if (typeof Lampa !== 'undefined' && Lampa.Input) {
+            Lampa.Input.show({
+                title: title,
+                placeholder: defaultValue,
+                value: defaultValue,
+                onBack: function() {
+                    console.log('[SaveFilter] Отмена');
+                },
+                onEnter: function(value) {
+                    if (value && value.trim()) {
+                        callback(value.trim());
+                    } else {
+                        showMsg('Название не может быть пустым');
+                        showInputDialog(title, defaultValue, callback);
+                    }
+                }
+            });
         } else {
-            showBrowserInputDialog(title, defaultValue, callback);
+            // Fallback для старых версий
+            var result = prompt(title, defaultValue);
+            if (result !== null && result.trim()) {
+                callback(result.trim());
+            } else if (result !== null) {
+                showMsg('Название не может быть пустым');
+                showInputDialog(title, defaultValue, callback);
+            }
         }
     }
 
