@@ -6,6 +6,8 @@
     var STORAGE_KEY = 'saved_filters_list';
     var POSITION_SAVE_KEY = 'bookmark_save_position';
     var POSITION_CLEAR_KEY = 'bookmark_clear_position';
+    
+    var isDialogOpen = false;
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
@@ -15,27 +17,33 @@
         }
     }
 
-    // ==================== КАСТОМНЫЙ ДИАЛОГ ТОЛЬКО ДЛЯ ANDROID TV ====================
+    // ==================== ДИАЛОГ ВВОДА ====================
     
-    function showCustomInputDialog(title, placeholder, callback) {
-        // Определяем платформу
+    function showInputDialog(title, defaultValue, callback) {
+        // Предотвращаем двойное открытие
+        if (isDialogOpen) return;
+        isDialogOpen = true;
+        
         var isAndroid = Lampa.Platform && Lampa.Platform.is('android');
         
         // Для браузера используем стандартный prompt
         if (!isAndroid) {
-            var result = prompt(title, placeholder);
+            var result = prompt(title, defaultValue);
+            isDialogOpen = false;
             if (result !== null && result.trim()) {
                 callback(result.trim());
             } else if (result !== null) {
                 showMsg('Название не может быть пустым');
-                showCustomInputDialog(title, placeholder, callback);
+                showInputDialog(title, defaultValue, callback);
             }
             return;
         }
         
-        // Для Android TV создаем кастомный диалог
+        // Для Android TV создаем кастомный диалог с событиями Lampa
+        var dialogId = 'custom_input_dialog_' + Date.now();
+        
         var dialogHtml = `
-            <div id="custom_input_dialog" style="
+            <div id="${dialogId}" style="
                 position: fixed;
                 top: 50%;
                 left: 50%;
@@ -50,7 +58,7 @@
                 padding: 20px;
             ">
                 <div style="font-size: 20px; margin-bottom: 15px; text-align: center;">${title}</div>
-                <input type="text" id="custom_input_field" placeholder="${placeholder}" value="${placeholder}" style="
+                <input type="text" id="input_field_${dialogId}" placeholder="${defaultValue}" value="${defaultValue}" style="
                     width: 100%;
                     padding: 12px;
                     background: #2a2a3e;
@@ -62,25 +70,23 @@
                     box-sizing: border-box;
                 ">
                 <div style="display: flex; gap: 10px;">
-                    <div id="custom_input_ok" style="
+                    <div id="ok_btn_${dialogId}" class="selector" style="
                         flex: 1;
                         padding: 10px;
                         text-align: center;
                         background: #4CAF50;
                         border-radius: 6px;
-                        cursor: pointer;
                     ">✅ Сохранить</div>
-                    <div id="custom_input_cancel" style="
+                    <div id="cancel_btn_${dialogId}" class="selector" style="
                         flex: 1;
                         padding: 10px;
                         text-align: center;
                         background: #555;
                         border-radius: 6px;
-                        cursor: pointer;
                     ">❌ Отмена</div>
                 </div>
             </div>
-            <div id="custom_input_overlay" style="
+            <div id="overlay_${dialogId}" style="
                 position: fixed;
                 top: 0;
                 left: 0;
@@ -93,28 +99,27 @@
         
         $('body').append(dialogHtml);
         
-        var inputField = $('#custom_input_field');
-        var dialog = $('#custom_input_dialog');
-        var overlay = $('#custom_input_overlay');
+        var dialog = $('#' + dialogId);
+        var overlay = $('#overlay_' + dialogId);
+        var inputField = $('#input_field_' + dialogId);
         
-        dialog.on('click', function(e) {
-            e.stopPropagation();
-        });
-        
-        overlay.on('click', function() {
-            dialog.remove();
-            overlay.remove();
-        });
-        
+        // Фокус на поле
         setTimeout(function() {
             inputField.focus();
         }, 200);
         
-        $('#custom_input_ok').on('click', function() {
+        // Функция закрытия
+        function closeDialog() {
+            dialog.remove();
+            overlay.remove();
+            isDialogOpen = false;
+        }
+        
+        // Обработчик сохранения (событие hover:enter для пульта)
+        $('#ok_btn_' + dialogId).on('hover:enter', function() {
             var value = inputField.val().trim();
             if (value) {
-                dialog.remove();
-                overlay.remove();
+                closeDialog();
                 callback(value);
             } else {
                 showMsg('Название не может быть пустым');
@@ -122,22 +127,44 @@
             }
         });
         
-        $('#custom_input_cancel').on('click', function() {
-            dialog.remove();
-            overlay.remove();
+        // Обработчик отмены
+        $('#cancel_btn_' + dialogId).on('hover:enter', function() {
+            closeDialog();
         });
         
-        inputField.on('keypress', function(e) {
-            if (e.which === 13) {
-                $('#custom_input_ok').trigger('click');
+        // Клик для мыши
+        $('#ok_btn_' + dialogId).on('click', function() {
+            var value = inputField.val().trim();
+            if (value) {
+                closeDialog();
+                callback(value);
+            } else {
+                showMsg('Название не может быть пустым');
+                inputField.focus();
             }
         });
-    }
-
-    // ==================== ДИАЛОГ ВВОДА НАЗВАНИЯ ====================
-    
-    function showInputDialog(title, defaultName, callback) {
-        showCustomInputDialog(title, defaultName, callback);
+        
+        $('#cancel_btn_' + dialogId).on('click', function() {
+            closeDialog();
+        });
+        
+        // Enter на поле ввода
+        inputField.on('keypress', function(e) {
+            if (e.which === 13) {
+                var value = inputField.val().trim();
+                if (value) {
+                    closeDialog();
+                    callback(value);
+                } else {
+                    showMsg('Название не может быть пустым');
+                }
+            }
+        });
+        
+        // Клик по оверлею
+        overlay.on('click', function() {
+            closeDialog();
+        });
     }
 
     // ==================== ПРОВЕРКА КОРНЕВОГО РАЗДЕЛА ====================
