@@ -15,14 +15,25 @@
         }
     }
 
-    // ==================== КАСТОМНЫЙ ДИАЛОГ С ПОЛЕМ ВВОДА ====================
+    // ==================== КАСТОМНЫЙ ДИАЛОГ ТОЛЬКО ДЛЯ ANDROID TV ====================
     
     function showCustomInputDialog(title, placeholder, callback) {
         // Определяем платформу
         var isAndroid = Lampa.Platform && Lampa.Platform.is('android');
-        var isBrowser = !isAndroid && (typeof window !== 'undefined' && window.navigator && window.navigator.userAgent && !window.navigator.userAgent.match(/(Android|webOS|iPhone|iPad|iPod|BlackBerry|Windows Phone)/i));
         
-        // Создаем HTML диалог
+        // Для браузера используем стандартный prompt
+        if (!isAndroid) {
+            var result = prompt(title, placeholder);
+            if (result !== null && result.trim()) {
+                callback(result.trim());
+            } else if (result !== null) {
+                showMsg('Название не может быть пустым');
+                showCustomInputDialog(title, placeholder, callback);
+            }
+            return;
+        }
+        
+        // Для Android TV создаем кастомный диалог
         var dialogHtml = `
             <div id="custom_input_dialog" style="
                 position: fixed;
@@ -86,7 +97,7 @@
         var dialog = $('#custom_input_dialog');
         var overlay = $('#custom_input_overlay');
         
-        // Предотвращаем всплытие событий для диалога
+        // Предотвращаем всплытие
         dialog.on('click', function(e) {
             e.stopPropagation();
         });
@@ -96,65 +107,35 @@
             overlay.remove();
         });
         
-        // Функция для установки фокуса
-        function setFocus() {
-            // На время фокуса отключаем события Lampa
-            if (typeof Lampa !== 'undefined' && Lampa.Controller) {
-                Lampa.Controller.enabled().disable = true;
-            }
-            
+        // Фокус на поле
+        setTimeout(function() {
             inputField.focus();
-            
-            // Для браузера выделяем текст
-            if (isBrowser) {
-                inputField.select();
-            }
-        }
-        
-        // Устанавливаем фокус с задержкой
-        setTimeout(setFocus, 200);
+        }, 200);
         
         // Обработчик OK
         $('#custom_input_ok').on('click', function() {
             var value = inputField.val().trim();
             if (value) {
-                // Восстанавливаем контроллер
-                if (typeof Lampa !== 'undefined' && Lampa.Controller) {
-                    Lampa.Controller.enabled().disable = false;
-                }
                 dialog.remove();
                 overlay.remove();
                 callback(value);
             } else {
                 showMsg('Название не может быть пустым');
-                setFocus();
+                inputField.focus();
             }
         });
         
         // Обработчик Cancel
         $('#custom_input_cancel').on('click', function() {
-            if (typeof Lampa !== 'undefined' && Lampa.Controller) {
-                Lampa.Controller.enabled().disable = false;
-            }
             dialog.remove();
             overlay.remove();
         });
         
-        // Обработка нажатия Enter
+        // Enter
         inputField.on('keypress', function(e) {
             if (e.which === 13) {
                 $('#custom_input_ok').trigger('click');
             }
-        });
-        
-        // Предотвращаем потерю фокуса при клике вне поля
-        inputField.on('blur', function() {
-            // Небольшая задержка, чтобы клик по кнопке успел сработать
-            setTimeout(function() {
-                if (dialog.is(':visible')) {
-                    setFocus();
-                }
-            }, 100);
         });
     }
 
