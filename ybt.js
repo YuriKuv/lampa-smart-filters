@@ -9,6 +9,7 @@
     
     var isDialogOpen = false;
     var isSaving = false;
+    var isProcessing = false;  // Флаг для предотвращения двойного срабатывания
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
@@ -18,47 +19,12 @@
         }
     }
 
-    // ==================== СИНХРОНИЗАЦИЯ ====================
-    
-    function registerSyncKey() {
-        if (typeof Lampa !== 'undefined' && Lampa.Storage) {
-            Lampa.Storage.set(STORAGE_KEY + '_sync', true);
-            
-            if (Lampa.Storage.sync) {
-                Lampa.Storage.sync(STORAGE_KEY);
-                console.log('[SaveFilter] Ключ зарегистрирован для синхронизации CUB');
-            }
-            
-            var syncedData = Lampa.Storage.get(STORAGE_KEY, null);
-            if (syncedData && syncedData.length > 0) {
-                console.log('[SaveFilter] Загружено облачных закладок:', syncedData.length);
-            }
-        }
-    }
-    
-    function syncBookmarks() {
-        if (typeof Lampa !== 'undefined' && Lampa.Storage) {
-            var currentData = Lampa.Storage.get(STORAGE_KEY, []);
-            Lampa.Storage.set(STORAGE_KEY, currentData);
-            if (Lampa.Storage.sync) {
-                Lampa.Storage.sync(STORAGE_KEY);
-            }
-        }
-    }
-    
-    function saveAndSync(filters) {
-        Lampa.Storage.set(STORAGE_KEY, filters);
-        if (Lampa.Storage.sync) {
-            Lampa.Storage.sync(STORAGE_KEY);
-        }
-        updateFiltersMenu();
-    }
-
     // ==================== ДИАЛОГ ВВОДА ====================
     
     function showInputDialog(title, defaultValue, callback) {
         if (isDialogOpen) return;
         isDialogOpen = true;
+        isProcessing = false;
         
         var isAndroid = Lampa.Platform && Lampa.Platform.is('android');
         
@@ -143,40 +109,60 @@
         }, 200);
         
         function closeDialog() {
+            if (isProcessing) return;
             dialog.remove();
             overlay.remove();
             isDialogOpen = false;
+            isProcessing = false;
         }
         
-        $('#ok_btn_' + dialogId).on('hover:enter', function() {
+        // Используем только одно событие для кнопки "Сохранить"
+        $('#ok_btn_' + dialogId).off().on('hover:enter', function(e) {
+            e.stopPropagation();
+            e.preventDefault();
+            
+            if (isProcessing) return;
+            isProcessing = true;
+            
             var value = inputField.val().trim();
             if (value) {
                 closeDialog();
                 callback(value);
             } else {
                 showMsg('Название не может быть пустым');
+                isProcessing = false;
                 inputField.focus();
             }
         });
         
-        $('#cancel_btn_' + dialogId).on('hover:enter', function() {
+        // Кнопка "Отмена"
+        $('#cancel_btn_' + dialogId).off().on('hover:enter', function(e) {
+            e.stopPropagation();
+            e.preventDefault();
+            if (isProcessing) return;
+            isProcessing = true;
             closeDialog();
         });
         
-        inputField.on('keypress', function(e) {
-            if (e.which === 13) {
-                var value = inputField.val().trim();
-                if (value) {
-                    closeDialog();
-                    callback(value);
-                } else {
-                    showMsg('Название не может быть пустым');
-                }
+        // Enter на поле ввода
+        inputField.off('keypress').on('keypress', function(e) {
+            if (e.which === 13 && !isProcessing) {
+                e.preventDefault();
+                $('#ok_btn_' + dialogId).trigger('hover:enter');
             }
         });
         
-        overlay.on('click', function() {
-            closeDialog();
+        // Клик по оверлею (только для мыши)
+        overlay.off('click').on('click', function() {
+            if (!isProcessing) {
+                isProcessing = true;
+                closeDialog();
+            }
+        });
+        
+        // Защита от двойного закрытия
+        dialog.on('click', function(e) {
+            e.stopPropagation();
         });
     }
 
@@ -267,7 +253,8 @@
                 return;
             }
             filters.push(newFilter);
-            saveAndSync(filters);
+            Lampa.Storage.set(STORAGE_KEY, filters);
+            updateFiltersMenu();
             showMsg('Закладка "' + name + '" сохранена');
             isSaving = false;
         });
@@ -301,8 +288,16 @@
                 if (item.value === 'yes') {
                     var filters = Lampa.Storage.get(STORAGE_KEY, []);
                     var newFilters = filters.filter(function(f) { return f.id != filterId; });
-                    saveAndSync(newFilters);
+                    Lampa.Storage.set(STORAGE_KEY, newFilters);
+                    updateFiltersMenu();
                     showMsg('Закладка "' + filterName + '" удалена');
+                    
+                    // Восстанавливаем фокус после удаления
+                    setTimeout(function() {
+                        if (Lampa.Controller && Lampa.Controller.enabled) {
+                            Lampa.Controller.toggle('content');
+                        }
+                    }, 100);
                 }
             }
         });
@@ -323,8 +318,16 @@
             ],
             onSelect: function(item) {
                 if (item.value === 'yes') {
-                    saveAndSync([]);
+                    Lampa.Storage.set(STORAGE_KEY, []);
+                    updateFiltersMenu();
                     showMsg('Все закладки удалены');
+                    
+                    // Восстанавливаем фокус после удаления
+                    setTimeout(function() {
+                        if (Lampa.Controller && Lampa.Controller.enabled) {
+                            Lampa.Controller.toggle('content');
+                        }
+                    }, 100);
                 }
             }
         });
@@ -349,7 +352,8 @@
             </li>
         `);
         
-        saveButton.on('hover:enter', function() {
+        saveButton.on('hover:enter', function(e) {
+            e.stopPropagation();
             saveCurrentFilter();
         });
         
@@ -373,7 +377,8 @@
             </li>
         `);
         
-        clearButton.on('hover:enter', function() {
+        clearButton.on('hover:enter', function(e) {
+            e.stopPropagation();
             deleteAllFilters();
         });
         
@@ -398,7 +403,8 @@
             </div>
         `);
         
-        bookmarkBtn.on('hover:enter', function() {
+        bookmarkBtn.on('hover:enter', function(e) {
+            e.stopPropagation();
             saveCurrentFilter();
         });
         
@@ -416,7 +422,8 @@
             </div>
         `);
         
-        clearBtn.on('hover:enter', function() {
+        clearBtn.on('hover:enter', function(e) {
+            e.stopPropagation();
             deleteAllFilters();
         });
         
@@ -458,6 +465,7 @@
     // ==================== ОБНОВЛЕНИЕ МЕНЮ ЗАКЛАДОК ====================
     
     function updateFiltersMenu() {
+        console.log('[SaveFilter] Обновление меню закладок');
         $('.submenu-item').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
@@ -485,31 +493,22 @@
                 </li>
             `);
             
+            // Открытие по короткому нажатию
             item.on('hover:enter', function(e) {
                 e.stopPropagation();
                 openFilter(filter);
             });
             
+            // Долгое нажатие для удаления
             item.on('hover:long', function(e) {
                 e.stopPropagation();
                 deleteFilter(filter.id, filter.name);
             });
             
-            var holdTimer = null;
-            item.on('mousedown', function() {
-                holdTimer = setTimeout(function() {
-                    deleteFilter(filter.id, filter.name);
-                    holdTimer = null;
-                }, 800);
-            }).on('mouseup mouseleave', function() {
-                if (holdTimer) {
-                    clearTimeout(holdTimer);
-                    holdTimer = null;
-                }
-            });
-            
             mainList.append(item);
         });
+        
+        console.log('[SaveFilter] Меню обновлено, закладок:', filters.length);
     }
 
     // ==================== НАСТРОЙКИ ====================
@@ -562,11 +561,9 @@
     
     function init() {
         console.log('[SaveFilter] Инициализация');
-        registerSyncKey();
         applyButtonPositions();
         updateFiltersMenu();
         addSettings();
-        syncBookmarks();
     }
     
     if (typeof Lampa !== 'undefined') {
