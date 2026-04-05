@@ -9,7 +9,6 @@
     
     var isDialogOpen = false;
     var isSaving = false;
-    var isProcessing = false;  // Флаг для предотвращения двойного срабатывания
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
@@ -19,151 +18,99 @@
         }
     }
 
-    // ==================== ДИАЛОГ ВВОДА ====================
+    // ==================== ДИАЛОГ ВВОДА ДЛЯ ANDROID TV ====================
     
-    function showInputDialog(title, defaultValue, callback) {
+    function showAndroidInputDialog(title, defaultValue, callback) {
         if (isDialogOpen) return;
         isDialogOpen = true;
-        isProcessing = false;
         
+        var inputValue = defaultValue || '';
+        
+        // Создаем диалог через Lampa.Select
+        var items = [
+            { title: '✏️ Название: ' + inputValue, value: 'input', isInput: true },
+            { title: '✅ Сохранить', value: 'save' },
+            { title: '❌ Отмена', value: 'cancel' }
+        ];
+        
+        Lampa.Select.show({
+            title: title,
+            items: items,
+            onSelect: function(item) {
+                if (item.value === 'cancel') {
+                    isDialogOpen = false;
+                    return;
+                }
+                if (item.value === 'save') {
+                    if (inputValue && inputValue.trim()) {
+                        isDialogOpen = false;
+                        callback(inputValue.trim());
+                    } else {
+                        showMsg('Название не может быть пустым');
+                        isDialogOpen = false;
+                        showAndroidInputDialog(title, defaultValue, callback);
+                    }
+                }
+                if (item.value === 'input') {
+                    // Открываем клавиатуру для ввода
+                    if (Lampa.Keyboard) {
+                        Lampa.Keyboard.show({
+                            title: title,
+                            value: inputValue,
+                            onKey: function(value) {
+                                inputValue = value;
+                                // Обновляем пункт меню с новым названием
+                                var newItems = [
+                                    { title: '✏️ Название: ' + (value || defaultValue), value: 'input', isInput: true },
+                                    { title: '✅ Сохранить', value: 'save' },
+                                    { title: '❌ Отмена', value: 'cancel' }
+                                ];
+                                Lampa.Select.update(newItems);
+                            },
+                            onEnter: function(value) {
+                                inputValue = value;
+                                isDialogOpen = false;
+                                if (value && value.trim()) {
+                                    callback(value.trim());
+                                } else {
+                                    showMsg('Название не может быть пустым');
+                                }
+                            },
+                            onBack: function() {
+                                // Возвращаемся к диалогу
+                            }
+                        });
+                    }
+                }
+            },
+            onBack: function() {
+                isDialogOpen = false;
+            }
+        });
+    }
+
+    // ==================== ДИАЛОГ ДЛЯ БРАУЗЕРА ====================
+    
+    function showBrowserInputDialog(title, defaultValue, callback) {
+        var result = prompt(title, defaultValue);
+        if (result !== null && result.trim()) {
+            callback(result.trim());
+        } else if (result !== null) {
+            showMsg('Название не может быть пустым');
+            showBrowserInputDialog(title, defaultValue, callback);
+        }
+    }
+
+    // ==================== УНИВЕРСАЛЬНЫЙ ДИАЛОГ ====================
+    
+    function showInputDialog(title, defaultValue, callback) {
         var isAndroid = Lampa.Platform && Lampa.Platform.is('android');
         
-        if (!isAndroid) {
-            var result = prompt(title, defaultValue);
-            isDialogOpen = false;
-            if (result !== null && result.trim()) {
-                callback(result.trim());
-            } else if (result !== null) {
-                showMsg('Название не может быть пустым');
-                isDialogOpen = false;
-                showInputDialog(title, defaultValue, callback);
-            }
-            return;
+        if (isAndroid) {
+            showAndroidInputDialog(title, defaultValue, callback);
+        } else {
+            showBrowserInputDialog(title, defaultValue, callback);
         }
-        
-        var dialogId = 'custom_input_dialog_' + Date.now();
-        
-        var dialogHtml = `
-            <div id="${dialogId}" style="
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                width: 85%;
-                max-width: 500px;
-                background: #1a1a2e;
-                border-radius: 12px;
-                z-index: 100000;
-                color: white;
-                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-                padding: 20px;
-            ">
-                <div style="font-size: 20px; margin-bottom: 15px; text-align: center;">${title}</div>
-                <input type="text" id="input_field_${dialogId}" placeholder="${defaultValue}" value="${defaultValue}" style="
-                    width: 100%;
-                    padding: 12px;
-                    background: #2a2a3e;
-                    color: white;
-                    border: 2px solid #4CAF50;
-                    border-radius: 8px;
-                    font-size: 16px;
-                    margin-bottom: 15px;
-                    box-sizing: border-box;
-                ">
-                <div style="display: flex; gap: 10px;">
-                    <div id="ok_btn_${dialogId}" class="selector" style="
-                        flex: 1;
-                        padding: 10px;
-                        text-align: center;
-                        background: #4CAF50;
-                        border-radius: 6px;
-                    ">✅ Сохранить</div>
-                    <div id="cancel_btn_${dialogId}" class="selector" style="
-                        flex: 1;
-                        padding: 10px;
-                        text-align: center;
-                        background: #555;
-                        border-radius: 6px;
-                    ">❌ Отмена</div>
-                </div>
-            </div>
-            <div id="overlay_${dialogId}" style="
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0,0,0,0.7);
-                z-index: 99999;
-            "></div>
-        `;
-        
-        $('body').append(dialogHtml);
-        
-        var dialog = $('#' + dialogId);
-        var overlay = $('#overlay_' + dialogId);
-        var inputField = $('#input_field_' + dialogId);
-        
-        setTimeout(function() {
-            inputField.focus();
-        }, 200);
-        
-        function closeDialog() {
-            if (isProcessing) return;
-            dialog.remove();
-            overlay.remove();
-            isDialogOpen = false;
-            isProcessing = false;
-        }
-        
-        // Используем только одно событие для кнопки "Сохранить"
-        $('#ok_btn_' + dialogId).off().on('hover:enter', function(e) {
-            e.stopPropagation();
-            e.preventDefault();
-            
-            if (isProcessing) return;
-            isProcessing = true;
-            
-            var value = inputField.val().trim();
-            if (value) {
-                closeDialog();
-                callback(value);
-            } else {
-                showMsg('Название не может быть пустым');
-                isProcessing = false;
-                inputField.focus();
-            }
-        });
-        
-        // Кнопка "Отмена"
-        $('#cancel_btn_' + dialogId).off().on('hover:enter', function(e) {
-            e.stopPropagation();
-            e.preventDefault();
-            if (isProcessing) return;
-            isProcessing = true;
-            closeDialog();
-        });
-        
-        // Enter на поле ввода
-        inputField.off('keypress').on('keypress', function(e) {
-            if (e.which === 13 && !isProcessing) {
-                e.preventDefault();
-                $('#ok_btn_' + dialogId).trigger('hover:enter');
-            }
-        });
-        
-        // Клик по оверлею (только для мыши)
-        overlay.off('click').on('click', function() {
-            if (!isProcessing) {
-                isProcessing = true;
-                closeDialog();
-            }
-        });
-        
-        // Защита от двойного закрытия
-        dialog.on('click', function(e) {
-            e.stopPropagation();
-        });
     }
 
     // ==================== ПРОВЕРКА КОРНЕВОГО РАЗДЕЛА ====================
@@ -291,13 +238,6 @@
                     Lampa.Storage.set(STORAGE_KEY, newFilters);
                     updateFiltersMenu();
                     showMsg('Закладка "' + filterName + '" удалена');
-                    
-                    // Восстанавливаем фокус после удаления
-                    setTimeout(function() {
-                        if (Lampa.Controller && Lampa.Controller.enabled) {
-                            Lampa.Controller.toggle('content');
-                        }
-                    }, 100);
                 }
             }
         });
@@ -321,13 +261,6 @@
                     Lampa.Storage.set(STORAGE_KEY, []);
                     updateFiltersMenu();
                     showMsg('Все закладки удалены');
-                    
-                    // Восстанавливаем фокус после удаления
-                    setTimeout(function() {
-                        if (Lampa.Controller && Lampa.Controller.enabled) {
-                            Lampa.Controller.toggle('content');
-                        }
-                    }, 100);
                 }
             }
         });
@@ -352,8 +285,7 @@
             </li>
         `);
         
-        saveButton.on('hover:enter', function(e) {
-            e.stopPropagation();
+        saveButton.on('hover:enter', function() {
             saveCurrentFilter();
         });
         
@@ -377,8 +309,7 @@
             </li>
         `);
         
-        clearButton.on('hover:enter', function(e) {
-            e.stopPropagation();
+        clearButton.on('hover:enter', function() {
             deleteAllFilters();
         });
         
@@ -403,8 +334,7 @@
             </div>
         `);
         
-        bookmarkBtn.on('hover:enter', function(e) {
-            e.stopPropagation();
+        bookmarkBtn.on('hover:enter', function() {
             saveCurrentFilter();
         });
         
@@ -422,8 +352,7 @@
             </div>
         `);
         
-        clearBtn.on('hover:enter', function(e) {
-            e.stopPropagation();
+        clearBtn.on('hover:enter', function() {
             deleteAllFilters();
         });
         
@@ -465,7 +394,6 @@
     // ==================== ОБНОВЛЕНИЕ МЕНЮ ЗАКЛАДОК ====================
     
     function updateFiltersMenu() {
-        console.log('[SaveFilter] Обновление меню закладок');
         $('.submenu-item').remove();
         
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
@@ -493,13 +421,11 @@
                 </li>
             `);
             
-            // Открытие по короткому нажатию
             item.on('hover:enter', function(e) {
                 e.stopPropagation();
                 openFilter(filter);
             });
             
-            // Долгое нажатие для удаления
             item.on('hover:long', function(e) {
                 e.stopPropagation();
                 deleteFilter(filter.id, filter.name);
@@ -507,8 +433,6 @@
             
             mainList.append(item);
         });
-        
-        console.log('[SaveFilter] Меню обновлено, закладок:', filters.length);
     }
 
     // ==================== НАСТРОЙКИ ====================
