@@ -18,6 +18,9 @@
     // ==================== КАСТОМНЫЙ ДИАЛОГ С ПОЛЕМ ВВОДА ====================
     
     function showCustomInputDialog(title, placeholder, callback) {
+        // Определяем платформу
+        var isAndroid = Lampa.Platform && Lampa.Platform.is('android');
+        
         // Создаем HTML диалог
         var dialogHtml = `
             <div id="custom_input_dialog" style="
@@ -78,19 +81,24 @@
         
         $('body').append(dialogHtml);
         
-        // Фокусируемся на поле ввода
         var inputField = $('#custom_input_field');
-        inputField.focus();
         
-        // На Android TV принудительно вызываем клавиатуру
-        if (Lampa.Platform && Lampa.Platform.is('android')) {
-            inputField.click();
-            // Дополнительная попытка вызвать клавиатуру
-            setTimeout(function() {
-                inputField.focus();
-                inputField.click();
-            }, 100);
+        // Функция для фокуса на поле ввода
+        function focusInput() {
+            inputField.focus();
+            // Для браузера выделяем текст
+            if (!isAndroid) {
+                inputField.select();
+            }
         }
+        
+        // Задержка для правильной инициализации
+        setTimeout(focusInput, 100);
+        
+        // Для браузера: обрабатываем клик по полю
+        inputField.on('click', function() {
+            focusInput();
+        });
         
         // Обработчик OK
         $('#custom_input_ok').on('click', function() {
@@ -100,7 +108,7 @@
                 callback(value);
             } else {
                 showMsg('Название не может быть пустым');
-                inputField.focus();
+                focusInput();
             }
         });
         
@@ -114,6 +122,11 @@
             if (e.which === 13) {
                 $('#custom_input_ok').trigger('click');
             }
+        });
+        
+        // Предотвращаем всплытие событий для диалога
+        $('#custom_input_dialog').on('click', function(e) {
+            e.stopPropagation();
         });
     }
 
