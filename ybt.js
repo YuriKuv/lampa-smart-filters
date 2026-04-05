@@ -15,30 +15,21 @@
         }
     }
 
-    // ==================== НАТИВНЫЙ ДИАЛОГ ВВОДА С ВОЗВРАТОМ ФОКУСА ====================
+    // ==================== ДИАЛОГ ВВОДА ====================
     
     function showInputDialog(title, defaultValue, callback, returnElement) {
-        // Убеждаемся, что элемент имеет класс selector
-        if (returnElement && returnElement.length && !returnElement.hasClass('selector')) {
-            returnElement.addClass('selector');
-        }
-        
         Lampa.Input.edit({
             value: defaultValue,
             title: title,
             free: true,
             nosave: true
         }, function(newValue) {
-            // Задержка для Android — даём время закрыться клавиатуре
+            // Возвращаем фокус после закрытия клавиатуры
             setTimeout(function() {
                 if (returnElement && returnElement.length) {
-                    // Возвращаем фокус на элемент
                     Lampa.Nav.focus(returnElement);
-                } else {
-                    // Если элемента нет — форсируем поиск
-                    Lampa.Nav.force();
                 }
-            }, 50);
+            }, 100);
             
             if (newValue && newValue.trim()) {
                 callback(newValue.trim());
@@ -97,12 +88,6 @@
         if (!activity) {
             showMsg('Не удалось определить текущую страницу');
             isSaving = false;
-            // Возвращаем фокус
-            if (buttonElement && buttonElement.length) {
-                setTimeout(function() {
-                    Lampa.Nav.focus(buttonElement);
-                }, 50);
-            }
             return;
         }
         
@@ -110,22 +95,12 @@
         if (!validComponents.includes(activity.component) && activity.component.indexOf('category') === -1) {
             showMsg('Откройте раздел с контентом');
             isSaving = false;
-            if (buttonElement && buttonElement.length) {
-                setTimeout(function() {
-                    Lampa.Nav.focus(buttonElement);
-                }, 50);
-            }
             return;
         }
         
         if (isRootSection(activity)) {
             showMsg('Нельзя сохранить основной раздел. Откройте подраздел через кнопку "Ещё" или примените фильтр');
             isSaving = false;
-            if (buttonElement && buttonElement.length) {
-                setTimeout(function() {
-                    Lampa.Nav.focus(buttonElement);
-                }, 50);
-            }
             return;
         }
         
@@ -176,7 +151,7 @@
 
     // ==================== УДАЛЕНИЕ ====================
     
-    function deleteFilter(filterId, filterName, returnElement) {
+    function deleteFilter(filterId, filterName) {
         Lampa.Select.show({
             title: 'Удалить закладку?',
             items: [
@@ -193,17 +168,13 @@
                 }
                 // Возвращаем фокус
                 setTimeout(function() {
-                    if (returnElement && returnElement.length) {
-                        Lampa.Nav.focus(returnElement);
-                    } else {
-                        Lampa.Nav.force();
-                    }
-                }, 50);
+                    Lampa.Nav.force();
+                }, 100);
             }
         });
     }
 
-    function deleteAllFilters(returnElement) {
+    function deleteAllFilters() {
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         if (filters.length === 0) {
             showMsg('Нет сохраненных закладок');
@@ -224,12 +195,8 @@
                 }
                 // Возвращаем фокус
                 setTimeout(function() {
-                    if (returnElement && returnElement.length) {
-                        Lampa.Nav.focus(returnElement);
-                    } else {
-                        Lampa.Nav.force();
-                    }
-                }, 50);
+                    Lampa.Nav.force();
+                }, 100);
             }
         });
     }
@@ -278,7 +245,7 @@
         `);
         
         clearButton.on('hover:enter', function() {
-            deleteAllFilters(clearButton);
+            deleteAllFilters();
         });
         
         var settingsList = $('.menu .menu__list').eq(1);
@@ -321,7 +288,7 @@
         `);
         
         clearBtn.on('hover:enter', function() {
-            deleteAllFilters(clearBtn);
+            deleteAllFilters();
         });
         
         $('.head__actions').append(clearBtn);
@@ -396,7 +363,7 @@
             
             item.on('hover:long', function(e) {
                 e.stopPropagation();
-                deleteFilter(filter.id, filter.name, item);
+                deleteFilter(filter.id, filter.name);
             });
             
             mainList.append(item);
