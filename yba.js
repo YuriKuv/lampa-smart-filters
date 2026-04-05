@@ -297,7 +297,7 @@
         });
     }
 
-    // ==================== КНОПКИ (ТОЛЬКО hover:enter для пульта, click для мыши) ====================
+    // ==================== КНОПКИ ====================
     
     var saveButton = null;
     var clearButton = null;
@@ -316,7 +316,6 @@
             </li>
         `);
         
-        // Используем только одно событие для всех платформ
         saveButton.on('hover:enter', function() {
             saveCurrentFilter();
         });
@@ -453,11 +452,19 @@
                 </li>
             `);
             
+            // Открытие по короткому нажатию
             item.on('hover:enter', function(e) {
                 e.stopPropagation();
                 openFilter(filter);
             });
             
+            // Долгое нажатие для удаления (для пульта и Android TV)
+            item.on('hover:long', function(e) {
+                e.stopPropagation();
+                deleteFilter(filter.id, filter.name);
+            });
+            
+            // Долгое нажатие для браузера (через мышь)
             var holdTimer = null;
             item.on('mousedown', function() {
                 holdTimer = setTimeout(function() {
