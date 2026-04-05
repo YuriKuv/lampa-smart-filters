@@ -1,582 +1,464 @@
-```javascript
-// Lampa Bookmarks Plugin
-// Версия 2.0 - Кросс-платформенная
-(function() {
-    'use strict';
+javascript
+/**
+ * Универсальный диалог ввода с поддержкой всех платформ
+ * @param {string} title - Заголовок диалога
+ * @param {string} placeholder - Подсказка в поле ввода
+ * @param {Function} callback - Функция обратного вызова
+ * @param {Object} options - Дополнительные опции
+ */
+function showInputDialog(title, placeholder, callback, options = {}) {
+    const config = {
+        defaultValue: options.defaultValue || '',
+        maxLength: options.maxLength || 100,
+        minLength: options.minLength || 1,
+        type: options.type || 'text', // text, number, password, email
+        required: options.required !== false,
+        cancelable: options.cancelable !== false,
+        width: options.width || '400px',
+        height: options.height || 'auto',
+        theme: options.theme || getSystemTheme(),
+        platform: detectPlatform()
+    };
+
+    // Проверяем, доступен ли Lampa.Select
+    if (typeof Lampa !== 'undefined' && Lampa.Select && Lampa.Select.show) {
+        showLampaDialog(title, placeholder, callback, config);
+    } else {
+        // Fallback для случаев, когда Lampa не доступен
+        showUniversalDialog(title, placeholder, callback, config);
+    }
+}
+
+/**
+ * Определение текущей платформы
+ */
+function detectPlatform() {
+    const ua = navigator.userAgent.toLowerCase();
+    return {
+        isMobile: /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(ua),
+        isIOS: /iphone|ipad|ipod/.test(ua),
+        isAndroid: /android/.test(ua),
+        isTouch: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
+        isDesktop: !/android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(ua)
+    };
+}
+
+/**
+ * Получение системной темы
+ */
+function getSystemTheme() {
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        return 'dark';
+    }
+    return 'light';
+}
+
+/**
+ * Диалог через Lampa.Select (оригинальный стиль)
+ */
+function showLampaDialog(title, placeholder, callback, config) {
+    Lampa.Select.show({
+        title: title,
+        items: [
+            { 
+                title: '[Введите название]', 
+                value: 'input',
+                description: placeholder
+            }
+        ],
+        onSelect: function(item) {
+            if (item.value === 'input') {
+                // Используем универсальный диалог вместо prompt
+                showCustomInputDialog(title, placeholder, callback, config);
+            }
+        },
+        onBack: function() {
+            if (config.cancelable && typeof options.onCancel === 'function') {
+                options.onCancel();
+            }
+        }
+    });
+}
+
+/**
+ * Универсальный кастомный диалог ввода
+ */
+function showCustomInputDialog(title, placeholder, callback, config) {
+    // Удаляем предыдущий диалог, если есть
+    const existingDialog = document.querySelector('.universal-input-dialog');
+    if (existingDialog) existingDialog.remove();
+
+    // Создаем overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'universal-input-dialog-overlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: fadeIn 0.3s ease;
+    `;
+
+    // Создаем диалог
+    const dialog = document.createElement('div');
+    dialog.className = 'universal-input-dialog';
+    dialog.style.cssText = `
+        background: ${config.theme === 'dark' ? '#1a1a1a' : '#ffffff'};
+        color: ${config.theme === 'dark' ? '#ffffff' : '#000000'};
+        border-radius: 12px;
+        padding: 24px;
+        width: ${config.width};
+        max-width: 90vw;
+        max-height: 90vh;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        animation: slideUp 0.3s ease;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    `;
+
+    // Заголовок
+    const titleEl = document.createElement('h3');
+    titleEl.textContent = title;
+    titleEl.style.cssText = `
+        margin: 0 0 16px 0;
+        font-size: 20px;
+        font-weight: 600;
+        color: ${config.theme === 'dark' ? '#ffffff' : '#000000'};
+    `;
+
+    // Поле ввода
+    const input = document.createElement('input');
+    input.type = config.type;
+    input.placeholder = placeholder;
+    input.value = config.defaultValue;
+    input.maxLength = config.maxLength;
+    input.autocomplete = 'off';
+    input.autocorrect = 'off';
+    input.autocapitalize = 'off';
+    input.spellcheck = false;
     
-    console.log('[Bookmarks] Plugin loading...');
-    
-    // Ждем полной загрузки Lampa
-    function waitForLampa(callback) {
-        if (window.Lampa && window.Lampa.Storage) {
-            callback();
+    input.style.cssText = `
+        width: 100%;
+        padding: ${config.isMobile ? '16px' : '12px'};
+        margin: 0 0 20px 0;
+        border: 2px solid ${config.theme === 'dark' ? '#444' : '#ddd'};
+        border-radius: 8px;
+        font-size: ${config.isMobile ? '18px' : '16px'};
+        background: ${config.theme === 'dark' ? '#2a2a2a' : '#f9f9f9'};
+        color: ${config.theme === 'dark' ? '#ffffff' : '#000000'};
+        box-sizing: border-box;
+        outline: none;
+        transition: border-color 0.3s ease;
+    `;
+
+    input.addEventListener('focus', () => {
+        input.style.borderColor = config.theme === 'dark' ? '#667eea' : '#764ba2';
+    });
+
+    input.addEventListener('blur', () => {
+        input.style.borderColor = config.theme === 'dark' ? '#444' : '#ddd';
+    });
+
+    // Кнопки
+    const buttonsContainer = document.createElement('div');
+    buttonsContainer.style.cssText = `
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+    `;
+
+    // Кнопка отмены
+    const cancelButton = document.createElement('button');
+    cancelButton.textContent = 'Отмена';
+    cancelButton.style.cssText = `
+        padding: ${config.isMobile ? '14px 24px' : '10px 20px'};
+        background: ${config.theme === 'dark' ? '#444' : '#f0f0f0'};
+        color: ${config.theme === 'dark' ? '#ccc' : '#666'};
+        border: none;
+        border-radius: 8px;
+        font-size: ${config.isMobile ? '16px' : '14px'};
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        flex: 1;
+    `;
+
+    // Кнопка подтверждения
+    const confirmButton = document.createElement('button');
+    confirmButton.textContent = 'OK';
+    confirmButton.style.cssText = `
+        padding: ${config.isMobile ? '14px 24px' : '10px 20px'};
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: ${config.isMobile ? '16px' : '14px'};
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        flex: 1;
+    `;
+
+    // Добавляем hover эффекты для десктопа
+    if (!config.isMobile) {
+        cancelButton.addEventListener('mouseenter', () => {
+            cancelButton.style.opacity = '0.8';
+        });
+        cancelButton.addEventListener('mouseleave', () => {
+            cancelButton.style.opacity = '1';
+        });
+        
+        confirmButton.addEventListener('mouseenter', () => {
+            confirmButton.style.transform = 'translateY(-2px)';
+            confirmButton.style.boxShadow = '0 5px 15px rgba(102, 126, 234, 0.4)';
+        });
+        confirmButton.addEventListener('mouseleave', () => {
+            confirmButton.style.transform = 'translateY(0)';
+            confirmButton.style.boxShadow = 'none';
+        });
+    }
+
+    // Обработчики событий
+    const handleConfirm = () => {
+        const value = input.value.trim();
+        
+        if (config.required && !value) {
+            showError('Поле не может быть пустым');
+            input.focus();
             return;
         }
         
-        let attempts = 0;
-        const maxAttempts = 30; // 30 секунд максимум
-        
-        const interval = setInterval(function() {
-            attempts++;
-            
-            if (window.Lampa && window.Lampa.Storage) {
-                clearInterval(interval);
-                callback();
-            } else if (attempts >= maxAttempts) {
-                clearInterval(interval);
-                console.error('[Bookmarks] Lampa not found after', maxAttempts, 'seconds');
-            }
-        }, 1000);
-    }
-    
-    // Основной код плагина
-    function initPlugin() {
-        console.log('[Bookmarks] Lampa found, initializing plugin...');
-        
-        const STORAGE_KEY = 'lampa_bookmarks_v2';
-        let isInitialized = false;
-        
-        // Безопасный доступ к API
-        function getStorage() {
-            try {
-                return Lampa.Storage.get(STORAGE_KEY, []);
-            } catch (e) {
-                console.error('[Bookmarks] Storage error:', e);
-                return [];
-            }
+        if (value.length < config.minLength) {
+            showError(`Минимальная длина: ${config.minLength} символов`);
+            input.focus();
+            return;
         }
         
-        function setStorage(data) {
-            try {
-                Lampa.Storage.set(STORAGE_KEY, data);
-                return true;
-            } catch (e) {
-                console.error('[Bookmarks] Storage set error:', e);
-                return false;
-            }
-        }
-        
-        function showMessage(text) {
-            try {
-                if (Lampa.Noty && Lampa.Noty.show) {
-                    Lampa.Noty.show(text);
-                } else {
-                    console.log('[Bookmarks]', text);
-                }
-            } catch (e) {
-                console.log('[Bookmarks]', text);
-            }
-        }
-        
-        function showInputDialog(title, defaultValue, callback) {
-            try {
-                if (Lampa.Input && Lampa.Input.edit) {
-                    Lampa.Input.edit({
-                        title: title,
-                        value: defaultValue || '',
-                        free: true,
-                        nosave: true
-                    }, function(value) {
-                        if (callback) callback(value || '');
-                    });
-                } else {
-                    // Fallback для браузеров
-                    const result = prompt(title, defaultValue || '');
-                    if (callback) callback(result || '');
-                }
-            } catch (e) {
-                console.error('[Bookmarks] Input error:', e);
-                if (callback) callback(defaultValue || '');
-            }
-        }
-        
-        function getCurrentActivity() {
-            try {
-                if (Lampa.Activity && Lampa.Activity.active) {
-                    return Lampa.Activity.active();
-                }
-                return null;
-            } catch (e) {
-                console.error('[Bookmarks] Activity error:', e);
-                return null;
-            }
-        }
-        
-        function isSaveableActivity(activity) {
-            if (!activity || !activity.url) return false;
-            
-            // Не сохраняем корневые разделы
-            const nonSaveable = [
-                'main', 'feed', 'catalog', 'search', 
-                'settings', 'about', 'console', 'edit',
-                'favorite', 'history', 'subscribes'
-            ];
-            
-            return !nonSaveable.includes(activity.url);
-        }
-        
-        // Основные функции
-        function saveBookmark() {
-            const activity = getCurrentActivity();
-            
-            if (!isSaveableActivity(activity)) {
-                showMessage('Этот раздел нельзя сохранить как закладку');
-                return;
-            }
-            
-            const defaultName = activity.title || 'Без названия';
-            
-            showInputDialog('Название закладки', defaultName, function(name) {
-                if (!name || !name.trim()) {
-                    showMessage('Название не может быть пустым');
-                    return;
-                }
-                
-                const bookmarks = getStorage();
-                const newBookmark = {
-                    id: Date.now(),
-                    name: name.trim(),
-                    url: activity.url || '',
-                    component: activity.component || 'category',
-                    source: activity.source || 'tmdb',
-                    genres: activity.genres || [],
-                    sort: activity.sort || '',
-                    page: activity.page || 1,
-                    time: new Date().toLocaleString()
-                };
-                
-                bookmarks.push(newBookmark);
-                
-                if (setStorage(bookmarks)) {
-                    showMessage('Закладка сохранена: ' + name.trim());
-                    updateBookmarksMenu();
-                } else {
-                    showMessage('Ошибка сохранения');
-                }
-            });
-        }
-        
-        function loadBookmark(bookmark) {
-            try {
-                Lampa.Activity.push({
-                    url: bookmark.url,
-                    title: bookmark.name,
-                    component: bookmark.component,
-                    source: bookmark.source,
-                    genres: bookmark.genres,
-                    sort: bookmark.sort,
-                    page: bookmark.page || 1
-                });
-            } catch (e) {
-                console.error('[Bookmarks] Load error:', e);
-                showMessage('Ошибка загрузки закладки');
-            }
-        }
-        
-        function deleteBookmark(bookmarkId) {
-            const bookmarks = getStorage();
-            const newBookmarks = bookmarks.filter(b => b.id !== bookmarkId);
-            
-            if (setStorage(newBookmarks)) {
-                showMessage('Закладка удалена');
-                updateBookmarksMenu();
-            }
-        }
-        
-        function confirmDelete(bookmark, callback) {
-            try {
-                if (Lampa.Select && Lampa.Select.show) {
-                    Lampa.Select.show({
-                        title: 'Удалить "' + bookmark.name + '"?',
-                        items: [
-                            { title: 'Отмена', value: 'cancel' },
-                            { title: 'Удалить', value: 'delete' }
-                        ],
-                        onSelect: function(result) {
-                            if (result.value === 'delete' && callback) {
-                                callback();
-                            }
-                        }
-                    });
-                } else {
-                    if (confirm('Удалить "' + bookmark.name + '"?')) {
-                        if (callback) callback();
-                    }
-                }
-            } catch (e) {
-                console.error('[Bookmarks] Confirm error:', e);
-                if (confirm('Удалить "' + bookmark.name + '"?')) {
-                    if (callback) callback();
-                }
-            }
-        }
-        
-        // Работа с меню
-        function createBookmarkElement(bookmark) {
-            const element = document.createElement('div');
-            element.className = 'selector focusable';
-            element.tabIndex = 0;
-            element.setAttribute('data-id', bookmark.id);
-            element.setAttribute('data-name', bookmark.name);
-            
-            element.innerHTML = `
-                <div class="bookmark-item" style="
-                    padding: 12px 16px;
-                    display: flex;
-                    align-items: center;
-                    color: #fff;
-                    font-size: 16px;
-                    border-bottom: 1px solid rgba(255,255,255,0.1);
-                ">
-                    <span style="margin-right: 10px;">📌</span>
-                    <span>${escapeHtml(bookmark.name)}</span>
-                </div>
-            `;
-            
-            // Обработчики событий
-            element.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                loadBookmark(bookmark);
-            });
-            
-            element.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    loadBookmark(bookmark);
-                } else if (e.key === 'Delete' || e.key === 'Backspace') {
-                    e.preventDefault();
-                    confirmDelete(bookmark, function() {
-                        deleteBookmark(bookmark.id);
-                    });
-                }
-            });
-            
-            // Долгое нажатие для TV
-            let longPressTimer;
-            element.addEventListener('mousedown', function() {
-                longPressTimer = setTimeout(function() {
-                    confirmDelete(bookmark, function() {
-                        deleteBookmark(bookmark.id);
-                    });
-                }, 1000);
-            });
-            
-            element.addEventListener('mouseup', function() {
-                clearTimeout(longPressTimer);
-            });
-            
-            element.addEventListener('mouseleave', function() {
-                clearTimeout(longPressTimer);
-            });
-            
-            return element;
-        }
-        
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
-        function updateBookmarksMenu() {
-            try {
-                // Удаляем старое меню закладок
-                const oldMenu = document.getElementById('bookmarks-menu-container');
-                if (oldMenu && oldMenu.parentNode) {
-                    oldMenu.parentNode.removeChild(oldMenu);
-                }
-                
-                const bookmarks = getStorage();
-                if (bookmarks.length === 0) return;
-                
-                // Ищем основное меню
-                const mainMenu = document.querySelector('.menu__body, .menu-body, [class*="menu"]');
-                if (!mainMenu) {
-                    // Пробуем позже
-                    setTimeout(updateBookmarksMenu, 1000);
-                    return;
-                }
-                
-                // Создаем контейнер для закладок
-                const container = document.createElement('div');
-                container.id = 'bookmarks-menu-container';
-                container.style.cssText = `
-                    margin-top: 20px;
-                    padding: 0 16px;
-                `;
-                
-                // Заголовок
-                const title = document.createElement('div');
-                title.textContent = '📚 Закладки';
-                title.style.cssText = `
-                    color: #888;
-                    font-size: 14px;
-                    margin-bottom: 10px;
-                    padding-left: 16px;
-                    opacity: 0.7;
-                `;
-                container.appendChild(title);
-                
-                // Добавляем закладки
-                bookmarks.forEach(bookmark => {
-                    container.appendChild(createBookmarkElement(bookmark));
-                });
-                
-                // Вставляем в меню
-                mainMenu.appendChild(container);
-                
-            } catch (e) {
-                console.error('[Bookmarks] Menu update error:', e);
-            }
-        }
-        
-        function addSaveButton() {
-            try {
-                // Добавляем кнопку через API Lampa если доступно
-                if (Lampa.Menu && Lampa.Menu.add) {
-                    Lampa.Menu.add({
-                        title: 'Сохранить закладку',
-                        action: saveBookmark,
-                        group: 'tools'
-                    });
-                    return true;
-                }
-                
-                // Альтернативный способ - добавляем в DOM
-                const observer = new MutationObserver(function(mutations) {
-                    mutations.forEach(function(mutation) {
-                        if (mutation.addedNodes.length) {
-                            const actionMenu = document.querySelector('.actions-menu, .menu-actions, [class*="action"]');
-                            if (actionMenu && !document.getElementById('bookmark-save-btn')) {
-                                const button = document.createElement('div');
-                                button.id = 'bookmark-save-btn';
-                                button.className = 'selector focusable';
-                                button.tabIndex = 0;
-                                button.innerHTML = `
-                                    <div style="padding: 12px 16px; color: #4CAF50; font-size: 16px;">
-                                        💾 Сохранить закладку
-                                    </div>
-                                `;
-                                
-                                button.addEventListener('click', saveBookmark);
-                                button.addEventListener('keydown', function(e) {
-                                    if (e.key === 'Enter') saveBookmark();
-                                });
-                                
-                                actionMenu.appendChild(button);
-                            }
-                        }
-                    });
-                });
-                
-                observer.observe(document.body, { childList: true, subtree: true });
-                
-                return true;
-                
-            } catch (e) {
-                console.error('[Bookmarks] Button error:', e);
-                return false;
-            }
-        }
-        
-        function injectStyles() {
-            const styleId = 'bookmarks-plugin-styles';
-            if (document.getElementById(styleId)) return;
-            
-            const style = document.createElement('style');
-            style.id = styleId;
-            style.textContent = `
-                .bookmark-item:hover, 
-                .bookmark-item:focus {
-                    background-color: rgba(255, 152, 0, 0.1);
-                }
-                
-                #bookmark-save-btn:hover,
-                #bookmark-save-btn:focus {
-                    background-color: rgba(76, 175, 80, 0.1);
-                }
-                
-                .selector.focusable:focus {
-                    outline: 2px solid #ff9800;
-                    outline-offset: -2px;
-                }
-            `;
-            
-            document.head.appendChild(style);
-        }
-        
-        // Инициализация
-        function initialize() {
-            if (isInitialized) return;
-            
-            console.log('[Bookmarks] Starting initialization...');
-            
-            injectStyles();
-            addSaveButton();
-            
-            // Обновляем меню при открытии
-            document.addEventListener('menu:open', updateBookmarksMenu);
-            document.addEventListener('menu:show', updateBookmarksMenu);
-            
-            // Периодически проверяем и обновляем
-            let checkCount = 0;
-            const checkInterval = setInterval(function() {
-                checkCount++;
-                updateBookmarksMenu();
-                
-                if (checkCount >= 6) { // 30 секунд
-                    clearInterval(checkInterval);
-                }
-            }, 5000);
-            
-            // Обновляем при изменении хранилища
-            if (Lampa.Listener && Lampa.Listener.follow) {
-                Lampa.Listener.follow('storage', function(e) {
-                    if (e.key === STORAGE_KEY) {
-                        updateBookmarksMenu();
-                    }
-                });
-            }
-            
-            isInitialized = true;
-            console.log('[Bookmarks] Plugin initialized successfully');
-            showMessage('Плагин закладок активирован');
-        }
-        
-        // Запускаем инициализацию после загрузки DOM
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() {
-                setTimeout(initialize, 2000);
-            });
-        } else {
-            setTimeout(initialize, 2000);
-        }
-        
-        // Экспортируем API для отладки
-        window.BookmarksAPI = {
-            save: saveBookmark,
-            list: getStorage,
-            clear: function() {
-                setStorage([]);
-                updateBookmarksMenu();
-                showMessage('Все закладки удалены');
-            },
-            refresh: updateBookmarksMenu
-        };
-    }
-    
-    // Запускаем плагин
-    waitForLampa(initPlugin);
-    
-})();
-```
+        closeDialog();
+        callback(value);
+    };
 
-**Упрощенная версия (если выше не работает):**
+    const handleCancel = () => {
+        closeDialog();
+        if (config.cancelable && typeof options.onCancel === 'function') {
+            options.onCancel();
+        }
+    };
 
-```javascript
-// Минимальная версия плагина закладок для Lampa
-try {
-    console.log('Bookmarks plugin starting...');
-    
-    // Ждем Lampa
-    const checkLampa = setInterval(() => {
-        if (window.Lampa && Lampa.Storage) {
-            clearInterval(checkLampa);
-            startBookmarks();
-        }
-    }, 500);
-    
-    function startBookmarks() {
-        const STORAGE_KEY = 'my_bookmarks';
+    const closeDialog = () => {
+        document.body.style.overflow = '';
+        overlay.remove();
         
-        // Простая функция сохранения
-        function saveBookmark() {
-            try {
-                const activity = Lampa.Activity.active();
-                if (!activity || !activity.url) return;
-                
-                const name = prompt('Название закладки:', activity.title || 'Закладка');
-                if (!name) return;
-                
-                const bookmarks = Lampa.Storage.get(STORAGE_KEY, []);
-                bookmarks.push({
-                    id: Date.now(),
-                    name: name,
-                    url: activity.url,
-                    title: activity.title,
-                    time: new Date().toLocaleString()
-                });
-                
-                Lampa.Storage.set(STORAGE_KEY, bookmarks);
-                
-                if (Lampa.Noty) {
-                    Lampa.Noty.show('Сохранено: ' + name);
-                } else {
-                    alert('Сохранено: ' + name);
-                }
-            } catch (e) {
-                console.error('Bookmark save error:', e);
-            }
+        // Удаляем обработчики клавиатуры
+        document.removeEventListener('keydown', handleKeyDown);
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Escape') {
+            handleCancel();
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleConfirm();
         }
+    };
+
+    // Показ ошибки
+    const showError = (message) => {
+        // Удаляем предыдущую ошибку
+        const existingError = dialog.querySelector('.input-error');
+        if (existingError) existingError.remove();
+
+        const errorEl = document.createElement('div');
+        errorEl.className = 'input-error';
+        errorEl.textContent = message;
+        errorEl.style.cssText = `
+            color: #ff4757;
+            font-size: 14px;
+            margin: -10px 0 10px 0;
+            animation: shake 0.3s ease;
+        `;
         
-        // Добавляем кнопку в меню
-        function addButton() {
-            // Ищем меню и добавляем кнопку
-            const observer = new MutationObserver(() => {
-                const menu = document.querySelector('.menu__list, .menu-list');
-                if (menu && !document.querySelector('#bookmark-btn')) {
-                    const btn = document.createElement('li');
-                    btn.id = 'bookmark-btn';
-                    btn.innerHTML = '<div>💾 Сохранить закладку</div>';
-                    btn.style.cssText = 'padding: 10px; color: #4CAF50;';
-                    btn.onclick = saveBookmark;
-                    menu.appendChild(btn);
-                }
-            });
-            
-            observer.observe(document.body, { childList: true, subtree: true });
+        input.parentNode.insertBefore(errorEl, input.nextSibling);
+        
+        // Анимация встряхивания поля ввода
+        input.style.animation = 'shake 0.3s ease';
+        setTimeout(() => {
+            input.style.animation = '';
+        }, 300);
+    };
+
+    // Назначаем обработчики
+    cancelButton.addEventListener('click', handleCancel);
+    confirmButton.addEventListener('click', handleConfirm);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            handleConfirm();
         }
-        
-        // Запускаем
-        setTimeout(addButton, 2000);
-        console.log('Bookmarks plugin loaded');
-    }
+    });
+
+    // Добавляем элементы
+    buttonsContainer.appendChild(cancelButton);
+    buttonsContainer.appendChild(confirmButton);
     
-    // Таймаут на случай ошибки
+    dialog.appendChild(titleEl);
+    dialog.appendChild(input);
+    dialog.appendChild(buttonsContainer);
+    overlay.appendChild(dialog);
+    
+    // Добавляем на страницу
+    document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
+    
+    // Фокусируемся на поле ввода
     setTimeout(() => {
-        clearInterval(checkLampa);
-    }, 10000);
+        input.focus();
+        input.select();
+    }, 100);
     
-} catch (e) {
-    console.error('Bookmarks plugin fatal error:', e);
+    // Добавляем обработчик клавиатуры
+    document.addEventListener('keydown', handleKeyDown);
+    
+    // Добавляем анимации CSS
+    addDialogStyles();
+}
+
+/**
+ * Добавляем CSS стили для анимаций
+ */
+function addDialogStyles() {
+    if (document.querySelector('#dialog-styles')) return;
+    
+    const style = document.createElement('style');
+    style.id = 'dialog-styles';
+    style.textContent = `
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+        
+        /* Адаптивные стили для мобильных */
+        @media (max-width: 768px) {
+            .universal-input-dialog {
+                padding: 20px !important;
+                margin: 10px !important;
+            }
+            
+            .universal-input-dialog input {
+                font-size: 18px !important;
+                padding: 16px !important;
+            }
+            
+            .universal-input-dialog button {
+                font-size: 16px !important;
+                padding: 14px 20px !important;
+            }
+        }
+        
+        /* Поддержка темной темы */
+        @media (prefers-color-scheme: dark) {
+            .universal-input-dialog {
+                background: #1a1a1a !important;
+                color: #ffffff !important;
+            }
+            
+            .universal-input-dialog input {
+                background: #2a2a2a !important;
+                color: #ffffff !important;
+                border-color: #444 !important;
+            }
+        }
+    `;
+    
+    document.head.appendChild(style);
+}
+
+/**
+ * Универсальный диалог (fallback)
+ */
+function showUniversalDialog(title, placeholder, callback, config) {
+    // Используем кастомный диалог как fallback
+    showCustomInputDialog(title, placeholder, callback, config);
+}
+
+// Экспорт функции для использования
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { showInputDialog };
 }
 ```
 
-**Инструкция по установке:**
+## Ключевые улучшения:
 
-1. **Для Android TV через браузер:**
-   - Откройте Lampa
-   - Нажмите "Настройки" → "Консоль"
-   - Вставьте код в консоль и нажмите Enter
+### 1. **Кроссплатформенность**
+- Автоматическое определение платформы (мобильная/десктоп)
+- Адаптивные стили для разных устройств
+- Поддержка touch и mouse событий
 
-2. **Для постоянной установки:**
-   - Создайте файл `bookmarks.js` с кодом
-   - Добавьте в `index.html` Lampa:
-   ```html
-   <script src="bookmarks.js"></script>
-   ```
+### 2. **Улучшенный UI**
+- Современный дизайн с анимациями
+- Поддержка темной темы
+- Градиентные кнопки
+- Анимация встряхивания при ошибке
 
-3. **Проверка работы:**
-   - Откройте любой фильм или сериал
-   - Нажмите "Меню" (три точки)
-   - Должна появиться кнопка "Сохранить закладку"
+### 3. **Валидация ввода**
+- Проверка минимальной/максимальной длины
+- Проверка обязательных полей
+- Визуальная обратная связь
 
-**Если все еще возникает "Script error":**
-1. Убедитесь что Lampa полностью загружена
-2. Попробуйте добавить скрипт через `setTimeout`:
+### 4. **Управление с клавиатуры**
+- Enter - подтвердить
+- Escape - отменить
+- Shift+Enter - новая строка (если нужно)
+
+### 5. **Адаптивный дизайн**
+- Большие кнопки для мобильных
+- Увеличенные шрифты
+- Оптимизированные отступы
+
+### 6. **Fallback система**
+- Использует Lampa.Select если доступен
+- Автоматический fallback на кастомный диалог
+- Работает без зависимостей
+
+### 7. **Дополнительные опции**
 ```javascript
-setTimeout(function() {
-    // Весь код плагина здесь
-}, 5000);
-```
+// Пример использования с опциями
+showInputDialog(
+    'Введите название плейлиста',
+    'Мой плейлист',
+    function(name) {
+        console.log('Создан плейлист:', name);
+    },
+    {
+        defaultValue: 'Избранное',
+        maxLength: 50,
+        minLength: 3,
+        type: 'text',
+        required: true,
+        cancelable: true,
+        width: '500px',
+        theme: 'dark' // или 'auto', 'light', 'dark'
+    }
+);
