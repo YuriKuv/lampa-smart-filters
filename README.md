@@ -87,6 +87,21 @@
 | macOS (браузер) | ✅ Полностью работает |
 | iOS (Safari) | ✅ Полностью работает |
 
+📄 Лицензия
+
+MIT License
+👤 Автор
+YuriKuv
+
+🤝 Поддержка
+Если вы нашли ошибку или у вас есть предложения по улучшению:
+
+    Создайте Issue
+
+    Отправьте Pull Request
+
+Приятного просмотра! 🎬🍿
+
 ## 📦 Установка с GitHub
 
 ```bash
@@ -95,19 +110,3 @@ git clone https://github.com/yurikuv/your-bookmarks.git
 
 # Или просто скачайте файл
 wget https://raw.githubusercontent.com/yurikuv/your-bookmarks/main/yba.js
-
-📄 Лицензия
-
-MIT License
-👤 Автор
-
-[YuriKuv]
-🤝 Поддержка
-
-Если вы нашли ошибку или у вас есть предложения по улучшению:
-
-    Создайте Issue
-
-    Отправьте Pull Request
-
-Приятного просмотра! 🎬🍿
