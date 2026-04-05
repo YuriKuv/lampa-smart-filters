@@ -21,25 +21,39 @@
     // ==================== СИНХРОНИЗАЦИЯ ====================
     
     function registerSyncKey() {
-        // Способ 1: Через Profiles плагин (если установлен)
-        if (window.StateService && window.StateService.sync) {
-            if (window.StateService.sync.keys.indexOf(STORAGE_KEY) === -1) {
-                window.StateService.sync.keys.push(STORAGE_KEY);
-                console.log('[SaveFilter] Ключ синхронизации добавлен через StateService');
-            }
-        }
-        
-        // Способ 2: Через Lampa.Storage (для CUB)
         if (typeof Lampa !== 'undefined' && Lampa.Storage) {
-            // Проверяем, нужно ли синхронизировать
-            var syncFlag = Lampa.Storage.get(STORAGE_KEY + '_sync', false);
-            if (!syncFlag) {
-                Lampa.Storage.set(STORAGE_KEY + '_sync', true);
-                console.log('[SaveFilter] Ключ синхронизации активирован для CUB');
+            Lampa.Storage.set(STORAGE_KEY + '_sync', true);
+            
+            if (Lampa.Storage.sync) {
+                Lampa.Storage.sync(STORAGE_KEY);
+                console.log('[SaveFilter] Ключ зарегистрирован для синхронизации CUB');
+            }
+            
+            var syncedData = Lampa.Storage.get(STORAGE_KEY, null);
+            if (syncedData && syncedData.length > 0) {
+                console.log('[SaveFilter] Загружено облачных закладок:', syncedData.length);
             }
         }
     }
-  
+    
+    function syncBookmarks() {
+        if (typeof Lampa !== 'undefined' && Lampa.Storage) {
+            var currentData = Lampa.Storage.get(STORAGE_KEY, []);
+            Lampa.Storage.set(STORAGE_KEY, currentData);
+            if (Lampa.Storage.sync) {
+                Lampa.Storage.sync(STORAGE_KEY);
+            }
+        }
+    }
+    
+    function saveAndSync(filters) {
+        Lampa.Storage.set(STORAGE_KEY, filters);
+        if (Lampa.Storage.sync) {
+            Lampa.Storage.sync(STORAGE_KEY);
+        }
+        updateFiltersMenu();
+    }
+
     // ==================== ДИАЛОГ ВВОДА ====================
     
     function showInputDialog(title, defaultValue, callback) {
@@ -253,8 +267,7 @@
                 return;
             }
             filters.push(newFilter);
-            Lampa.Storage.set(STORAGE_KEY, filters);
-            updateFiltersMenu();
+            saveAndSync(filters);
             showMsg('Закладка "' + name + '" сохранена');
             isSaving = false;
         });
@@ -288,8 +301,7 @@
                 if (item.value === 'yes') {
                     var filters = Lampa.Storage.get(STORAGE_KEY, []);
                     var newFilters = filters.filter(function(f) { return f.id != filterId; });
-                    Lampa.Storage.set(STORAGE_KEY, newFilters);
-                    updateFiltersMenu();
+                    saveAndSync(newFilters);
                     showMsg('Закладка "' + filterName + '" удалена');
                 }
             }
@@ -311,8 +323,7 @@
             ],
             onSelect: function(item) {
                 if (item.value === 'yes') {
-                    Lampa.Storage.set(STORAGE_KEY, []);
-                    updateFiltersMenu();
+                    saveAndSync([]);
                     showMsg('Все закладки удалены');
                 }
             }
@@ -474,19 +485,16 @@
                 </li>
             `);
             
-            // Открытие по короткому нажатию
             item.on('hover:enter', function(e) {
                 e.stopPropagation();
                 openFilter(filter);
             });
             
-            // Долгое нажатие для удаления (для пульта и Android TV)
             item.on('hover:long', function(e) {
                 e.stopPropagation();
                 deleteFilter(filter.id, filter.name);
             });
             
-            // Долгое нажатие для браузера (через мышь)
             var holdTimer = null;
             item.on('mousedown', function() {
                 holdTimer = setTimeout(function() {
@@ -558,6 +566,7 @@
         applyButtonPositions();
         updateFiltersMenu();
         addSettings();
+        syncBookmarks();
     }
     
     if (typeof Lampa !== 'undefined') {
