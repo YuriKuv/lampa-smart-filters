@@ -8,6 +8,7 @@
     var POSITION_CLEAR_KEY = 'bookmark_clear_position';
     
     var isSaving = false;
+    var inputValue = '';
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
@@ -17,50 +18,37 @@
         }
     }
 
-    // ==================== ДИАЛОГ ВВОДА ====================
+    // ==================== ДИАЛОГ ВВОДА (через Lampa.Select) ====================
     
     function showInputDialog(title, defaultValue, callback) {
-        // Проверяем доступность Lampa.Input
-        var hasInput = typeof Lampa !== 'undefined' && Lampa.Input;
-        var hasShow = hasInput && typeof Lampa.Input.show === 'function';
+        inputValue = defaultValue || '';
         
-        // Показываем отладочную информацию
-        showMsg('DEBUG: Lampa.Input=' + (hasInput ? 'да' : 'нет') + ', show=' + (hasShow ? 'да' : 'нет'));
-        
-        if (hasShow) {
-            try {
-                Lampa.Input.show({
-                    title: title,
-                    placeholder: defaultValue,
-                    value: defaultValue,
-                    onBack: function() {
-                        console.log('[SaveFilter] Диалог закрыт');
-                    },
-                    onEnter: function(value) {
-                        if (value && value.trim()) {
-                            callback(value.trim());
-                        } else {
-                            showMsg('Название не может быть пустым');
-                            showInputDialog(title, defaultValue, callback);
-                        }
+        Lampa.Select.show({
+            title: title,
+            keyboard: true,
+            value: inputValue,
+            items: [
+                { title: '✅ Сохранить', value: 'save' },
+                { title: '❌ Отмена', value: 'cancel' }
+            ],
+            onKeyboard: function(value) {
+                inputValue = value;
+            },
+            onSelect: function(item) {
+                if (item.value === 'save') {
+                    if (inputValue && inputValue.trim()) {
+                        callback(inputValue.trim());
+                    } else {
+                        showMsg('Название не может быть пустым');
+                        showInputDialog(title, defaultValue, callback);
                     }
-                });
-                return;
-            } catch(e) {
-                showMsg('Ошибка Lampa.Input: ' + e.message);
-                console.error('[SaveFilter] Lampa.Input error:', e);
+                }
+                // cancel — просто закрываем
+            },
+            onBack: function() {
+                console.log('[SaveFilter] Диалог закрыт');
             }
-        }
-        
-        // Fallback: используем стандартный prompt
-        showMsg('Используем стандартный диалог ввода');
-        var result = prompt(title, defaultValue);
-        if (result !== null && result.trim()) {
-            callback(result.trim());
-        } else if (result !== null) {
-            showMsg('Название не может быть пустым');
-            showInputDialog(title, defaultValue, callback);
-        }
+        });
     }
 
     // ==================== ПРОВЕРКА КОРНЕВОГО РАЗДЕЛА ====================
@@ -438,10 +426,7 @@
         applyButtonPositions();
         updateFiltersMenu();
         addSettings();
-        // Показываем приветствие только один раз
-        setTimeout(function() {
-            showMsg('Плагин загружен. Нажмите "Сохранить закладку" в меню');
-        }, 2000);
+        showMsg('Плагин загружен. Нажмите "Сохранить закладку" в меню');
     }
     
     if (typeof Lampa !== 'undefined') {
