@@ -15,43 +15,27 @@
         }
     }
 
-    // ==================== ДИАЛОГ ВВОДА ====================
+    // ==================== ПРОСТОЙ ДИАЛОГ ВВОДА ====================
     
-    function showInputDialog(title, defaultValue, callback, returnElement) {
-        Lampa.Input.edit({
-            value: defaultValue,
-            title: title,
-            free: true,
-            nosave: true
-        }, function(newValue) {
-            // --- ПОДТВЕРЖДЕНИЕ ---
-            isSaving = false;
-            
-            if (newValue && newValue.trim()) {
-                callback(newValue.trim());
+    function showInputDialog(title, defaultValue, callback, buttonElement) {
+        // Используем простой prompt — он работает везде и не вызывает ошибок
+        var result = prompt(title, defaultValue);
+        
+        // Возвращаем фокус после закрытия
+        setTimeout(function() {
+            if (buttonElement && buttonElement.length) {
+                Lampa.Nav.focus(buttonElement);
+            } else {
+                Lampa.Nav.force();
             }
-            
-            // Возвращаем фокус
-            setTimeout(function() {
-                if (returnElement && returnElement.length && document.body.contains(returnElement[0])) {
-                    Lampa.Nav.focus(returnElement);
-                } else {
-                    Lampa.Nav.force();
-                }
-            }, 200);
-        }, function() {
-            // --- ОТМЕНА (кнопка "Назад") ---
-            isSaving = false;
-            
-            // Возвращаем фокус
-            setTimeout(function() {
-                if (returnElement && returnElement.length && document.body.contains(returnElement[0])) {
-                    Lampa.Nav.focus(returnElement);
-                } else {
-                    Lampa.Nav.force();
-                }
-            }, 200);
-        });
+        }, 100);
+        
+        if (result !== null && result.trim()) {
+            callback(result.trim());
+        } else if (result !== null && result !== '') {
+            showMsg('Название не может быть пустым');
+            showInputDialog(title, defaultValue, callback, buttonElement);
+        }
     }
 
     // ==================== ПРОВЕРКА КОРНЕВОГО РАЗДЕЛА ====================
@@ -137,12 +121,14 @@
             var exists = filters.some(function(f) { return f.name === name && f.url === newFilter.url; });
             if (exists) {
                 showMsg('Закладка с таким названием уже существует');
+                isSaving = false;
                 return;
             }
             filters.push(newFilter);
             Lampa.Storage.set(STORAGE_KEY, filters);
             updateFiltersMenu();
             showMsg('Закладка "' + name + '" сохранена');
+            isSaving = false;
         }, buttonElement);
     }
 
@@ -178,15 +164,9 @@
                     updateFiltersMenu();
                     showMsg('Закладка "' + filterName + '" удалена');
                 }
-                // Возвращаем фокус
                 setTimeout(function() {
                     Lampa.Nav.force();
-                }, 200);
-            },
-            onBack: function() {
-                setTimeout(function() {
-                    Lampa.Nav.force();
-                }, 200);
+                }, 100);
             }
         });
     }
@@ -212,12 +192,7 @@
                 }
                 setTimeout(function() {
                     Lampa.Nav.force();
-                }, 200);
-            },
-            onBack: function() {
-                setTimeout(function() {
-                    Lampa.Nav.force();
-                }, 200);
+                }, 100);
             }
         });
     }
