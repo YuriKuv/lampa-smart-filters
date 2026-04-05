@@ -17,36 +17,49 @@
         }
     }
 
-    // ==================== НАТИВНЫЙ ДИАЛОГ Lampa ====================
+    // ==================== ДИАЛОГ ВВОДА ====================
     
     function showInputDialog(title, defaultValue, callback) {
-        // Используем нативный Lampa.Input
-        if (typeof Lampa !== 'undefined' && Lampa.Input) {
-            Lampa.Input.show({
-                title: title,
-                placeholder: defaultValue,
-                value: defaultValue,
-                onBack: function() {
-                    console.log('[SaveFilter] Диалог закрыт');
-                },
-                onEnter: function(value) {
-                    if (value && value.trim()) {
-                        callback(value.trim());
-                    } else {
-                        showMsg('Название не может быть пустым');
-                        showInputDialog(title, defaultValue, callback);
+        // Проверяем доступность Lampa.Input
+        var hasInput = typeof Lampa !== 'undefined' && Lampa.Input;
+        var hasShow = hasInput && typeof Lampa.Input.show === 'function';
+        
+        // Показываем отладочную информацию
+        showMsg('DEBUG: Lampa.Input=' + (hasInput ? 'да' : 'нет') + ', show=' + (hasShow ? 'да' : 'нет'));
+        
+        if (hasShow) {
+            try {
+                Lampa.Input.show({
+                    title: title,
+                    placeholder: defaultValue,
+                    value: defaultValue,
+                    onBack: function() {
+                        console.log('[SaveFilter] Диалог закрыт');
+                    },
+                    onEnter: function(value) {
+                        if (value && value.trim()) {
+                            callback(value.trim());
+                        } else {
+                            showMsg('Название не может быть пустым');
+                            showInputDialog(title, defaultValue, callback);
+                        }
                     }
-                }
-            });
-        } else {
-            // Fallback для очень старых версий (но в современных всегда есть Lampa.Input)
-            var result = prompt(title, defaultValue);
-            if (result !== null && result.trim()) {
-                callback(result.trim());
-            } else if (result !== null) {
-                showMsg('Название не может быть пустым');
-                showInputDialog(title, defaultValue, callback);
+                });
+                return;
+            } catch(e) {
+                showMsg('Ошибка Lampa.Input: ' + e.message);
+                console.error('[SaveFilter] Lampa.Input error:', e);
             }
+        }
+        
+        // Fallback: используем стандартный prompt
+        showMsg('Используем стандартный диалог ввода');
+        var result = prompt(title, defaultValue);
+        if (result !== null && result.trim()) {
+            callback(result.trim());
+        } else if (result !== null) {
+            showMsg('Название не может быть пустым');
+            showInputDialog(title, defaultValue, callback);
         }
     }
 
@@ -358,13 +371,11 @@
                 </li>
             `);
             
-            // Открытие по короткому нажатию
             item.on('hover:enter', function(e) {
                 e.stopPropagation();
                 openFilter(filter);
             });
             
-            // Долгое нажатие для удаления (нативный Lampa)
             item.on('hover:long', function(e) {
                 e.stopPropagation();
                 deleteFilter(filter.id, filter.name);
@@ -427,7 +438,10 @@
         applyButtonPositions();
         updateFiltersMenu();
         addSettings();
-        showMsg('Плагин загружен. Настройки в разделе "Интерфейс"');
+        // Показываем приветствие только один раз
+        setTimeout(function() {
+            showMsg('Плагин загружен. Нажмите "Сохранить закладку" в меню');
+        }, 2000);
     }
     
     if (typeof Lampa !== 'undefined') {
