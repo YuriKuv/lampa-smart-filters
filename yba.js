@@ -6,6 +6,8 @@
     var STORAGE_KEY = 'saved_filters_list';
     var POSITION_SAVE_KEY = 'bookmark_save_position';
     var POSITION_CLEAR_KEY = 'bookmark_clear_position';
+    
+    var currentCallback = null;
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
@@ -15,113 +17,187 @@
         }
     }
 
+    // ==================== КЛАВИАТУРА Lampa ====================
+    
+    function showKeyboardDialog(title, placeholder, callback) {
+        currentCallback = callback;
+        
+        // Создаем временный HTML для диалога с клавиатурой
+        var dialogHtml = `
+            <div id="bookmark_keyboard_dialog" style="
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 90%;
+                max-width: 600px;
+                background: #1a1a2e;
+                border-radius: 12px;
+                z-index: 100000;
+                color: white;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+                padding: 20px;
+            ">
+                <div style="font-size: 20px; margin-bottom: 15px; text-align: center;">${title}</div>
+                <div id="bookmark_input_display" style="
+                    width: 100%;
+                    padding: 12px;
+                    background: #2a2a3e;
+                    border-radius: 8px;
+                    font-size: 16px;
+                    margin-bottom: 15px;
+                    min-height: 45px;
+                    word-break: break-all;
+                ">${placeholder}</div>
+                <div style="display: flex; gap: 10px;">
+                    <div id="bookmark_ok_btn" style="
+                        flex: 1;
+                        padding: 10px;
+                        text-align: center;
+                        background: #4CAF50;
+                        border-radius: 6px;
+                        cursor: pointer;
+                    ">✅ Сохранить</div>
+                    <div id="bookmark_cancel_btn" style="
+                        flex: 1;
+                        padding: 10px;
+                        text-align: center;
+                        background: #555;
+                        border-radius: 6px;
+                        cursor: pointer;
+                    ">❌ Отмена</div>
+                </div>
+            </div>
+            <div id="bookmark_overlay" style="
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.7);
+                z-index: 99999;
+            "></div>
+        `;
+        
+        $('body').append(dialogHtml);
+        
+        var currentValue = placeholder || '';
+        $('#bookmark_input_display').text(currentValue);
+        
+        // Запускаем клавиатуру Lampa
+        if (typeof Lampa !== 'undefined' && Lampa.Keyboard) {
+            Lampa.Keyboard.show({
+                title: title,
+                value: currentValue,
+                onKey: function(value) {
+                    currentValue = value;
+                    $('#bookmark_input_display').text(value || placeholder);
+                },
+                onEnter: function(value) {
+                    currentValue = value;
+                    $('#bookmark_input_display').text(value || placeholder);
+                    $('#bookmark_ok_btn').trigger('click');
+                },
+                onBack: function() {
+                    // Просто закрываем
+                }
+            });
+        } else if (typeof Keybord !== 'undefined') {
+            // Альтернативный способ через Keybord
+            var keyboard = new Keybord({
+                layout: 'search',
+                value: currentValue
+            });
+            keyboard.create();
+            keyboard.listener.follow('change', function(event) {
+                currentValue = event.value;
+                $('#bookmark_input_display').text(event.value || placeholder);
+            });
+            keyboard.listener.follow('enter', function(event) {
+                currentValue = event.value;
+                $('#bookmark_ok_btn').trigger('click');
+            });
+            keyboard.toggle();
+        } else {
+            // Fallback для браузера
+            var result = prompt(title, placeholder);
+            if (result !== null) {
+                currentValue = result;
+                $('#bookmark_ok_btn').trigger('click');
+                return;
+            }
+        }
+        
+        // Обработчик OK
+        $('#bookmark_ok_btn').off('click').on('click', function() {
+            var value = currentValue.trim();
+            if (value) {
+                $('#bookmark_keyboard_dialog, #bookmark_overlay').remove();
+                if (currentCallback) {
+                    currentCallback(value);
+                    currentCallback = null;
+                }
+            } else {
+                showMsg('Название не может быть пустым');
+            }
+        });
+        
+        // Обработчик Cancel
+        $('#bookmark_cancel_btn, #bookmark_overlay').off('click').on('click', function() {
+            $('#bookmark_keyboard_dialog, #bookmark_overlay').remove();
+            if (typeof Lampa !== 'undefined' && Lampa.Keyboard) {
+                Lampa.Keyboard.close();
+            }
+            currentCallback = null;
+        });
+    }
+
     // ==================== ОПРЕДЕЛЕНИЕ ТИПА КОНТЕНТА ====================
     
     function getContentType(activity) {
-        // По component
         if (activity.component === 'tv') return 'сериалы';
         if (activity.component === 'cartoon') return 'мультфильмы';
         if (activity.component === 'anime') return 'аниме';
-        if (activity.component === 'serial') return 'сериалы';
-        
-        // По URL
-        if (activity.url && activity.url.indexOf('/tv') !== -1) return 'сериалы';
         if (activity.url && activity.url.indexOf('discover/tv') !== -1) return 'сериалы';
-        
-        // По наличию жанра мультфильмы
-        if (activity.genres === 16 || (Array.isArray(activity.genres) && activity.genres.indexOf(16) !== -1)) {
-            return 'мультфильмы';
-        }
-        
-        // По наличию жанра аниме (обычно 16 + японский язык)
-        if (activity.genres === 16 && activity.url && activity.url.indexOf('with_original_language=ja') !== -1) {
-            return 'аниме';
-        }
-        
+        if (activity.genres === 16) return 'мультфильмы';
         return 'фильмы';
     }
 
-    // ==================== ПОЛУЧЕНИЕ ИНФОРМАЦИИ О ФИЛЬТРАХ ====================
+    // ==================== ПОЛУЧЕНИЕ ВСЕХ ПАРАМЕТРОВ ФИЛЬТРА ====================
     
-    function parseFilterParams(activity) {
+    function getAllFilterParams(activity) {
+        var url = activity.url || '';
         var params = {
             genres: [],
-            genreNames: [],
             year: null,
             yearFrom: null,
             yearTo: null,
-            language: null,
-            languageName: null,
-            sort: null,
-            sortName: null,
-            section: null,
-            hasFilter: false
+            language: null
         };
         
-        var url = activity.url || '';
-        
-        // Жанры
         if (activity.genres) {
-            params.hasFilter = true;
-            if (typeof activity.genres === 'number') {
-                params.genres = [activity.genres];
-            } else if (Array.isArray(activity.genres)) {
-                params.genres = activity.genres;
-            }
+            params.genres = Array.isArray(activity.genres) ? activity.genres : [activity.genres];
         }
-        
-        // Жанры из URL
         var genreMatch = url.match(/with_genres=([\d,]+)/);
         if (genreMatch) {
-            params.hasFilter = true;
-            var genreIds = genreMatch[1].split(',');
-            for (var i = 0; i < genreIds.length; i++) {
-                if (params.genres.indexOf(parseInt(genreIds[i])) === -1) {
-                    params.genres.push(parseInt(genreIds[i]));
-                }
+            var ids = genreMatch[1].split(',').map(Number);
+            for (var i = 0; i < ids.length; i++) {
+                if (params.genres.indexOf(ids[i]) === -1) params.genres.push(ids[i]);
             }
         }
         
-        // Год
-        var yearMatch = url.match(/primary_release_year=(\d{4})/);
-        if (!yearMatch) yearMatch = url.match(/air_date=(\d{4})/);
-        if (!yearMatch) yearMatch = url.match(/first_air_date=(\d{4})/);
-        if (yearMatch) {
-            params.hasFilter = true;
-            params.year = yearMatch[1];
-        }
+        var yearMatch = url.match(/(?:primary_release_year|air_date|first_air_date)[=:](\d{4})/);
+        if (yearMatch) params.year = yearMatch[1];
         
-        // Диапазон годов
-        var yearFromMatch = url.match(/primary_release_date\.gte=(\d{4})/);
-        var yearToMatch = url.match(/primary_release_date\.lte=(\d{4})/);
+        var yearFromMatch = url.match(/(?:primary_release_date|first_air_date)\.gte=(\d{4})/);
+        var yearToMatch = url.match(/(?:primary_release_date|first_air_date)\.lte=(\d{4})/);
         if (yearFromMatch && yearToMatch) {
-            params.hasFilter = true;
             params.yearFrom = yearFromMatch[1];
             params.yearTo = yearToMatch[1];
         }
         
-        // Язык
         var langMatch = url.match(/with_original_language=([a-z]+)/);
-        if (langMatch) {
-            params.hasFilter = true;
-            params.language = langMatch[1];
-        }
-        
-        // Сортировка
-        var sortMatch = url.match(/sort_by=([^&]+)/);
-        if (sortMatch) {
-            params.sort = sortMatch[1];
-        }
-        
-        // Определяем название раздела
-        if (activity.title) {
-            params.section = activity.title.replace(' - TMDB', '');
-        }
-        
-        if (url.indexOf('now_playing') !== -1) params.section = 'Сейчас смотрят';
-        if (url.indexOf('popular') !== -1) params.section = 'Популярное';
-        if (url.indexOf('top_rated') !== -1) params.section = 'Топ рейтинга';
-        if (url.indexOf('upcoming') !== -1) params.section = 'Скоро выйдут';
+        if (langMatch) params.language = langMatch[1];
         
         return params;
     }
@@ -135,15 +211,10 @@
             9648: 'Детективы', 10749: 'Мелодрамы', 878: 'Фантастика',
             10770: 'ТВ фильмы', 53: 'Триллеры', 10752: 'Военные', 37: 'Вестерны'
         };
-        
-        if (!genreIds) return [];
-        
-        var ids = Array.isArray(genreIds) ? genreIds : [genreIds];
+        if (!genreIds || genreIds.length === 0) return [];
         var names = [];
-        for (var i = 0; i < ids.length; i++) {
-            if (genreMap[ids[i]]) {
-                names.push(genreMap[ids[i]]);
-            }
+        for (var i = 0; i < genreIds.length; i++) {
+            if (genreMap[genreIds[i]]) names.push(genreMap[genreIds[i]]);
         }
         return names;
     }
@@ -152,145 +223,94 @@
         var langMap = {
             'ru': 'Русские', 'en': 'Английские', 'ja': 'Японские',
             'zh': 'Китайские', 'ko': 'Корейские', 'fr': 'Французские',
-            'de': 'Немецкие', 'es': 'Испанские', 'it': 'Итальянские',
-            'tr': 'Турецкие', 'pl': 'Польские', 'uk': 'Украинские'
+            'de': 'Немецкие', 'es': 'Испанские', 'it': 'Итальянские'
         };
         return langMap[code] || null;
     }
-    
-    function getSortName(sort) {
-        var sortMap = {
-            'popularity.desc': 'Популярные',
-            'vote_average.desc': 'Лучшие по рейтингу',
-            'vote_count.desc': 'Самые обсуждаемые',
-            'revenue.desc': 'Кассовые',
-            'primary_release_date.desc': 'Новинки',
-            'first_air_date.desc': 'Новые серии'
-        };
-        return sortMap[sort] || null;
-    }
 
-    // ==================== ГЕНЕРАЦИЯ УМНЫХ НАЗВАНИЙ ====================
+    // ==================== ГЕНЕРАЦИЯ НАЗВАНИЙ ====================
     
-    function generateSmartNames(activity) {
+    function generateAllNames(activity) {
         var type = getContentType(activity);
-        var params = parseFilterParams(activity);
+        var params = getAllFilterParams(activity);
         var genreNames = getGenreNames(params.genres);
         var languageName = getLanguageName(params.language);
-        var sortName = getSortName(params.sort);
+        var typeCapitalized = type.charAt(0).toUpperCase() + type.slice(1);
         
         var names = [];
         
-        // 1. Название текущего раздела
-        if (params.section && params.section !== 'Фильмы' && params.section !== 'Сериалы' && params.section !== 'Мультфильмы') {
-            names.push(params.section);
-            names.push(params.section + ' (' + type + ')');
+        if (activity.title && activity.title !== 'Фильмы - TMDB' && activity.title !== 'Сериалы - TMDB') {
+            var sectionName = activity.title.replace(' - TMDB', '');
+            names.push(sectionName);
         }
         
-        // 2. Комбинация жанров
-        if (genreNames.length > 0) {
-            var genresStr = genreNames.join(', ');
-            names.push(genresStr);
-            names.push(genresStr + ' ' + type);
-            
-            // С разными приставками
-            names.push('Лучшие ' + genresStr.toLowerCase());
-            names.push('Новые ' + genresStr.toLowerCase());
-            names.push('Топ ' + genresStr.toLowerCase());
+        if (genreNames.length === 1) {
+            names.push(genreNames[0]);
+            names.push(genreNames[0] + ' ' + type);
+            names.push('Лучшие ' + genreNames[0].toLowerCase());
+            names.push('Популярные ' + genreNames[0].toLowerCase());
+        } else if (genreNames.length >= 2) {
+            names.push(genreNames.join(', '));
+            names.push(genreNames.join(', ') + ' ' + type);
         }
         
-        // 3. Комбинация с годом
         if (params.year) {
-            if (genreNames.length > 0) {
-                names.push(genreNames.join(', ') + ' ' + params.year);
-                names.push(params.year + ' ' + genreNames.join(', '));
-            }
-            names.push(type.charAt(0).toUpperCase() + type.slice(1) + ' ' + params.year);
+            names.push(typeCapitalized + ' ' + params.year);
             names.push('Новинки ' + params.year);
+            if (genreNames.length === 1) {
+                names.push(genreNames[0] + ' ' + params.year);
+            }
         }
         
-        // 4. Диапазон годов
         if (params.yearFrom && params.yearTo) {
-            var range = params.yearFrom + '-' + params.yearTo;
-            if (genreNames.length > 0) {
-                names.push(genreNames.join(', ') + ' ' + range);
+            var range = params.yearFrom + '–' + params.yearTo;
+            names.push(typeCapitalized + ' ' + range);
+            if (genreNames.length === 1) {
+                names.push(genreNames[0] + ' ' + range);
             }
-            names.push(type + ' ' + range);
-            names.push('Лучшее за ' + range);
         }
         
-        // 5. Язык
         if (languageName) {
-            names.push(languageName + ' ' + type);
+            names.push(languageName + ' ' + typeCapitalized);
             names.push(languageName);
-            if (genreNames.length > 0) {
-                names.push(languageName + ' ' + genreNames.join(', '));
-                names.push(genreNames.join(', ') + ' ' + languageName.toLowerCase());
-            }
             if (params.year) {
-                names.push(languageName + ' ' + type + ' ' + params.year);
+                names.push(languageName + ' ' + typeCapitalized + ' ' + params.year);
+            }
+            if (genreNames.length === 1) {
+                names.push(languageName + ' ' + genreNames[0]);
             }
         }
         
-        // 6. Сортировка
-        if (sortName) {
-            names.push(sortName + ' ' + type);
-            if (genreNames.length > 0) {
-                names.push(sortName + ' ' + genreNames.join(', '));
-            }
-            if (params.year) {
-                names.push(sortName + ' ' + params.year);
-            }
+        if (params.year && languageName && genreNames.length === 1) {
+            names.push(languageName + ' ' + genreNames[0] + ' ' + params.year);
         }
         
-        // 7. Специальные разделы
-        if (params.section) {
-            if (params.section === 'Сейчас смотрят') {
-                names.push('Сейчас смотрят ' + type);
-                names.push('Популярное сейчас');
-            }
-            if (params.section === 'Популярное') {
-                names.push('Популярные ' + type);
-                names.push('Хиты');
-            }
-            if (params.section === 'Топ рейтинга') {
-                names.push('Лучшие ' + type);
-                names.push('Топ 100 ' + type);
-            }
+        if (activity.url) {
+            if (activity.url.indexOf('now_playing') !== -1) names.push('Сейчас в кино');
+            if (activity.url.indexOf('popular') !== -1) names.push('Популярные ' + type);
+            if (activity.url.indexOf('top_rated') !== -1) names.push('Лучшие ' + type);
         }
         
-        // 8. Комбинация всех параметров
-        if (params.hasFilter && genreNames.length > 0 && params.year) {
-            names.push(genreNames.join(', ') + ' ' + params.year + ' ' + type);
-        }
-        if (params.hasFilter && languageName && genreNames.length > 0 && params.year) {
-            names.push(languageName + ' ' + genreNames.join(', ') + ' ' + params.year);
-        }
-        
-        // 9. Убираем дубликаты
         var uniqueNames = [];
         for (var i = 0; i < names.length; i++) {
-            if (uniqueNames.indexOf(names[i]) === -1 && names[i] && names[i].length < 50) {
+            if (uniqueNames.indexOf(names[i]) === -1 && names[i] && names[i].length < 60) {
                 uniqueNames.push(names[i]);
             }
         }
         
-        // Ограничиваем количество (не более 10)
-        return uniqueNames.slice(0, 10);
+        return uniqueNames.slice(0, 12);
     }
 
-    // ==================== ДИАЛОГ С ВЫБОРОМ НАЗВАНИЯ ====================
+    // ==================== ДИАЛОГ ВЫБОРА ====================
     
-    function showInputDialog(title, defaultName, activity, callback) {
-        var suggestions = generateSmartNames(activity);
+    function showSelectionDialog(title, activity, callback) {
+        var suggestions = generateAllNames(activity);
         var items = [];
         
-        // Добавляем умные предложения (максимум 8)
-        for (var i = 0; i < Math.min(suggestions.length, 8); i++) {
+        for (var i = 0; i < suggestions.length; i++) {
             items.push({ title: '📌 ' + suggestions[i], value: suggestions[i] });
         }
         
-        // Добавляем разделитель и вариант с произвольным названием
         items.push({ title: '──────────', value: 'separator', disabled: true });
         items.push({ title: '✏️ Ввести своё название', value: 'custom' });
         items.push({ title: '❌ Отмена', value: 'cancel' });
@@ -299,13 +319,9 @@
             title: title,
             items: items,
             onSelect: function(item) {
-                if (item.value === 'cancel') {
-                    console.log('[SaveFilter] Отмена');
-                    return;
-                }
-                
+                if (item.value === 'cancel') return;
                 if (item.value === 'custom') {
-                    showCustomInputDialog(title, defaultName, callback);
+                    showKeyboardDialog(title, suggestions[0] || 'Моя закладка', callback);
                 } else if (item.value !== 'separator') {
                     callback(item.value);
                 }
@@ -314,38 +330,6 @@
                 console.log('[SaveFilter] Диалог закрыт');
             }
         });
-    }
-    
-    function showCustomInputDialog(title, defaultName, callback) {
-        if (typeof Lampa !== 'undefined' && Lampa.Input && Lampa.Input.show) {
-            Lampa.Input.show({
-                title: title,
-                placeholder: defaultName,
-                value: defaultName,
-                onEnter: function(value) {
-                    if (value && value.trim()) {
-                        callback(value.trim());
-                    } else {
-                        showMsg('Название не может быть пустым');
-                        showCustomInputDialog(title, defaultName, callback);
-                    }
-                },
-                onBack: function() {
-                    var activity = Lampa.Activity.active();
-                    if (activity) {
-                        showInputDialog(title, defaultName, activity, callback);
-                    }
-                }
-            });
-        } else {
-            var result = prompt(title, defaultName);
-            if (result && result.trim()) {
-                callback(result.trim());
-            } else if (result !== null) {
-                showMsg('Название не может быть пустым');
-                showCustomInputDialog(title, defaultName, callback);
-            }
-        }
     }
 
     // ==================== ПРОВЕРКА КОРНЕВОГО РАЗДЕЛА ====================
@@ -359,15 +343,11 @@
         ];
         
         for (var i = 0; i < rootActions.length; i++) {
-            if (activity.url === rootActions[i]) {
-                return true;
-            }
+            if (activity.url === rootActions[i]) return true;
         }
         
         if (activity.component === 'category' && !activity.genres && !activity.sort) {
-            if (activity.url === 'movie' || activity.url === 'tv') {
-                return true;
-            }
+            if (activity.url === 'movie' || activity.url === 'tv') return true;
         }
         
         return false;
@@ -387,31 +367,17 @@
         }
         if (activity.url === 'movie') return 'discover/movie';
         if (activity.url === 'tv') return 'discover/tv';
-        if (activity.url && activity.url.indexOf('keyword/') === 0) return activity.url;
         return activity.url;
-    }
-
-    function getDefaultName(activity) {
-        var suggestions = generateSmartNames(activity);
-        if (suggestions.length > 0) {
-            return suggestions[0];
-        }
-        if (activity.title) return activity.title.replace(' - TMDB', '');
-        return 'Моя закладка';
     }
 
     // ==================== СОХРАНЕНИЕ ====================
     
     function saveCurrentFilter() {
-        console.log('[SaveFilter] saveCurrentFilter вызван');
-        
         var activity = Lampa.Activity.active();
         if (!activity) {
             showMsg('Не удалось определить текущую страницу');
             return;
         }
-        
-        console.log('[SaveFilter] Текущий activity:', activity.component, activity.url);
         
         var validComponents = ['category', 'category_full', 'serial', 'movie', 'cartoon', 'anime', 'tv', 'catalog'];
         if (!validComponents.includes(activity.component) && activity.component.indexOf('category') === -1) {
@@ -420,15 +386,11 @@
         }
         
         if (isRootSection(activity)) {
-            showMsg('❌ Нельзя сохранить основной раздел.\n\n✅ Для создания закладки:\n• Откройте подраздел через кнопку "Ещё"\n• Или примените фильтр (жанры, годы, язык)');
+            showMsg('Нельзя сохранить основной раздел. Откройте подраздел через кнопку "Ещё" или примените фильтр');
             return;
         }
         
-        var defaultName = getDefaultName(activity);
-        
-        showInputDialog('Сохранить закладку', defaultName, activity, function(name) {
-            console.log('[SaveFilter] Сохраняем закладку:', name);
-            
+        showSelectionDialog('Сохранить закладку', activity, function(name) {
             var newFilter = {
                 id: Date.now(),
                 name: name,
@@ -450,27 +412,23 @@
             filters.push(newFilter);
             Lampa.Storage.set(STORAGE_KEY, filters);
             updateFiltersMenu();
-            showMsg('✓ Закладка "' + name + '" сохранена');
+            showMsg('Закладка "' + name + '" сохранена');
         });
     }
 
     // ==================== ОТКРЫТИЕ ====================
     
     function openFilter(filter) {
-        console.log('[SaveFilter] Открываем закладку:', filter.name);
-        
-        var openParams = {
+        Lampa.Activity.push({
             url: filter.url,
             title: filter.name,
             component: filter.component || 'category',
             source: filter.source || 'tmdb',
             card_type: true,
-            page: 1
-        };
-        if (filter.genres) openParams.genres = filter.genres;
-        if (filter.sort) openParams.sort = filter.sort;
-        
-        Lampa.Activity.push(openParams);
+            page: 1,
+            genres: filter.genres,
+            sort: filter.sort
+        });
     }
 
     // ==================== УДАЛЕНИЕ ====================
@@ -511,7 +469,7 @@
                 if (item.value === 'yes') {
                     Lampa.Storage.set(STORAGE_KEY, []);
                     updateFiltersMenu();
-                    showMsg('✓ Все закладки удалены');
+                    showMsg('Все закладки удалены');
                 }
             }
         });
@@ -537,12 +495,10 @@
         `);
         
         saveButton.on('hover:enter', function() {
-            console.log('[SaveFilter] Кнопка "Сохранить закладку" нажата');
             saveCurrentFilter();
         });
         
         saveButton.on('click', function() {
-            console.log('[SaveFilter] Кнопка "Сохранить закладку" нажата (click)');
             saveCurrentFilter();
         });
         
@@ -567,12 +523,10 @@
         `);
         
         clearButton.on('hover:enter', function() {
-            console.log('[SaveFilter] Кнопка "Удалить все закладки" нажата');
             deleteAllFilters();
         });
         
         clearButton.on('click', function() {
-            console.log('[SaveFilter] Кнопка "Удалить все закладки" нажата (click)');
             deleteAllFilters();
         });
         
@@ -598,12 +552,10 @@
         `);
         
         bookmarkBtn.on('hover:enter', function() {
-            console.log('[SaveFilter] Кнопка (header) "Сохранить закладку" нажата');
             saveCurrentFilter();
         });
         
         bookmarkBtn.on('click', function() {
-            console.log('[SaveFilter] Кнопка (header) "Сохранить закладку" нажата (click)');
             saveCurrentFilter();
         });
         
@@ -622,12 +574,10 @@
         `);
         
         clearBtn.on('hover:enter', function() {
-            console.log('[SaveFilter] Кнопка (header) "Удалить все закладки" нажата');
             deleteAllFilters();
         });
         
         clearBtn.on('click', function() {
-            console.log('[SaveFilter] Кнопка (header) "Удалить все закладки" нажата (click)');
             deleteAllFilters();
         });
         
@@ -719,15 +669,8 @@
                 }
             });
             
-            item.on('v-click', function(e) {
-                e.stopPropagation();
-                deleteFilter(filter.id, filter.name);
-            });
-            
             mainList.append(item);
         });
-        
-        console.log('[SaveFilter] Меню обновлено, закладок:', filters.length);
     }
 
     // ==================== НАСТРОЙКИ ====================
@@ -783,7 +726,7 @@
         applyButtonPositions();
         updateFiltersMenu();
         addSettings();
-        showMsg('✓ Плагин загружен. Настройки в разделе "Интерфейс"');
+        showMsg('Плагин загружен. Настройки в разделе "Интерфейс"');
     }
     
     if (typeof Lampa !== 'undefined') {
