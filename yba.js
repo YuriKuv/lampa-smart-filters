@@ -15,114 +15,82 @@
         }
     }
 
-    // ==================== ПРОСТОЙ ДИАЛОГ С ВЫБОРОМ ====================
+    // ==================== ДИАЛОГ С ВВОДОМ ТЕКСТА ====================
     
     function showInputDialog(title, defaultName, callback) {
-        // Создаем список с вариантами
-        var items = [
-            { title: '📝 ' + defaultName, value: defaultName },
-            { title: '✏️ Ввести другое название', value: 'custom' }
-        ];
-        
-        // Добавляем 5 последних использованных названий (если есть)
-        var lastNames = Lampa.Storage.get('last_bookmark_names', []);
-        for (var i = 0; i < Math.min(lastNames.length, 3); i++) {
-            items.push({ title: '🔁 ' + lastNames[i], value: lastNames[i] });
-        }
-        
-        items.push({ title: '❌ Отмена', value: 'cancel' });
-        
-        Lampa.Select.show({
-            title: title,
-            items: items,
-            onSelect: function(item) {
-                if (item.value === 'cancel') {
-                    console.log('[SaveFilter] Отмена');
-                    return;
-                }
-                
-                if (item.value === 'custom') {
-                    // Для ввода другого названия используем другой диалог
-                    showCustomInputDialog(title, defaultName, callback);
-                } else {
-                    callback(item.value);
-                    // Сохраняем в историю
-                    saveToLastNames(item.value);
-                }
-            },
-            onBack: function() {
-                console.log('[SaveFilter] Диалог закрыт');
-            }
-        });
-    }
-    
-    function saveToLastNames(name) {
-        var lastNames = Lampa.Storage.get('last_bookmark_names', []);
-        // Удаляем если уже есть
-        lastNames = lastNames.filter(function(n) { return n !== name; });
-        // Добавляем в начало
-        lastNames.unshift(name);
-        // Оставляем только 5
-        lastNames = lastNames.slice(0, 5);
-        Lampa.Storage.set('last_bookmark_names', lastNames);
-    }
-    
-    function showCustomInputDialog(title, defaultName, callback) {
-        // Используем простой список с предустановленными шаблонами
-        var templates = [
-            { title: defaultName, value: defaultName },
-            { title: 'Мои ' + defaultName, value: 'Мои ' + defaultName },
-            { title: 'Лучшие ' + defaultName, value: 'Лучшие ' + defaultName },
-            { title: 'Новые ' + defaultName, value: 'Новые ' + defaultName },
-            { title: defaultName + ' 2024', value: defaultName + ' 2024' },
-            { title: defaultName + ' 2025', value: defaultName + ' 2025' },
-            { title: '❌ Отмена', value: 'cancel' }
-        ];
-        
-        Lampa.Select.show({
-            title: title + ' (выберите или нажмите назад)',
-            items: templates,
-            onSelect: function(item) {
-                if (item.value === 'cancel') {
-                    // Возвращаемся к предыдущему диалогу
-                    showInputDialog(title, defaultName, callback);
-                } else {
-                    callback(item.value);
-                    saveToLastNames(item.value);
-                }
-            },
-            onBack: function() {
-                // При нажатии назад предлагаем ввести название через системную клавиатуру
-                if (typeof Lampa !== 'undefined' && Lampa.Input) {
-                    Lampa.Input.show({
-                        title: title,
-                        placeholder: defaultName,
-                        onEnter: function(value) {
-                            if (value && value.trim()) {
-                                callback(value.trim());
-                                saveToLastNames(value.trim());
-                            } else {
-                                showMsg('Название не может быть пустым');
-                                showCustomInputDialog(title, defaultName, callback);
-                            }
-                        },
-                        onBack: function() {
-                            showInputDialog(title, defaultName, callback);
-                        }
-                    });
-                } else {
-                    // Если Lampa.Input нет, используем prompt (только для браузера)
-                    var result = prompt(title, defaultName);
-                    if (result && result.trim()) {
-                        callback(result.trim());
-                        saveToLastNames(result.trim());
-                    } else if (result !== null) {
+        // Пробуем использовать Lampa.Input (работает на Android TV)
+        if (typeof Lampa !== 'undefined' && Lampa.Input && Lampa.Input.show) {
+            Lampa.Input.show({
+                title: title,
+                placeholder: defaultName,
+                value: defaultName,
+                onBack: function() {
+                    console.log('[SaveFilter] Диалог закрыт');
+                },
+                onEnter: function(value) {
+                    if (value && value.trim()) {
+                        callback(value.trim());
+                    } else {
                         showMsg('Название не может быть пустым');
-                        showCustomInputDialog(title, defaultName, callback);
+                        // Повторно открываем диалог
+                        showInputDialog(title, defaultName, callback);
                     }
                 }
+            });
+        } 
+        // Альтернативный метод через Lampa.Select с keyboard
+        else if (typeof Lampa !== 'undefined' && Lampa.Select) {
+            Lampa.Select.show({
+                title: title,
+                items: [
+                    { title: '📝 ' + (defaultName || 'Введите название'), value: 'input_field', keyboard: true },
+                    { title: '✅ Сохранить', value: 'save' },
+                    { title: '❌ Отмена', value: 'cancel' }
+                ],
+                onKeyboard: function(value) {
+                    // Обновляем отображение при вводе
+                    this.items[0].title = '📝 ' + (value || defaultName || 'Введите название');
+                    this.update();
+                    this.tempValue = value;
+                },
+                onSelect: function(item) {
+                    if (item.value === 'save') {
+                        var inputValue = this.tempValue || defaultName || '';
+                        if (inputValue && inputValue.trim()) {
+                            callback(inputValue.trim());
+                        } else {
+                            showMsg('Название не может быть пустым');
+                        }
+                    } else if (item.value === 'input_field') {
+                        // Активируем клавиатуру
+                        if (Lampa.Keyboard && Lampa.Keyboard.show) {
+                            Lampa.Keyboard.show({
+                                title: title,
+                                value: defaultName || '',
+                                onKey: function(value) {
+                                    this.tempValue = value;
+                                    this.items[0].title = '📝 ' + (value || defaultName || 'Введите название');
+                                    this.update();
+                                }.bind(this)
+                            });
+                        }
+                    }
+                }.bind(this),
+                onBack: function() {
+                    console.log('[SaveFilter] Диалог закрыт');
+                }
+            });
+        }
+        // Последний шанс - обычный prompt (для браузера)
+        else {
+            var result = prompt(title, defaultName);
+            if (result && result.trim()) {
+                callback(result.trim());
+            } else if (result !== null) {
+                showMsg('Название не может быть пустым');
+                showInputDialog(title, defaultName, callback);
             }
-        });
+        }
     }
 
     // ==================== ПРОВЕРКА КОРНЕВОГО РАЗДЕЛА ====================
