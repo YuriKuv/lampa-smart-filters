@@ -20,6 +20,7 @@
     function showCustomInputDialog(title, placeholder, callback) {
         // Определяем платформу
         var isAndroid = Lampa.Platform && Lampa.Platform.is('android');
+        var isBrowser = !isAndroid && (typeof window !== 'undefined' && window.navigator && window.navigator.userAgent && !window.navigator.userAgent.match(/(Android|webOS|iPhone|iPad|iPod|BlackBerry|Windows Phone)/i));
         
         // Создаем HTML диалог
         var dialogHtml = `
@@ -82,39 +83,61 @@
         $('body').append(dialogHtml);
         
         var inputField = $('#custom_input_field');
+        var dialog = $('#custom_input_dialog');
+        var overlay = $('#custom_input_overlay');
         
-        // Функция для фокуса на поле ввода
-        function focusInput() {
+        // Предотвращаем всплытие событий для диалога
+        dialog.on('click', function(e) {
+            e.stopPropagation();
+        });
+        
+        overlay.on('click', function() {
+            dialog.remove();
+            overlay.remove();
+        });
+        
+        // Функция для установки фокуса
+        function setFocus() {
+            // На время фокуса отключаем события Lampa
+            if (typeof Lampa !== 'undefined' && Lampa.Controller) {
+                Lampa.Controller.enabled().disable = true;
+            }
+            
             inputField.focus();
+            
             // Для браузера выделяем текст
-            if (!isAndroid) {
+            if (isBrowser) {
                 inputField.select();
             }
         }
         
-        // Задержка для правильной инициализации
-        setTimeout(focusInput, 100);
-        
-        // Для браузера: обрабатываем клик по полю
-        inputField.on('click', function() {
-            focusInput();
-        });
+        // Устанавливаем фокус с задержкой
+        setTimeout(setFocus, 200);
         
         // Обработчик OK
         $('#custom_input_ok').on('click', function() {
             var value = inputField.val().trim();
             if (value) {
-                $('#custom_input_dialog, #custom_input_overlay').remove();
+                // Восстанавливаем контроллер
+                if (typeof Lampa !== 'undefined' && Lampa.Controller) {
+                    Lampa.Controller.enabled().disable = false;
+                }
+                dialog.remove();
+                overlay.remove();
                 callback(value);
             } else {
                 showMsg('Название не может быть пустым');
-                focusInput();
+                setFocus();
             }
         });
         
         // Обработчик Cancel
-        $('#custom_input_cancel, #custom_input_overlay').on('click', function() {
-            $('#custom_input_dialog, #custom_input_overlay').remove();
+        $('#custom_input_cancel').on('click', function() {
+            if (typeof Lampa !== 'undefined' && Lampa.Controller) {
+                Lampa.Controller.enabled().disable = false;
+            }
+            dialog.remove();
+            overlay.remove();
         });
         
         // Обработка нажатия Enter
@@ -124,9 +147,14 @@
             }
         });
         
-        // Предотвращаем всплытие событий для диалога
-        $('#custom_input_dialog').on('click', function(e) {
-            e.stopPropagation();
+        // Предотвращаем потерю фокуса при клике вне поля
+        inputField.on('blur', function() {
+            // Небольшая задержка, чтобы клик по кнопке успел сработать
+            setTimeout(function() {
+                if (dialog.is(':visible')) {
+                    setFocus();
+                }
+            }, 100);
         });
     }
 
