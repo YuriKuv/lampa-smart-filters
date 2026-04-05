@@ -12,10 +12,12 @@
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
             Lampa.Noty.show(text);
+        } else {
+            console.log('[SaveFilter]', text);
         }
     }
 
-    // ==================== ДИАЛОГ ВВОДА (НАТИВНЫЙ) ====================
+    // ==================== НАТИВНЫЙ ДИАЛОГ Lampa ====================
     
     function showInputDialog(title, defaultValue, callback) {
         // Используем нативный Lampa.Input
@@ -25,7 +27,7 @@
                 placeholder: defaultValue,
                 value: defaultValue,
                 onBack: function() {
-                    console.log('[SaveFilter] Отмена');
+                    console.log('[SaveFilter] Диалог закрыт');
                 },
                 onEnter: function(value) {
                     if (value && value.trim()) {
@@ -37,7 +39,7 @@
                 }
             });
         } else {
-            // Fallback для старых версий
+            // Fallback для очень старых версий (но в современных всегда есть Lampa.Input)
             var result = prompt(title, defaultValue);
             if (result !== null && result.trim()) {
                 callback(result.trim());
@@ -356,11 +358,13 @@
                 </li>
             `);
             
+            // Открытие по короткому нажатию
             item.on('hover:enter', function(e) {
                 e.stopPropagation();
                 openFilter(filter);
             });
             
+            // Долгое нажатие для удаления (нативный Lampa)
             item.on('hover:long', function(e) {
                 e.stopPropagation();
                 deleteFilter(filter.id, filter.name);
@@ -423,6 +427,7 @@
         applyButtonPositions();
         updateFiltersMenu();
         addSettings();
+        showMsg('Плагин загружен. Настройки в разделе "Интерфейс"');
     }
     
     if (typeof Lampa !== 'undefined') {
