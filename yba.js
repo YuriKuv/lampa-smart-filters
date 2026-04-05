@@ -21,13 +21,11 @@
     // ==================== ДИАЛОГ ВВОДА ====================
     
     function showInputDialog(title, defaultValue, callback) {
-        // Предотвращаем двойное открытие
         if (isDialogOpen) return;
         isDialogOpen = true;
         
         var isAndroid = Lampa.Platform && Lampa.Platform.is('android');
         
-        // Для браузера используем стандартный prompt
         if (!isAndroid) {
             var result = prompt(title, defaultValue);
             isDialogOpen = false;
@@ -41,7 +39,6 @@
             return;
         }
         
-        // Для Android TV создаем кастомный диалог
         var dialogId = 'custom_input_dialog_' + Date.now();
         
         var dialogHtml = `
@@ -130,21 +127,6 @@
             closeDialog();
         });
         
-        $('#ok_btn_' + dialogId).on('click', function() {
-            var value = inputField.val().trim();
-            if (value) {
-                closeDialog();
-                callback(value);
-            } else {
-                showMsg('Название не может быть пустым');
-                inputField.focus();
-            }
-        });
-        
-        $('#cancel_btn_' + dialogId).on('click', function() {
-            closeDialog();
-        });
-        
         inputField.on('keypress', function(e) {
             if (e.which === 13) {
                 var value = inputField.val().trim();
@@ -203,7 +185,6 @@
     // ==================== СОХРАНЕНИЕ ====================
     
     function saveCurrentFilter() {
-        // Предотвращаем повторный вызов
         if (isSaving) return;
         isSaving = true;
         
@@ -316,7 +297,7 @@
         });
     }
 
-    // ==================== КНОПКИ ====================
+    // ==================== КНОПКИ (ТОЛЬКО hover:enter для пульта, click для мыши) ====================
     
     var saveButton = null;
     var clearButton = null;
@@ -335,12 +316,8 @@
             </li>
         `);
         
+        // Используем только одно событие для всех платформ
         saveButton.on('hover:enter', function() {
-            saveCurrentFilter();
-        });
-        
-        saveButton.on('click', function(e) {
-            e.stopPropagation();
             saveCurrentFilter();
         });
         
@@ -365,11 +342,6 @@
         `);
         
         clearButton.on('hover:enter', function() {
-            deleteAllFilters();
-        });
-        
-        clearButton.on('click', function(e) {
-            e.stopPropagation();
             deleteAllFilters();
         });
         
@@ -398,11 +370,6 @@
             saveCurrentFilter();
         });
         
-        bookmarkBtn.on('click', function(e) {
-            e.stopPropagation();
-            saveCurrentFilter();
-        });
-        
         $('.head__actions').append(bookmarkBtn);
     }
     
@@ -418,11 +385,6 @@
         `);
         
         clearBtn.on('hover:enter', function() {
-            deleteAllFilters();
-        });
-        
-        clearBtn.on('click', function(e) {
-            e.stopPropagation();
             deleteAllFilters();
         });
         
@@ -492,11 +454,6 @@
             `);
             
             item.on('hover:enter', function(e) {
-                e.stopPropagation();
-                openFilter(filter);
-            });
-            
-            item.on('click', function(e) {
                 e.stopPropagation();
                 openFilter(filter);
             });
