@@ -7,7 +7,9 @@
     var POSITION_SAVE_KEY = 'bookmark_save_position';
     var POSITION_CLEAR_KEY = 'bookmark_clear_position';
     
+    var isDialogOpen = false;
     var isSaving = false;
+    var currentDialogId = null;
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
@@ -17,29 +19,145 @@
         }
     }
 
-    // ==================== ДИАЛОГ ВВОДА (РОДНОЙ Lampa) ====================
+    // ==================== КАСТОМНЫЙ ДИАЛОГ ====================
+    
+    function showCustomDialog(title, defaultValue, callback) {
+        if (isDialogOpen) {
+            // Если диалог уже открыт, не открываем новый
+            return;
+        }
+        isDialogOpen = true;
+        
+        var dialogId = 'bookmark_dialog_' + Date.now();
+        currentDialogId = dialogId;
+        
+        var dialogHtml = `
+            <div id="${dialogId}" style="
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 85%;
+                max-width: 500px;
+                background: #1a1a2e;
+                border-radius: 12px;
+                z-index: 100000;
+                color: white;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+                padding: 20px;
+            ">
+                <div style="font-size: 20px; margin-bottom: 15px; text-align: center;">${title}</div>
+                <input type="text" id="input_${dialogId}" placeholder="${defaultValue}" value="${defaultValue}" style="
+                    width: 100%;
+                    padding: 12px;
+                    background: #2a2a3e;
+                    color: white;
+                    border: 2px solid #4CAF50;
+                    border-radius: 8px;
+                    font-size: 16px;
+                    margin-bottom: 15px;
+                    box-sizing: border-box;
+                ">
+                <div style="display: flex; gap: 10px;">
+                    <div id="save_${dialogId}" class="selector" style="
+                        flex: 1;
+                        padding: 10px;
+                        text-align: center;
+                        background: #4CAF50;
+                        border-radius: 6px;
+                    ">✅ Сохранить</div>
+                    <div id="cancel_${dialogId}" class="selector" style="
+                        flex: 1;
+                        padding: 10px;
+                        text-align: center;
+                        background: #555;
+                        border-radius: 6px;
+                    ">❌ Отмена</div>
+                </div>
+            </div>
+            <div id="overlay_${dialogId}" style="
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.7);
+                z-index: 99999;
+            "></div>
+        `;
+        
+        $('body').append(dialogHtml);
+        
+        var dialog = $('#' + dialogId);
+        var overlay = $('#overlay_' + dialogId);
+        var inputField = $('#input_' + dialogId);
+        
+        // Функция закрытия диалога
+        function closeDialog() {
+            if (currentDialogId === dialogId) {
+                dialog.remove();
+                overlay.remove();
+                isDialogOpen = false;
+                currentDialogId = null;
+            }
+        }
+        
+        // Фокус на поле ввода
+        setTimeout(function() {
+            inputField.focus();
+        }, 200);
+        
+        // Сохранение
+        $('#save_' + dialogId).on('hover:enter', function(e) {
+            e.stopPropagation();
+            var value = inputField.val().trim();
+            if (value) {
+                closeDialog();
+                callback(value);
+            } else {
+                showMsg('Название не может быть пустым');
+                inputField.focus();
+            }
+        });
+        
+        // Отмена
+        $('#cancel_' + dialogId).on('hover:enter', function(e) {
+            e.stopPropagation();
+            closeDialog();
+        });
+        
+        // Enter на поле ввода
+        inputField.on('keypress', function(e) {
+            if (e.which === 13) {
+                var value = inputField.val().trim();
+                if (value) {
+                    closeDialog();
+                    callback(value);
+                } else {
+                    showMsg('Название не может быть пустым');
+                }
+            }
+        });
+        
+        // Клик по оверлею (для мыши)
+        overlay.on('click', function() {
+            closeDialog();
+        });
+        
+        // Предотвращаем закрытие при клике на диалог
+        dialog.on('click', function(e) {
+            e.stopPropagation();
+        });
+    }
+
+    // ==================== УНИВЕРСАЛЬНЫЙ ДИАЛОГ ====================
     
     function showInputDialog(title, defaultValue, callback) {
-        // Используем родной диалог Lampa
-        if (typeof Lampa !== 'undefined' && Lampa.Input && Lampa.Input.show) {
-            Lampa.Input.show({
-                title: title,
-                placeholder: defaultValue,
-                value: defaultValue,
-                onBack: function() {
-                    console.log('[SaveFilter] Диалог закрыт');
-                },
-                onEnter: function(value) {
-                    if (value && value.trim()) {
-                        callback(value.trim());
-                    } else {
-                        showMsg('Название не может быть пустым');
-                        showInputDialog(title, defaultValue, callback);
-                    }
-                }
-            });
+        var isAndroid = Lampa.Platform && Lampa.Platform.is('android');
+        
+        if (isAndroid) {
+            showCustomDialog(title, defaultValue, callback);
         } else {
-            // Fallback для браузера
             var result = prompt(title, defaultValue);
             if (result !== null && result.trim()) {
                 callback(result.trim());
