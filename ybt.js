@@ -15,10 +15,24 @@
         }
     }
 
+    // ==================== ВОЗВРАТ ФОКУСА ====================
+    
+    function returnFocus() {
+        setTimeout(function() {
+            // Возвращаем фокус на кнопку "Сохранить закладку" или в контент
+            var saveBtn = $('[data-action="save_filter_btn"], [data-action="save_bookmark_header"]').first();
+            if (saveBtn.length && saveBtn.is(':visible')) {
+                Lampa.Nav.focus(saveBtn[0]);
+            } else {
+                // Если кнопка не найдена, возвращаем фокус на контент
+                Lampa.Controller.enable();
+            }
+        }, 200);
+    }
+
     // ==================== НАТИВНЫЙ ДИАЛОГ ВВОДА ====================
     
     function showInputDialog(title, defaultValue, callback) {
-        // Используем Lampa.Input.edit - правильный метод для ввода текста
         Lampa.Input.edit({
             value: defaultValue,
             title: title,
@@ -27,9 +41,12 @@
         }, function(newValue) {
             if (newValue && newValue.trim()) {
                 callback(newValue.trim());
+                returnFocus();
             } else if (newValue !== null && newValue !== undefined) {
                 showMsg('Название не может быть пустым');
                 showInputDialog(title, defaultValue, callback);
+            } else {
+                returnFocus();
             }
         });
     }
