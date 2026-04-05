@@ -8,7 +8,6 @@
     var POSITION_CLEAR_KEY = 'bookmark_clear_position';
     
     var isSaving = false;
-    var currentSaveButton = null; // Сохраняем ссылку на кнопку
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
@@ -19,27 +18,31 @@
     // ==================== НАТИВНЫЙ ДИАЛОГ ВВОДА С ВОЗВРАТОМ ФОКУСА ====================
     
     function showInputDialog(title, defaultValue, callback, returnElement) {
+        // Убеждаемся, что элемент имеет класс selector
+        if (returnElement && returnElement.length && !returnElement.hasClass('selector')) {
+            returnElement.addClass('selector');
+        }
+        
         Lampa.Input.edit({
             value: defaultValue,
             title: title,
             free: true,
             nosave: true
         }, function(newValue) {
-            // Возвращаем фокус на элемент, с которого пришли
-            if (returnElement && returnElement.length) {
-                setTimeout(function() {
+            // Задержка для Android — даём время закрыться клавиатуре
+            setTimeout(function() {
+                if (returnElement && returnElement.length) {
+                    // Возвращаем фокус на элемент
                     Lampa.Nav.focus(returnElement);
-                }, 100);
-            } else {
-                // Если не знаем, на что вернуть фокус — используем force()
-                setTimeout(function() {
+                } else {
+                    // Если элемента нет — форсируем поиск
                     Lampa.Nav.force();
-                }, 100);
-            }
+                }
+            }, 50);
             
             if (newValue && newValue.trim()) {
                 callback(newValue.trim());
-            } else if (newValue !== null && newValue !== undefined) {
+            } else if (newValue !== null && newValue !== undefined && newValue !== '') {
                 showMsg('Название не может быть пустым');
                 showInputDialog(title, defaultValue, callback, returnElement);
             }
@@ -94,11 +97,11 @@
         if (!activity) {
             showMsg('Не удалось определить текущую страницу');
             isSaving = false;
-            // Возвращаем фокус на кнопку
+            // Возвращаем фокус
             if (buttonElement && buttonElement.length) {
                 setTimeout(function() {
                     Lampa.Nav.focus(buttonElement);
-                }, 100);
+                }, 50);
             }
             return;
         }
@@ -110,7 +113,7 @@
             if (buttonElement && buttonElement.length) {
                 setTimeout(function() {
                     Lampa.Nav.focus(buttonElement);
-                }, 100);
+                }, 50);
             }
             return;
         }
@@ -121,7 +124,7 @@
             if (buttonElement && buttonElement.length) {
                 setTimeout(function() {
                     Lampa.Nav.focus(buttonElement);
-                }, 100);
+                }, 50);
             }
             return;
         }
@@ -173,7 +176,7 @@
 
     // ==================== УДАЛЕНИЕ ====================
     
-    function deleteFilter(filterId, filterName) {
+    function deleteFilter(filterId, filterName, returnElement) {
         Lampa.Select.show({
             title: 'Удалить закладку?',
             items: [
@@ -190,13 +193,17 @@
                 }
                 // Возвращаем фокус
                 setTimeout(function() {
-                    Lampa.Nav.force();
-                }, 100);
+                    if (returnElement && returnElement.length) {
+                        Lampa.Nav.focus(returnElement);
+                    } else {
+                        Lampa.Nav.force();
+                    }
+                }, 50);
             }
         });
     }
 
-    function deleteAllFilters() {
+    function deleteAllFilters(returnElement) {
         var filters = Lampa.Storage.get(STORAGE_KEY, []);
         if (filters.length === 0) {
             showMsg('Нет сохраненных закладок');
@@ -217,8 +224,12 @@
                 }
                 // Возвращаем фокус
                 setTimeout(function() {
-                    Lampa.Nav.force();
-                }, 100);
+                    if (returnElement && returnElement.length) {
+                        Lampa.Nav.focus(returnElement);
+                    } else {
+                        Lampa.Nav.force();
+                    }
+                }, 50);
             }
         });
     }
@@ -243,7 +254,6 @@
         `);
         
         saveButton.on('hover:enter', function() {
-            // Передаём кнопку для возврата фокуса
             saveCurrentFilter(saveButton);
         });
         
@@ -268,7 +278,7 @@
         `);
         
         clearButton.on('hover:enter', function() {
-            deleteAllFilters();
+            deleteAllFilters(clearButton);
         });
         
         var settingsList = $('.menu .menu__list').eq(1);
@@ -311,7 +321,7 @@
         `);
         
         clearBtn.on('hover:enter', function() {
-            deleteAllFilters();
+            deleteAllFilters(clearBtn);
         });
         
         $('.head__actions').append(clearBtn);
@@ -386,7 +396,7 @@
             
             item.on('hover:long', function(e) {
                 e.stopPropagation();
-                deleteFilter(filter.id, filter.name);
+                deleteFilter(filter.id, filter.name, item);
             });
             
             mainList.append(item);
