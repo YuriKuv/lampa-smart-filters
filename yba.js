@@ -7,61 +7,47 @@
     var POSITION_SAVE_KEY = 'bookmark_save_position';
     var POSITION_CLEAR_KEY = 'bookmark_clear_position';
 
-    // ==================== ПОЛЬЗОВАТЕЛЬСКИЙ ДИАЛОГ С КЛАВИАТУРОЙ ====================
+    function showMsg(text) {
+        if (typeof Lampa !== 'undefined' && Lampa.Noty) {
+            Lampa.Noty.show(text);
+        } else {
+            console.log('[SaveFilter]', text);
+        }
+    }
+
+    // ==================== ПРОСТОЙ ДИАЛОГ С ВЫБОРОМ ====================
     
-    function showInputDialog(title, placeholder, callback) {
-        // Временная переменная для хранения введенного текста
-        var inputValue = '';
+    function showInputDialog(title, defaultName, callback) {
+        // Создаем список с вариантами
+        var items = [
+            { title: '📝 ' + defaultName, value: defaultName },
+            { title: '✏️ Ввести другое название', value: 'custom' }
+        ];
         
-        // Создаем кастомный диалог через Lampa.Select
+        // Добавляем 5 последних использованных названий (если есть)
+        var lastNames = Lampa.Storage.get('last_bookmark_names', []);
+        for (var i = 0; i < Math.min(lastNames.length, 3); i++) {
+            items.push({ title: '🔁 ' + lastNames[i], value: lastNames[i] });
+        }
+        
+        items.push({ title: '❌ Отмена', value: 'cancel' });
+        
         Lampa.Select.show({
             title: title,
-            items: [
-                { 
-                    title: '📝 ' + (placeholder || 'Введите название'), 
-                    value: 'input_field',
-                    keyboard: true  // Активируем клавиатуру для этого элемента
-                },
-                { title: '✅ Сохранить', value: 'save' },
-                { title: '❌ Отмена', value: 'cancel' }
-            ],
-            onKeyboard: function(value) {
-                // Обработчик ввода с клавиатуры
-                inputValue = value;
-                // Обновляем отображение введенного текста
-                var items = Lampa.Select.getItems();
-                if (items && items[0]) {
-                    items[0].title = '📝 ' + (value || (placeholder || 'Введите название'));
-                    Lampa.Select.update();
-                }
-            },
+            items: items,
             onSelect: function(item) {
-                if (item.value === 'save') {
-                    if (inputValue && inputValue.trim()) {
-                        callback(inputValue.trim());
-                    } else {
-                        showMsg('Название не может быть пустым');
-                        // Повторно открываем диалог
-                        showInputDialog(title, placeholder, callback);
-                    }
-                } else if (item.value === 'cancel') {
+                if (item.value === 'cancel') {
                     console.log('[SaveFilter] Отмена');
-                } else if (item.value === 'input_field') {
-                    // Активируем клавиатуру при выборе поля ввода
-                    if (Lampa.Keyboard) {
-                        Lampa.Keyboard.show({
-                            title: title,
-                            value: inputValue,
-                            onKey: function(value) {
-                                inputValue = value;
-                                var items = Lampa.Select.getItems();
-                                if (items && items[0]) {
-                                    items[0].title = '📝 ' + (value || (placeholder || 'Введите название'));
-                                    Lampa.Select.update();
-                                }
-                            }
-                        });
-                    }
+                    return;
+                }
+                
+                if (item.value === 'custom') {
+                    // Для ввода другого названия используем другой диалог
+                    showCustomInputDialog(title, defaultName, callback);
+                } else {
+                    callback(item.value);
+                    // Сохраняем в историю
+                    saveToLastNames(item.value);
                 }
             },
             onBack: function() {
@@ -69,13 +55,74 @@
             }
         });
     }
-
-    function showMsg(text) {
-        if (typeof Lampa !== 'undefined' && Lampa.Noty) {
-            Lampa.Noty.show(text);
-        } else {
-            console.log('[SaveFilter]', text);
-        }
+    
+    function saveToLastNames(name) {
+        var lastNames = Lampa.Storage.get('last_bookmark_names', []);
+        // Удаляем если уже есть
+        lastNames = lastNames.filter(function(n) { return n !== name; });
+        // Добавляем в начало
+        lastNames.unshift(name);
+        // Оставляем только 5
+        lastNames = lastNames.slice(0, 5);
+        Lampa.Storage.set('last_bookmark_names', lastNames);
+    }
+    
+    function showCustomInputDialog(title, defaultName, callback) {
+        // Используем простой список с предустановленными шаблонами
+        var templates = [
+            { title: defaultName, value: defaultName },
+            { title: 'Мои ' + defaultName, value: 'Мои ' + defaultName },
+            { title: 'Лучшие ' + defaultName, value: 'Лучшие ' + defaultName },
+            { title: 'Новые ' + defaultName, value: 'Новые ' + defaultName },
+            { title: defaultName + ' 2024', value: defaultName + ' 2024' },
+            { title: defaultName + ' 2025', value: defaultName + ' 2025' },
+            { title: '❌ Отмена', value: 'cancel' }
+        ];
+        
+        Lampa.Select.show({
+            title: title + ' (выберите или нажмите назад)',
+            items: templates,
+            onSelect: function(item) {
+                if (item.value === 'cancel') {
+                    // Возвращаемся к предыдущему диалогу
+                    showInputDialog(title, defaultName, callback);
+                } else {
+                    callback(item.value);
+                    saveToLastNames(item.value);
+                }
+            },
+            onBack: function() {
+                // При нажатии назад предлагаем ввести название через системную клавиатуру
+                if (typeof Lampa !== 'undefined' && Lampa.Input) {
+                    Lampa.Input.show({
+                        title: title,
+                        placeholder: defaultName,
+                        onEnter: function(value) {
+                            if (value && value.trim()) {
+                                callback(value.trim());
+                                saveToLastNames(value.trim());
+                            } else {
+                                showMsg('Название не может быть пустым');
+                                showCustomInputDialog(title, defaultName, callback);
+                            }
+                        },
+                        onBack: function() {
+                            showInputDialog(title, defaultName, callback);
+                        }
+                    });
+                } else {
+                    // Если Lampa.Input нет, используем prompt (только для браузера)
+                    var result = prompt(title, defaultName);
+                    if (result && result.trim()) {
+                        callback(result.trim());
+                        saveToLastNames(result.trim());
+                    } else if (result !== null) {
+                        showMsg('Название не может быть пустым');
+                        showCustomInputDialog(title, defaultName, callback);
+                    }
+                }
+            }
+        });
     }
 
     // ==================== ПРОВЕРКА КОРНЕВОГО РАЗДЕЛА ====================
@@ -176,6 +223,12 @@
             if (activity.sort) newFilter.sort = activity.sort;
             
             var filters = Lampa.Storage.get(STORAGE_KEY, []);
+            // Проверяем, нет ли уже такой закладки
+            var exists = filters.some(function(f) { return f.name === name && f.url === newFilter.url; });
+            if (exists) {
+                showMsg('Закладка с таким названием уже существует');
+                return;
+            }
             filters.push(newFilter);
             Lampa.Storage.set(STORAGE_KEY, filters);
             updateFiltersMenu();
