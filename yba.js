@@ -1,9 +1,9 @@
 javascript
 // ==UserScript==
-// @name         Lampa Input Dialog
+// @name         Lampa Input Dialog Universal
 // @namespace    http://tampermonkey.net/
-// @version      1.0.1
-// @description  Универсальный диалог ввода для Lampa
+// @version      2.0.0
+// @description  Универсальный диалог ввода для Lampa на всех платформах
 // @author       Your Name
 // @match        *://lampa.tv/*
 // @match        *://lampa.to/*
@@ -16,11 +16,15 @@ javascript
 (function() {
     'use strict';
     
+    // Проверяем окружение Lampa
+    const isLampaApp = typeof window.Lampa !== 'undefined' && 
+                      (window.Lampa.manifest || window.Lampa.isApp());
+    
     // Ждем полной загрузки страницы
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
-        setTimeout(init, 1000);
+        setTimeout(init, isLampaApp ? 2000 : 1000);
     }
     
     function init() {
@@ -32,9 +36,14 @@ javascript
         
         // Ждем загрузки Lampa API
         waitForLampa().then(() => {
-            // Безопасно добавляем функцию в глобальную область видимости
+            // Добавляем функцию в глобальную область видимости
             addInputDialogFunction();
-            console.log('Lampa Input Dialog загружен');
+            console.log('Lampa Input Dialog Universal загружен');
+            
+            // Для TV устройств добавляем навигацию
+            if (isTVDevice()) {
+                addTVNavigationSupport();
+            }
         }).catch(error => {
             console.warn('Lampa не найдена, используем fallback:', error);
             addInputDialogFunction();
@@ -42,24 +51,26 @@ javascript
     }
     
     function isLampaPage() {
-        // Проверяем по URL и наличию элементов Lampa
         const lampaUrls = ['lampa.tv', 'lampa.to'];
         const currentUrl = window.location.href.toLowerCase();
         
         return lampaUrls.some(url => currentUrl.includes(url)) ||
                document.querySelector('[lampa], .lampa, #lampa') ||
-               window.Lampa;
+               window.Lampa ||
+               navigator.userAgent.includes('Lampa');
     }
     
     function waitForLampa() {
         return new Promise((resolve, reject) => {
             let attempts = 0;
-            const maxAttempts = 50; // 5 секунд максимум
+            const maxAttempts = 100; // 10 секунд максимум
             
             function checkLampa() {
                 attempts++;
                 
-                if (typeof Lampa !== 'undefined' && Lampa.Select) {
+                // Проверяем разные варианты Lampa API
+                if (typeof Lampa !== 'undefined' && 
+                    (Lampa.Select || Lampa.Manager || Lampa.Activity)) {
                     resolve();
                 } else if (attempts >= maxAttempts) {
                     reject(new Error('Lampa не загрузилась'));
@@ -73,19 +84,67 @@ javascript
     }
     
     function addInputDialogFunction() {
-        // Добавляем функцию безопасно, проверяя конфликты
+        // Добавляем функцию безопасно
         if (typeof window.showInputDialog === 'undefined') {
             window.showInputDialog = showInputDialog;
         }
         
-        // Также добавляем в объект Lampa, если он существует
+        // Добавляем в объект Lampa
         if (typeof Lampa !== 'undefined') {
             Lampa.showInputDialog = showInputDialog;
+            Lampa.Dialog = Lampa.Dialog || {};
+            Lampa.Dialog.input = showInputDialog;
         }
     }
     
+    function isTVDevice() {
+        const ua = navigator.userAgent.toLowerCase();
+        return ua.includes('smart-tv') || 
+               ua.includes('tv') || 
+               ua.includes('android tv') ||
+               ua.includes('googletv') ||
+               ua.includes('appletv') ||
+               ua.includes('crkey') ||
+               ua.includes('aftb') ||
+               ua.includes('aftm') ||
+               ua.includes('aftmm') ||
+               ua.includes('afte') ||
+               ua.includes('afta') ||
+               screen.width >= 1280 && screen.height >= 720 && !isMobileDevice();
+    }
+    
+    function isMobileDevice() {
+        const ua = navigator.userAgent.toLowerCase();
+        return /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(ua);
+    }
+    
+    function addTVNavigationSupport() {
+        // Добавляем поддержку навигации для TV пультов
+        const style = document.createElement('style');
+        style.textContent = `
+            .input-dialog-button:focus {
+                outline: 3px solid #667eea;
+                outline-offset: 2px;
+                transform: scale(1.05);
+            }
+            
+            .input-dialog-input:focus {
+                outline: 3px solid #667eea;
+                outline-offset: -2px;
+            }
+            
+            @media (pointer: coarse) {
+                .input-dialog-button {
+                    min-height: 48px;
+                    min-width: 120px;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
     /**
-     * Универсальный диалог ввода для Lampa
+     * Универсальный диалог ввода для всех платформ Lampa
      */
     function showInputDialog(title, placeholder, callback, options = {}) {
         try {
@@ -96,77 +155,136 @@ javascript
                 type: options.type || 'text',
                 required: options.required !== false,
                 cancelable: options.cancelable !== false,
-                width: options.width || '400px',
+                width: options.width || (isTVDevice() ? '600px' : '400px'),
+                height: options.height || 'auto',
                 theme: options.theme || getSystemTheme(),
-                platform: detectPlatform()
+                platform: detectPlatform(),
+                keyboard: options.keyboard || 'default',
+                inputMode: options.inputMode || 'text',
+                onCancel: options.onCancel || null,
+                onShow: options.onShow || null,
+                onHide: options.onHide || null
             };
             
-            // Проверяем доступность Lampa.Select
-            if (typeof Lampa !== 'undefined' && Lampa.Select && Lampa.Select.show) {
-                showLampaSelectDialog(title, placeholder, callback, config);
-            } else {
-                showCustomDialog(title, placeholder, callback, config);
+            // Вызываем onShow если есть
+            if (typeof config.onShow === 'function') {
+                config.onShow();
             }
+            
+            // Пробуем использовать нативный диалог Lampa если доступен
+            if (tryNativeLampaDialog(title, placeholder, callback, config)) {
+                return;
+            }
+            
+            // Пробуем использовать Keyboard если доступен (для TV)
+            if (tryKeyboardDialog(title, placeholder, callback, config)) {
+                return;
+            }
+            
+            // Fallback на кастомный диалог
+            showCustomDialog(title, placeholder, callback, config);
+            
         } catch (error) {
             console.error('Ошибка в showInputDialog:', error);
-            // Fallback на стандартный prompt
-            const result = prompt(title, placeholder || '');
-            if (result !== null && result.trim()) {
-                callback(result.trim());
-            }
+            fallbackPrompt(title, placeholder, callback, options);
         }
     }
     
-    function detectPlatform() {
-        const ua = navigator.userAgent.toLowerCase();
-        return {
-            isMobile: /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(ua),
-            isIOS: /iphone|ipad|ipod/.test(ua),
-            isAndroid: /android/.test(ua),
-            isTouch: 'ontouchstart' in window || navigator.maxTouchPoints > 0
-        };
-    }
-    
-    function getSystemTheme() {
+    function tryNativeLampaDialog(title, placeholder, callback, config) {
         try {
-            if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                return 'dark';
+            // Проверяем наличие нативного диалога Lampa
+            if (typeof Lampa !== 'undefined') {
+                // Вариант 1: Lampa.Dialog (если существует)
+                if (Lampa.Dialog && Lampa.Dialog.prompt) {
+                    Lampa.Dialog.prompt({
+                        title: title,
+                        text: placeholder,
+                        value: config.defaultValue,
+                        callback: callback
+                    });
+                    return true;
+                }
+                
+                // Вариант 2: Lampa.Activity (для Android TV)
+                if (Lampa.Activity && Lampa.Activity.input) {
+                    Lampa.Activity.input({
+                        title: title,
+                        hint: placeholder,
+                        value: config.defaultValue,
+                        onSuccess: callback,
+                        onCancel: config.onCancel
+                    });
+                    return true;
+                }
+                
+                // Вариант 3: Lampa.Manager
+                if (Lampa.Manager && Lampa.Manager.showDialog) {
+                    Lampa.Manager.showDialog({
+                        title: title,
+                        html: `
+                            <div style="padding: 20px;">
+                                <input type="${config.type}" 
+                                       placeholder="${placeholder}"
+                                       value="${config.defaultValue}"
+                                       style="width: 100%; padding: 10px; font-size: 16px;"
+                                       class="lampa-input-dialog-field" />
+                            </div>
+                        `,
+                        buttons: [
+                            {
+                                title: 'Отмена',
+                                action: 'cancel'
+                            },
+                            {
+                                title: 'OK',
+                                action: function() {
+                                    const value = document.querySelector('.lampa-input-dialog-field').value;
+                                    if (config.required && !value.trim()) return;
+                                    callback(value);
+                                }
+                            }
+                        ]
+                    });
+                    return true;
+                }
             }
         } catch (e) {
-            // Игнорируем ошибки
+            console.warn('Нативный диалог Lampa не доступен:', e);
         }
-        return 'light';
+        return false;
     }
     
-    function showLampaSelectDialog(title, placeholder, callback, config) {
-        Lampa.Select.show({
-            title: title,
-            items: [
-                { 
-                    title: '[Введите название]', 
-                    value: 'input',
-                    description: placeholder
-                }
-            ],
-            onSelect: function(item) {
-                if (item.value === 'input') {
-                    showCustomDialog(title, placeholder, callback, config);
-                }
-            },
-            onBack: function() {
-                if (config.cancelable && typeof options.onCancel === 'function') {
-                    options.onCancel();
-                }
+    function tryKeyboardDialog(title, placeholder, callback, config) {
+        // Для TV устройств пробуем использовать виртуальную клавиатуру
+        if (isTVDevice() && typeof Lampa !== 'undefined' && Lampa.Keyboard) {
+            try {
+                Lampa.Keyboard.show({
+                    title: title,
+                    text: config.defaultValue,
+                    placeholder: placeholder,
+                    type: config.type === 'password' ? 'password' : 'text',
+                    onEnter: function(text) {
+                        if (config.required && !text.trim()) {
+                            Lampa.Noty.show('Поле не может быть пустым', 'error');
+                            return false;
+                        }
+                        callback(text);
+                        return true;
+                    },
+                    onCancel: config.onCancel
+                });
+                return true;
+            } catch (e) {
+                console.warn('Клавиатура Lampa не доступна:', e);
             }
-        });
+        }
+        return false;
     }
     
     function showCustomDialog(title, placeholder, callback, config) {
-        // Удаляем существующий диалог
         removeExistingDialog();
         
-        // Создаем overlay
-        const overlay = createOverlay();
+        const overlay = createOverlay(config);
         const dialog = createDialog(title, placeholder, callback, config, overlay);
         
         overlay.appendChild(dialog);
@@ -180,9 +298,16 @@ javascript
             const input = dialog.querySelector('.input-dialog-input');
             if (input) {
                 input.focus();
-                input.select();
+                if (config.defaultValue) {
+                    input.setSelectionRange(0, config.defaultValue.length);
+                }
+                
+                // Для TV добавляем виртуальную клавиатуру если нужно
+                if (isTVDevice() && config.keyboard !== 'none') {
+                    input.setAttribute('inputmode', config.inputMode);
+                }
             }
-        }, 50);
+        }, 100);
         
         // Добавляем обработчик клавиатуры
         const keyHandler = createKeyHandler(dialog, overlay, callback, config);
@@ -190,19 +315,10 @@ javascript
         
         // Сохраняем ссылку для cleanup
         overlay._keyHandler = keyHandler;
+        overlay._config = config;
     }
     
-    function removeExistingDialog() {
-        const existing = document.querySelector('.input-dialog-overlay');
-        if (existing) {
-            if (existing._keyHandler) {
-                document.removeEventListener('keydown', existing._keyHandler);
-            }
-            existing.remove();
-        }
-    }
-    
-    function createOverlay() {
+    function createOverlay(config) {
         const overlay = document.createElement('div');
         overlay.className = 'input-dialog-overlay';
         overlay.style.cssText = `
@@ -211,16 +327,24 @@ javascript
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.85);
             z-index: 999999;
             display: flex;
-            align-items: center;
+            align-items: ${isTVDevice() ? 'flex-start' : 'center'};
             justify-content: center;
             animation: inputDialogFadeIn 0.3s ease;
+            padding-top: ${isTVDevice() ? '100px' : '0'};
         `;
         
-        // Добавляем стили если их еще нет
+        // Добавляем стили
         addDialogStyles();
+        
+        // Обработчик клика на overlay
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay && config.cancelable) {
+                closeDialog(overlay, config);
+            }
+        });
         
         return overlay;
     }
@@ -231,15 +355,17 @@ javascript
         dialog.style.cssText = `
             background: ${config.theme === 'dark' ? '#1a1a1a' : '#ffffff'};
             color: ${config.theme === 'dark' ? '#ffffff' : '#000000'};
-            border-radius: 12px;
-            padding: 24px;
+            border-radius: ${isTVDevice() ? '8px' : '12px'};
+            padding: ${isTVDevice() ? '30px' : '24px'};
             width: ${config.width};
-            max-width: 90vw;
-            max-height: 90vh;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            max-width: ${isTVDevice() ? '800px' : '90vw'};
+            max-height: ${isTVDevice() ? '70vh' : '90vh'};
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
             animation: inputDialogSlideUp 0.3s ease;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            font-family: ${isTVDevice() ? 'Arial, sans-serif' : '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif'};
             box-sizing: border-box;
+            border: ${isTVDevice() ? '2px solid #333' : 'none'};
+            overflow-y: auto;
         `;
         
         // Заголовок
@@ -247,10 +373,11 @@ javascript
         titleEl.className = 'input-dialog-title';
         titleEl.textContent = title;
         titleEl.style.cssText = `
-            margin: 0 0 16px 0;
-            font-size: 20px;
-            font-weight: 600;
+            margin: 0 0 20px 0;
+            font-size: ${isTVDevice() ? '28px' : '20px'};
+            font-weight: ${isTVDevice() ? 'bold' : '600'};
             color: ${config.theme === 'dark' ? '#ffffff' : '#000000'};
+            text-align: ${isTVDevice() ? 'center' : 'left'};
         `;
         
         // Поле ввода
@@ -264,14 +391,15 @@ javascript
         input.autocorrect = 'off';
         input.autocapitalize = 'off';
         input.spellcheck = false;
+        input.inputMode = config.inputMode;
         
         input.style.cssText = `
             width: 100%;
-            padding: ${config.platform.isMobile ? '16px' : '12px'};
-            margin: 0 0 20px 0;
+            padding: ${isTVDevice() ? '20px' : '12px'};
+            margin: 0 0 25px 0;
             border: 2px solid ${config.theme === 'dark' ? '#444' : '#ddd'};
-            border-radius: 8px;
-            font-size: ${config.platform.isMobile ? '18px' : '16px'};
+            border-radius: ${isTVDevice() ? '6px' : '8px'};
+            font-size: ${isTVDevice() ? '24px' : '16px'};
             background: ${config.theme === 'dark' ? '#2a2a2a' : '#f9f9f9'};
             color: ${config.theme === 'dark' ? '#ffffff' : '#000000'};
             box-sizing: border-box;
@@ -289,7 +417,7 @@ javascript
         
         // Обработчики для input
         input.addEventListener('focus', () => {
-            input.style.borderColor = config.theme === 'dark' ? '#667eea' : '#764ba2';
+            input.style.borderColor = '#667eea';
         });
         
         input.addEventListener('blur', () => {
@@ -310,200 +438,45 @@ javascript
         const container = document.createElement('div');
         container.style.cssText = `
             display: flex;
-            gap: 12px;
-            justify-content: flex-end;
+            gap: ${isTVDevice() ? '20px' : '12px'};
+            justify-content: ${isTVDevice() ? 'space-between' : 'flex-end'};
         `;
         
-        // Кнопка отмены
-        const cancelBtn = document.createElement('button');
-        cancelBtn.className = 'input-dialog-cancel';
-        cancelBtn.textContent = 'Отмена';
-        cancelBtn.style.cssText = `
-            padding: ${config.platform.isMobile ? '14px 24px' : '10px 20px'};
-            background: ${config.theme === 'dark' ? '#444' : '#f0f0f0'};
-            color: ${config.theme === 'dark' ? '#ccc' : '#666'};
-            border: none;
-            border-radius: 8px;
-            font-size: ${config.platform.isMobile ? '16px' : '14px'};
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            flex: 1;
-        `;
+        // Кнопка отмены (только если cancelable)
+        if (config.cancelable) {
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'input-dialog-button input-dialog-cancel';
+            cancelBtn.textContent = 'Отмена';
+            cancelBtn.tabIndex = 1;
+            cancelBtn.style.cssText = `
+                padding: ${isTVDevice() ? '20px 30px' : '10px 20px'};
+                background: ${config.theme === 'dark' ? '#444' : '#f0f0f0'};
+                color: ${config.theme === 'dark' ? '#ccc' : '#666'};
+                border: none;
+                border-radius: ${isTVDevice() ? '6px' : '8px'};
+                font-size: ${isTVDevice() ? '22px' : '14px'};
+                font-weight: ${isTVDevice() ? 'bold' : '500'};
+                cursor: pointer;
+                transition: all 0.3s ease;
+                flex: ${isTVDevice() ? '1' : 'none'};
+                min-width: ${isTVDevice() ? '200px' : 'auto'};
+            `;
+            
+            cancelBtn.addEventListener('click', () => {
+                closeDialog(overlay, config);
+            });
+            
+            container.appendChild(cancelBtn);
+        }
         
         // Кнопка OK
         const okBtn = document.createElement('button');
-        okBtn.className = 'input-dialog-ok';
+        okBtn.className = 'input-dialog-button input-dialog-ok';
         okBtn.textContent = 'OK';
+        okBtn.tabIndex = 2;
         okBtn.style.cssText = `
-            padding: ${config.platform.isMobile ? '14px 24px' : '10px 20px'};
+            padding: ${isTVDevice() ? '20px 30px' : '10px 20px'};
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
-            border-radius: 8px;
-            font-size: ${config.platform.isMobile ? '16px' : '14px'};
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            flex: 1;
-        `;
-        
-        // Обработчики
-        cancelBtn.addEventListener('click', () => {
-            closeDialog(overlay);
-            if (config.cancelable && typeof options.onCancel === 'function') {
-                options.onCancel();
-            }
-        });
-        
-        okBtn.addEventListener('click', () => {
-            handleConfirm(input, callback, config, overlay);
-        });
-        
-        // Hover эффекты для десктопа
-        if (!config.platform.isMobile) {
-            cancelBtn.addEventListener('mouseenter', () => {
-                cancelBtn.style.opacity = '0.8';
-            });
-            cancelBtn.addEventListener('mouseleave', () => {
-                cancelBtn.style.opacity = '1';
-            });
-            
-            okBtn.addEventListener('mouseenter', () => {
-                okBtn.style.transform = 'translateY(-2px)';
-                okBtn.style.boxShadow = '0 5px 15px rgba(102, 126, 234, 0.4)';
-            });
-            okBtn.addEventListener('mouseleave', () => {
-                okBtn.style.transform = 'translateY(0)';
-                okBtn.style.boxShadow = 'none';
-            });
-        }
-        
-        container.appendChild(cancelBtn);
-        container.appendChild(okBtn);
-        
-        return container;
-    }
-    
-    function handleConfirm(input, callback, config, overlay) {
-        const value = input.value.trim();
-        
-        if (config.required && !value) {
-            showError('Поле не может быть пустым', input);
-            return;
-        }
-        
-        if (value.length < config.minLength) {
-            showError(`Минимальная длина: ${config.minLength} символов`, input);
-            return;
-        }
-        
-        closeDialog(overlay);
-        callback(value);
-    }
-    
-    function showError(message, input) {
-        // Удаляем старую ошибку
-        const oldError = input.parentNode.querySelector('.input-dialog-error');
-        if (oldError) oldError.remove();
-        
-        const error = document.createElement('div');
-        error.className = 'input-dialog-error';
-        error.textContent = message;
-        error.style.cssText = `
-            color: #ff4757;
-            font-size: 14px;
-            margin: -10px 0 10px 0;
-            animation: inputDialogShake 0.3s ease;
-        `;
-        
-        input.parentNode.insertBefore(error, input.nextSibling);
-        
-        // Анимация встряхивания
-        input.style.animation = 'inputDialogShake 0.3s ease';
-        setTimeout(() => {
-            input.style.animation = '';
-        }, 300);
-        
-        input.focus();
-    }
-    
-    function closeDialog(overlay) {
-        if (overlay && overlay.parentNode) {
-            if (overlay._keyHandler) {
-                document.removeEventListener('keydown', overlay._keyHandler);
-            }
-            overlay.remove();
-            document.body.style.overflow = '';
-        }
-    }
-    
-    function createKeyHandler(dialog, overlay, callback, config) {
-        return function(e) {
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                closeDialog(overlay);
-                if (config.cancelable && typeof options.onCancel === 'function') {
-                    options.onCancel();
-                }
-            } else if (e.key === 'Enter' && !e.shiftKey) {
-                const input = dialog.querySelector('.input-dialog-input');
-                if (input && document.activeElement === input) {
-                    e.preventDefault();
-                    handleConfirm(input, callback, config, overlay);
-                }
-            }
-        };
-    }
-    
-    function addDialogStyles() {
-        if (document.querySelector('#input-dialog-styles')) return;
-        
-        const style = document.createElement('style');
-        style.id = 'input-dialog-styles';
-        style.textContent = `
-            @keyframes inputDialogFadeIn {
-                from { opacity: 0; }
-                to { opacity: 1; }
-            }
-            
-            @keyframes inputDialogSlideUp {
-                from {
-                    opacity: 0;
-                    transform: translateY(30px);
-                }
-                to {
-                    opacity: 1;
-                    transform: translateY(0);
-                }
-            }
-            
-            @keyframes inputDialogShake {
-                0%, 100% { transform: translateX(0); }
-                10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
-                20%, 40%, 60%, 80% { transform: translateX(5px); }
-            }
-            
-            @media (max-width: 768px) {
-                .input-dialog {
-                    padding: 20px !important;
-                    margin: 10px !important;
-                }
-                
-                .input-dialog-input {
-                    font-size: 18px !important;
-                    padding: 16px !important;
-                }
-                
-                .input-dialog-cancel,
-                .input-dialog-ok {
-                    font-size: 16px !important;
-                    padding: 14px 20px !important;
-                }
-            }
-        `;
-        
-        document.head.appendChild(style);
-    }
-    
-})();
+            border-radius: ${isTVDevice() ? '6px' : '8px'};
