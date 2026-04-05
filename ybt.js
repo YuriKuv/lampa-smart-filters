@@ -8,7 +8,6 @@
     var POSITION_CLEAR_KEY = 'bookmark_clear_position';
     
     var isSaving = false;
-    var inputValue = '';
 
     function showMsg(text) {
         if (typeof Lampa !== 'undefined' && Lampa.Noty) {
@@ -18,36 +17,151 @@
         }
     }
 
-    // ==================== ДИАЛОГ ВВОДА (через Lampa.Select) ====================
+    // ==================== ДИАЛОГ ВВОДА (универсальный) ====================
     
     function showInputDialog(title, defaultValue, callback) {
-        inputValue = defaultValue || '';
+        // Сохраняем callback для использования после ввода
+        window._bookmarkCallback = callback;
+        window._bookmarkDefault = defaultValue;
+        window._bookmarkTitle = title;
         
-        Lampa.Select.show({
-            title: title,
-            keyboard: true,
-            value: inputValue,
-            items: [
-                { title: '✅ Сохранить', value: 'save' },
-                { title: '❌ Отмена', value: 'cancel' }
-            ],
-            onKeyboard: function(value) {
-                inputValue = value;
-            },
-            onSelect: function(item) {
-                if (item.value === 'save') {
-                    if (inputValue && inputValue.trim()) {
-                        callback(inputValue.trim());
-                    } else {
-                        showMsg('Название не может быть пустым');
-                        showInputDialog(title, defaultValue, callback);
+        // Создаем простой HTML-диалог, который работает с пультом
+        var dialogId = 'bookmark_dialog_' + Date.now();
+        
+        var dialogHtml = `
+            <div id="${dialogId}" style="
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0,0,0,0.85);
+                z-index: 100000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            ">
+                <div style="
+                    width: 85%;
+                    max-width: 500px;
+                    background: #1a1a2e;
+                    border-radius: 12px;
+                    color: white;
+                    padding: 20px;
+                ">
+                    <div style="font-size: 20px; margin-bottom: 15px; text-align: center;">${title}</div>
+                    <div id="bookmark_value_${dialogId}" style="
+                        width: 100%;
+                        padding: 12px;
+                        background: #2a2a3e;
+                        border-radius: 8px;
+                        font-size: 16px;
+                        margin-bottom: 15px;
+                        min-height: 45px;
+                        word-break: break-all;
+                        border: 2px solid #4CAF50;
+                    ">${defaultValue}</div>
+                    <div style="display: flex; gap: 10px;">
+                        <div id="bookmark_edit_${dialogId}" class="selector" style="
+                            flex: 1;
+                            padding: 10px;
+                            text-align: center;
+                            background: #2196F3;
+                            border-radius: 6px;
+                        ">✏️ Изменить</div>
+                        <div id="bookmark_save_${dialogId}" class="selector" style="
+                            flex: 1;
+                            padding: 10px;
+                            text-align: center;
+                            background: #4CAF50;
+                            border-radius: 6px;
+                        ">✅ Сохранить</div>
+                        <div id="bookmark_cancel_${dialogId}" class="selector" style="
+                            flex: 1;
+                            padding: 10px;
+                            text-align: center;
+                            background: #555;
+                            border-radius: 6px;
+                        ">❌ Отмена</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        $('body').append(dialogHtml);
+        
+        var currentValue = defaultValue;
+        var dialog = $('#' + dialogId);
+        var valueDiv = $('#bookmark_value_' + dialogId);
+        
+        // Функция обновления отображения
+        function updateDisplay() {
+            valueDiv.text(currentValue || window._bookmarkDefault || '');
+        }
+        
+        // Функция закрытия диалога
+        function closeDialog() {
+            dialog.remove();
+            window._bookmarkCallback = null;
+            // Возвращаем фокус в Lampa
+            setTimeout(function() {
+                Lampa.Controller.enable();
+            }, 100);
+        }
+        
+        // Кнопка "Изменить" — открываем нативную клавиатуру Lampa
+        $('#bookmark_edit_' + dialogId).on('hover:enter', function() {
+            // Пытаемся открыть клавиатуру через Lampa.Keyboard
+            if (typeof Lampa !== 'undefined' && Lampa.Keyboard && Lampa.Keyboard.show) {
+                Lampa.Keyboard.show({
+                    title: title,
+                    value: currentValue,
+                    onKey: function(value) {
+                        currentValue = value;
+                        updateDisplay();
+                    },
+                    onEnter: function(value) {
+                        currentValue = value;
+                        updateDisplay();
                     }
+                });
+            } else {
+                // Альтернативный способ: используем prompt (для браузера)
+                var newValue = prompt('Введите название:', currentValue);
+                if (newValue !== null) {
+                    currentValue = newValue;
+                    updateDisplay();
                 }
-                // cancel — просто закрываем
-            },
-            onBack: function() {
-                console.log('[SaveFilter] Диалог закрыт');
             }
+        });
+        
+        // Кнопка "Сохранить"
+        $('#bookmark_save_' + dialogId).on('hover:enter', function() {
+            if (currentValue && currentValue.trim()) {
+                closeDialog();
+                if (window._bookmarkCallback) {
+                    window._bookmarkCallback(currentValue.trim());
+                    window._bookmarkCallback = null;
+                }
+            } else {
+                showMsg('Название не может быть пустым');
+            }
+        });
+        
+        // Кнопка "Отмена"
+        $('#bookmark_cancel_' + dialogId).on('hover:enter', function() {
+            closeDialog();
+        });
+        
+        // Для поддержки мыши
+        $('#bookmark_edit_' + dialogId).on('click', function() {
+            $('#bookmark_edit_' + dialogId).trigger('hover:enter');
+        });
+        $('#bookmark_save_' + dialogId).on('click', function() {
+            $('#bookmark_save_' + dialogId).trigger('hover:enter');
+        });
+        $('#bookmark_cancel_' + dialogId).on('click', function() {
+            $('#bookmark_cancel_' + dialogId).trigger('hover:enter');
         });
     }
 
