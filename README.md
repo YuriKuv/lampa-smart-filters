@@ -24,13 +24,13 @@
 
     Откройте Настройки → Расширения → Добавить плагин
 
-    Вставьте ссылку на файл плагина: https://raw.githubusercontent.com/ваш-username/lampa-bookmarks/main/bookmarks.js
+    Вставьте ссылку на файл плагина: https://yurikuv.github.io/your-bookmarks/yba.js
 
     Нажмите "Добавить"
 
 Способ 2: Локальный файл
 
-    Скачайте файл bookmarks.js
+    Скачайте файл yba.js
 
     Поместите его в папку plugins вашего сервера с Lampa
 
