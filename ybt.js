@@ -4,17 +4,15 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v5';
-    const CFG = 'bf_cfg_v5';
+    const STORE = 'bf_items_v6';
+    const CFG = 'bf_cfg_v6';
 
     let lock = false;
-
-    // ========= CONFIG =========
 
     function cfg() {
         return Lampa.Storage.get(CFG, {
             enabled: true,
-            sort: 'date'
+            button: 'side'
         }) || {};
     }
 
@@ -22,27 +20,22 @@
         Lampa.Storage.set(CFG, c, true);
     }
 
-    // ========= STORAGE =========
-
     function list() {
         return Lampa.Storage.get(STORE, []) || [];
     }
 
     function saveList(l) {
-        Lampa.Storage.set(STORE, l, true); // важно!
+        Lampa.Storage.set(STORE, l, true);
     }
 
     function notify(t) {
         Lampa.Noty.show(t);
     }
 
-    // ========= LOGIC =========
-
     function isAllowed() {
         const act = Lampa.Activity.active();
         if (!act || !act.url) return false;
 
-        // ❌ базовые разделы
         if (
             act.url === 'movie' ||
             act.url === 'tv' ||
@@ -50,11 +43,9 @@
             act.url === 'catalog'
         ) return false;
 
-        // ✅ фильтры / подборки
         if (act.params || act.genres || act.sort || act.filter)
             return true;
 
-        // ✅ discover с параметрами (ЕЩЁ)
         if (act.url.indexOf('discover') !== -1 && act.url.indexOf('?') !== -1)
             return true;
 
@@ -65,9 +56,15 @@
         return {
             id: Date.now(),
             name: a.title || 'Закладка',
+
             url: a.url,
-            component: a.component,
-            source: a.source,
+            component: a.component || 'category_full',
+            source: a.source || 'tmdb',
+
+            genres: a.genres,
+            params: a.params,
+            page: a.page || 1,
+
             created: Date.now()
         };
     }
@@ -76,23 +73,12 @@
         return list().some(i => i.url === url);
     }
 
-    function sorted(data) {
-        const c = cfg();
-
-        if (c.sort === 'name')
-            return data.sort((a, b) => a.name.localeCompare(b.name));
-
-        return data.sort((a, b) => b.created - a.created);
-    }
-
     function unlock() {
         setTimeout(() => {
             lock = false;
             Lampa.Controller.toggle('content');
         }, 200);
     }
-
-    // ========= SAVE =========
 
     function save() {
         if (lock) return;
@@ -127,8 +113,6 @@
         }, unlock);
     }
 
-    // ========= REMOVE =========
-
     function remove(item) {
         const l = list().filter(i => i.id !== item.id);
         saveList(l);
@@ -141,30 +125,34 @@
         notify('Удалено');
     }
 
-    // ========= RENDER =========
-
     function render() {
         $('.bf-item').remove();
 
         const root = $('.menu .menu__list').eq(0);
         if (!root.length) return;
 
-        const l = sorted(list());
-
-        l.forEach(item => {
+        list().forEach(item => {
             const el = $(`
                 <li class="menu__item selector bf-item">
+                    <div class="menu__ico">bookmark</div>
                     <div class="menu__text">${item.name}</div>
                 </li>
             `);
 
-            // открыть
             el.on('hover:enter', (e) => {
                 e.stopPropagation();
-                Lampa.Activity.push(item);
+
+                Lampa.Activity.push({
+                    url: item.url,
+                    title: item.name,
+                    component: item.component,
+                    source: item.source,
+                    genres: item.genres,
+                    params: item.params,
+                    page: item.page
+                });
             });
 
-            // долгое нажатие = удалить
             el.on('hover:long', (e) => {
                 e.stopPropagation();
 
@@ -175,9 +163,7 @@
                         { title: 'Да', action: 'remove' }
                     ],
                     onSelect: (a) => {
-                        if (a.action === 'remove') {
-                            remove(item);
-                        }
+                        if (a.action === 'remove') remove(item);
                     },
                     onBack: () => {
                         Lampa.Controller.toggle('content');
@@ -189,13 +175,12 @@
         });
     }
 
-    // ========= BUTTON =========
-
     function addButton() {
         if ($('[data-bf-save]').length) return;
 
         const btn = $(`
             <li class="menu__item selector" data-bf-save>
+                <div class="menu__ico">add</div>
                 <div class="menu__text">Добавить закладку</div>
             </li>
         `);
@@ -206,12 +191,12 @@
         });
 
         const menu = $('.menu .menu__list');
-        if (!menu.length) return;
 
-        menu.eq(1).prepend(btn);
+        if (cfg().button === 'top')
+            menu.eq(0).prepend(btn);
+        else
+            menu.eq(1).prepend(btn);
     }
-
-    // ========= SETTINGS =========
 
     function settings() {
         Lampa.SettingsApi.addComponent({
@@ -223,22 +208,22 @@
         Lampa.SettingsApi.addParam({
             component: 'bf',
             param: {
-                name: 'bf_sort',
+                name: 'bf_button',
                 type: 'select',
                 values: {
-                    date: 'По дате',
-                    name: 'По имени'
+                    side: 'Боковое меню',
+                    top: 'Верхнее меню'
                 },
-                default: 'date'
+                default: 'side'
             },
             field: {
-                name: 'Сортировка'
+                name: 'Кнопка добавления'
             },
             onChange: v => {
                 const c = cfg();
-                c.sort = v;
+                c.button = v;
                 saveCfg(c);
-                render();
+                location.reload();
             }
         });
 
@@ -273,8 +258,6 @@
         });
     }
 
-    // ========= INIT =========
-
     function init() {
         if (!cfg().enabled) return;
 
@@ -283,12 +266,7 @@
         settings();
     }
 
-    if (window.appready) {
-        init();
-    } else {
-        Lampa.Listener.follow('app', (e) => {
-            if (e.type === 'ready') init();
-        });
-    }
+    if (window.appready) init();
+    else Lampa.Listener.follow('app', e => e.type === 'ready' && init());
 
 })();
