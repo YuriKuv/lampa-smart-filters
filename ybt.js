@@ -4,10 +4,31 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v10';
-    const CFG = 'bf_cfg_v10';
+    const STORE = 'bf_items_v11';
+    const CFG = 'bf_cfg_v11';
 
     let lock = false;
+
+    // ========= SVG ICONS =========
+
+    function iconPlus() {
+        return `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>`;
+    }
+
+    function iconBookmark() {
+        return `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M6 4h12v16l-6-4-6 4z"/>
+        </svg>`;
+    }
+
+    // ========= CONFIG =========
 
     function cfg() {
         return Lampa.Storage.get(CFG, {
@@ -20,6 +41,8 @@
         Lampa.Storage.set(CFG, c, true);
     }
 
+    // ========= STORAGE =========
+
     function list() {
         return Lampa.Storage.get(STORE, []) || [];
     }
@@ -31,6 +54,8 @@
     function notify(t) {
         Lampa.Noty.show(t);
     }
+
+    // ========= LOGIC =========
 
     function isAllowed() {
         const act = Lampa.Activity.active();
@@ -77,6 +102,8 @@
         }, 200);
     }
 
+    // ========= SAVE =========
+
     function save() {
         if (lock) return;
         lock = true;
@@ -110,6 +137,8 @@
         }, unlock);
     }
 
+    // ========= REMOVE =========
+
     function remove(item) {
         const l = list().filter(i => i.id !== item.id);
         saveList(l);
@@ -121,6 +150,8 @@
 
         notify('Удалено');
     }
+
+    // ========= OPEN =========
 
     function open(item) {
         Lampa.Activity.push({
@@ -134,6 +165,8 @@
         });
     }
 
+    // ========= RENDER =========
+
     function render() {
         $('.bf-item').remove();
 
@@ -143,7 +176,7 @@
         list().forEach(item => {
             const el = $(`
                 <li class="menu__item selector bf-item">
-                    <div class="menu__ico" data-ico="bookmark_border"></div>
+                    <div class="menu__ico">${iconBookmark()}</div>
                     <div class="menu__text">${item.name}</div>
                 </li>
             `);
@@ -172,6 +205,8 @@
         });
     }
 
+    // ========= BUTTON =========
+
     function addButton() {
         if ($('[data-bf-save]').length) return;
 
@@ -183,7 +218,7 @@
 
             const btn = $(`
                 <div class="head__action selector" data-bf-save>
-                    <div class="head__action-ico" data-ico="plus"></div>
+                    <div class="head__action-ico">${iconPlus()}</div>
                 </div>
             `);
 
@@ -199,7 +234,7 @@
 
             const btn = $(`
                 <li class="menu__item selector" data-bf-save>
-                    <div class="menu__ico" data-ico="plus"></div>
+                    <div class="menu__ico">${iconPlus()}</div>
                     <div class="menu__text">Добавить закладку</div>
                 </li>
             `);
@@ -212,6 +247,8 @@
             menu.eq(1).prepend(btn);
         }
     }
+
+    // ========= SETTINGS =========
 
     function settings() {
         Lampa.SettingsApi.addComponent({
