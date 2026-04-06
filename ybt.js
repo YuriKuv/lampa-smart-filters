@@ -1,165 +1,219 @@
 (function () {
     'use strict';
 
-    console.log('[SaveFilter FIX] старт');
+    const STORE_KEY = 'bf_items';
+    const CFG_KEY = 'bf_config';
 
-    const KEY = 'saved_filters_list';
     let lock = false;
 
-    function msg(text) {
-        try {
-            Lampa.Noty.show(text);
-        } catch (e) {
-            console.log(text);
-        }
+    const defaults = {
+        enabled: true,
+        button_position: 'side' // side | top
+    };
+
+    function getCfg() {
+        return Object.assign({}, defaults, Lampa.Storage.get(CFG_KEY, {}));
     }
 
-    function safeUnlock() {
+    function setCfg(cfg) {
+        Lampa.Storage.set(CFG_KEY, cfg);
+    }
+
+    function notify(t) {
+        Lampa.Noty.show(t);
+    }
+
+    function getList() {
+        return Lampa.Storage.get(STORE_KEY, []);
+    }
+
+    function setList(list) {
+        Lampa.Storage.set(STORE_KEY, list);
+    }
+
+    function isAllowed() {
+        const act = Lampa.Activity.active();
+        if (!act) return false;
+
+        // разрешаем только discover / фильтры / "ещё"
+        return act.url && act.url.indexOf('discover') !== -1;
+    }
+
+    function normalize(act) {
+        return {
+            id: Date.now(),
+            name: act.title,
+            url: act.url,
+            component: act.component,
+            source: act.source,
+            genres: act.genres,
+            sort: act.sort
+        };
+    }
+
+    function safeReturn() {
         setTimeout(() => {
             lock = false;
-            try {
-                Lampa.Controller.toggle('content');
-            } catch (e) {}
+            Lampa.Controller.toggle('content');
         }, 300);
-    }
-
-    function getActivity() {
-        try {
-            return Lampa.Activity.active();
-        } catch (e) {
-            return null;
-        }
-    }
-
-    function normalize(activity) {
-        if (!activity) return '';
-
-        if (activity.url?.includes('discover'))
-            return activity.url;
-
-        if (activity.genres)
-            return `discover/${activity.url || 'movie'}?with_genres=${activity.genres}`;
-
-        if (activity.sort)
-            return `discover/${activity.url || 'movie'}?sort_by=${activity.sort}`;
-
-        return activity.url || '';
     }
 
     function save() {
         if (lock) return;
         lock = true;
 
-        const act = getActivity();
-
-        if (!act) {
-            msg('Ошибка: нет активности');
-            return safeUnlock();
+        if (!isAllowed()) {
+            notify('Недоступно в этом разделе');
+            return safeReturn();
         }
+
+        const act = Lampa.Activity.active();
 
         Lampa.Input.edit({
             title: 'Название закладки',
-            value: act.title || 'Закладка',
-            free: true,
-            nosave: true
-        }, (value) => {
-            try {
-                if (!value) return safeUnlock();
+            value: act.title || 'Закладка'
+        }, (val) => {
+            if (!val) return safeReturn();
 
-                const list = Lampa.Storage.get(KEY, []);
+            const list = getList();
 
-                const item = {
-                    id: Date.now(),
-                    name: value.trim(),
-                    url: normalize(act),
-                    component: act.component || 'category',
-                    source: act.source || 'tmdb',
-                    genres: act.genres,
-                    sort: act.sort
-                };
+            list.push({
+                ...normalize(act),
+                name: val.trim()
+            });
 
-                list.push(item);
-                Lampa.Storage.set(KEY, list);
+            setList(list);
+            notify('Сохранено');
+            render();
 
-                render();
-
-                msg('Сохранено');
-            } catch (e) {
-                console.error(e);
-                msg('Ошибка сохранения');
-            }
-
-            safeUnlock();
-        }, () => {
-            safeUnlock();
-        });
+            safeReturn();
+        }, safeReturn);
     }
 
     function open(item) {
-        try {
-            Lampa.Activity.push({
-                url: item.url,
-                title: item.name,
-                component: item.component,
-                source: item.source,
-                genres: item.genres,
-                sort: item.sort
-            });
-        } catch (e) {
-            msg('Ошибка открытия');
-        }
+        Lampa.Activity.push(item);
     }
 
-    function remove(id) {
-        const list = Lampa.Storage.get(KEY, []);
-        const updated = list.filter(i => i.id !== id);
-
-        Lampa.Storage.set(KEY, updated);
-        render();
-        msg('Удалено');
+    function confirmRemove(item) {
+        Lampa.Modal.confirm({
+            title: 'Удаление',
+            text: `Удалить "${item.name}"?`,
+            onConfirm: () => {
+                const list = getList().filter(i => i.id !== item.id);
+                setList(list);
+                render();
+                notify('Удалено');
+            }
+        });
     }
 
     function render() {
-        $('.my-bookmark').remove();
+        $('.bf-item').remove();
 
-        const list = Lampa.Storage.get(KEY, []);
+        const list = getList();
         const root = $('.menu .menu__list').eq(0);
-
-        if (!root.length) return;
 
         list.forEach(item => {
             const el = $(`
-                <li class="menu__item selector my-bookmark">
+                <li class="menu__item selector bf-item">
                     <div class="menu__text">${item.name}</div>
                 </li>
             `);
 
             el.on('hover:enter', () => open(item));
-            el.on('hover:long', () => remove(item.id));
+            el.on('hover:long', () => confirmRemove(item));
 
             root.append(el);
         });
     }
 
     function addButton() {
-        if ($('[data-save-filter]').length) return;
+        if ($('[data-bf-save]').length) return;
+
+        const cfg = getCfg();
 
         const btn = $(`
-            <li class="menu__item selector" data-save-filter>
-                <div class="menu__text">⭐ Сохранить</div>
+            <li class="menu__item selector" data-bf-save>
+                <div class="menu__text">Сохранить</div>
             </li>
         `);
 
         btn.on('hover:enter', save);
 
-        $('.menu .menu__list').eq(1).prepend(btn);
+        if (cfg.button_position === 'top') {
+            $('.menu .menu__list').eq(0).prepend(btn);
+        } else {
+            $('.menu .menu__list').eq(1).prepend(btn);
+        }
+    }
+
+    function settings() {
+        Lampa.SettingsApi.addComponent({
+            component: 'bookmarks_filter',
+            icon: 'bookmark',
+            name: 'Мои закладки'
+        });
+
+        Lampa.SettingsApi.addParam({
+            component: 'bookmarks_filter',
+            field: {
+                name: 'Включить',
+                type: 'trigger',
+                default: true
+            },
+            onChange: (v) => {
+                const cfg = getCfg();
+                cfg.enabled = v;
+                setCfg(cfg);
+            }
+        });
+
+        Lampa.SettingsApi.addParam({
+            component: 'bookmarks_filter',
+            field: {
+                name: 'Позиция кнопки',
+                type: 'select',
+                values: {
+                    side: 'Боковая панель',
+                    top: 'Верхняя панель'
+                },
+                default: 'side'
+            },
+            onChange: (v) => {
+                const cfg = getCfg();
+                cfg.button_position = v;
+                setCfg(cfg);
+                location.reload();
+            }
+        });
+
+        Lampa.SettingsApi.addParam({
+            component: 'bookmarks_filter',
+            field: {
+                name: 'Очистить все',
+                type: 'button'
+            },
+            onChange: () => {
+                Lampa.Modal.confirm({
+                    title: 'Очистка',
+                    text: 'Удалить все закладки?',
+                    onConfirm: () => {
+                        setList([]);
+                        render();
+                        notify('Очищено');
+                    }
+                });
+            }
+        });
     }
 
     function init() {
-        console.log('[SaveFilter FIX] init');
+        const cfg = getCfg();
+        if (!cfg.enabled) return;
 
         addButton();
         render();
+        settings();
     }
 
     if (window.appready) {
