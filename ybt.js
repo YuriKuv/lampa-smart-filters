@@ -4,10 +4,12 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v6';
-    const CFG = 'bf_cfg_v6';
+    const STORE = 'bf_items_v7';
+    const CFG = 'bf_cfg_v7';
 
     let lock = false;
+
+    // ========= CONFIG =========
 
     function cfg() {
         return Lampa.Storage.get(CFG, {
@@ -19,6 +21,8 @@
     function saveCfg(c) {
         Lampa.Storage.set(CFG, c, true);
     }
+
+    // ========= STORAGE =========
 
     function list() {
         return Lampa.Storage.get(STORE, []) || [];
@@ -32,10 +36,13 @@
         Lampa.Noty.show(t);
     }
 
+    // ========= LOGIC =========
+
     function isAllowed() {
         const act = Lampa.Activity.active();
         if (!act || !act.url) return false;
 
+        // базовые разделы
         if (
             act.url === 'movie' ||
             act.url === 'tv' ||
@@ -43,9 +50,11 @@
             act.url === 'catalog'
         ) return false;
 
+        // фильтры / подборки
         if (act.params || act.genres || act.sort || act.filter)
             return true;
 
+        // discover (ЕЩЁ)
         if (act.url.indexOf('discover') !== -1 && act.url.indexOf('?') !== -1)
             return true;
 
@@ -80,6 +89,8 @@
         }, 200);
     }
 
+    // ========= SAVE =========
+
     function save() {
         if (lock) return;
         lock = true;
@@ -113,6 +124,8 @@
         }, unlock);
     }
 
+    // ========= REMOVE =========
+
     function remove(item) {
         const l = list().filter(i => i.id !== item.id);
         saveList(l);
@@ -124,6 +137,22 @@
 
         notify('Удалено');
     }
+
+    // ========= OPEN =========
+
+    function open(item) {
+        Lampa.Activity.push({
+            url: item.url,
+            title: item.name,
+            component: item.component,
+            source: item.source,
+            genres: item.genres,
+            params: item.params,
+            page: item.page
+        });
+    }
+
+    // ========= RENDER =========
 
     function render() {
         $('.bf-item').remove();
@@ -141,16 +170,7 @@
 
             el.on('hover:enter', (e) => {
                 e.stopPropagation();
-
-                Lampa.Activity.push({
-                    url: item.url,
-                    title: item.name,
-                    component: item.component,
-                    source: item.source,
-                    genres: item.genres,
-                    params: item.params,
-                    page: item.page
-                });
+                open(item);
             });
 
             el.on('hover:long', (e) => {
@@ -175,51 +195,55 @@
         });
     }
 
+    // ========= BUTTON =========
+
     function addButton() {
         if ($('[data-bf-save]').length) return;
-    
-        const btn = $(`
-            <div class="head__action selector" data-bf-save>
-                <div class="head__action-ico">add</div>
-            </div>
-        `);
-    
-        const sideBtn = $(`
-            <li class="menu__item selector" data-bf-save>
-                <div class="menu__ico">add</div>
-                <div class="menu__text">Добавить закладку</div>
-            </li>
-        `);
-    
+
         const c = cfg();
-    
+
         // ===== ВЕРХНЯЯ ПАНЕЛЬ =====
         if (c.button === 'top') {
+
             const head = $('.head__actions, .head__buttons').first();
-    
             if (!head.length) return;
-    
+
+            const btn = $(`
+                <div class="head__action selector" data-bf-save>
+                    <div class="head__action-ico">add</div>
+                </div>
+            `);
+
             btn.on('hover:enter', (e) => {
                 e.stopPropagation();
                 save();
             });
-    
+
             head.prepend(btn);
         }
-    
-        // ===== БОКОВАЯ ПАНЕЛЬ =====
+
+        // ===== БОКОВОЕ МЕНЮ =====
         else {
             const menu = $('.menu .menu__list');
             if (!menu.length) return;
-    
-            sideBtn.on('hover:enter', (e) => {
+
+            const btn = $(`
+                <li class="menu__item selector" data-bf-save>
+                    <div class="menu__ico">add</div>
+                    <div class="menu__text">Добавить закладку</div>
+                </li>
+            `);
+
+            btn.on('hover:enter', (e) => {
                 e.stopPropagation();
                 save();
             });
-    
-            menu.eq(1).prepend(sideBtn);
+
+            menu.eq(1).prepend(btn);
         }
     }
+
+    // ========= SETTINGS =========
 
     function settings() {
         Lampa.SettingsApi.addComponent({
@@ -235,7 +259,7 @@
                 type: 'select',
                 values: {
                     side: 'Боковое меню',
-                    top: 'Верхнее меню'
+                    top: 'Верхняя панель'
                 },
                 default: 'side'
             },
@@ -281,15 +305,20 @@
         });
     }
 
+    // ========= INIT =========
+
     function init() {
         if (!cfg().enabled) return;
-    
+
         setTimeout(() => {
             addButton();
         }, 500);
-    
+
         render();
         settings();
     }
+
+    if (window.appready) init();
+    else Lampa.Listener.follow('app', e => e.type === 'ready' && init());
 
 })();
