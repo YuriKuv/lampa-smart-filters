@@ -1,6 +1,9 @@
 (function () {
     'use strict';
 
+    if (window.bf_init) return;
+    window.bf_init = true;
+
     const STORE = 'bf_items_v2';
     const CFG = 'bf_cfg_v2';
 
@@ -8,13 +11,11 @@
 
     const defaults = {
         enabled: true,
-        ui: 'simple', // simple | advanced
-        sync: 'local', // local | gist | firebase
+        ui: 'simple',
+        sync: 'local',
         button: 'side',
-        sort: 'date' // date | name
+        sort: 'date'
     };
-
-    // ================= CORE =================
 
     function cfg() {
         return Object.assign({}, defaults, Lampa.Storage.get(CFG, {}));
@@ -30,7 +31,6 @@
 
     function saveList(l) {
         Lampa.Storage.set(STORE, l);
-        Sync.push(l);
     }
 
     function notify(t) {
@@ -61,6 +61,18 @@
         return data.sort((a, b) => b.created - a.created);
     }
 
+    function isAllowed() {
+        const act = Lampa.Activity.active();
+        return act && act.url && act.url.indexOf('discover') !== -1;
+    }
+
+    function unlock() {
+        setTimeout(() => {
+            lock = false;
+            Lampa.Controller.toggle('content');
+        }, 300);
+    }
+
     // ================= SAVE =================
 
     function save() {
@@ -69,8 +81,8 @@
 
         const act = Lampa.Activity.active();
 
-        if (!act || !act.url || act.url.indexOf('discover') === -1) {
-            notify('Недоступно');
+        if (!isAllowed()) {
+            notify('Недоступно в этом разделе');
             return unlock();
         }
 
@@ -80,8 +92,8 @@
         }
 
         Lampa.Input.edit({
-            title: 'Название',
-            value: act.title
+            title: 'Название закладки',
+            value: act.title || 'Закладка'
         }, (val) => {
             if (!val) return unlock();
 
@@ -90,17 +102,37 @@
 
             saveList(l);
             render();
-            notify('Сохранено');
 
+            notify('Сохранено');
             unlock();
         }, unlock);
     }
 
-    function unlock() {
-        setTimeout(() => {
-            lock = false;
-            Lampa.Controller.toggle('content');
-        }, 300);
+    // ================= REMOVE =================
+
+    function removeConfirm(item) {
+        Lampa.Modal.confirm({
+            title: 'Удаление',
+            text: `Удалить "${item.name}"?`,
+            onConfirm: () => {
+                const l = list().filter(i => i.id !== item.id);
+                saveList(l);
+                render();
+                notify('Удалено');
+            }
+        });
+    }
+
+    function clearAll() {
+        Lampa.Modal.confirm({
+            title: 'Очистить',
+            text: 'Удалить все закладки?',
+            onConfirm: () => {
+                saveList([]);
+                render();
+                notify('Очищено');
+            }
+        });
     }
 
     // ================= UI SIMPLE =================
@@ -111,6 +143,8 @@
         $('.bf-item').remove();
 
         const root = $('.menu .menu__list').eq(0);
+        if (!root.length) return;
+
         const l = sorted(list());
 
         l.forEach(i => {
@@ -120,8 +154,15 @@
                 </li>
             `);
 
-            el.on('hover:enter', () => Lampa.Activity.push(i));
-            el.on('hover:long', () => removeConfirm(i));
+            el.on('hover:enter', (e) => {
+                e.stopPropagation();
+                Lampa.Activity.push(i);
+            });
+
+            el.on('hover:long', (e) => {
+                e.stopPropagation();
+                removeConfirm(i);
+            });
 
             root.append(el);
         });
@@ -146,13 +187,15 @@
 
         const modal = $(html);
 
-        modal.find('.bf-row').on('hover:enter', function () {
+        modal.find('.bf-row').on('hover:enter', function (e) {
+            e.stopPropagation();
             const id = $(this).data('id');
             const item = l.find(x => x.id === id);
             Lampa.Activity.push(item);
         });
 
-        modal.find('.bf-row').on('hover:long', function () {
+        modal.find('.bf-row').on('hover:long', function (e) {
+            e.stopPropagation();
             const id = $(this).data('id');
             const item = l.find(x => x.id === id);
             removeConfirm(item);
@@ -164,71 +207,31 @@
         });
     }
 
-    // ================= REMOVE =================
-
-    function removeConfirm(item) {
-        Lampa.Modal.confirm({
-            title: 'Удаление',
-            text: item.name,
-            onConfirm: () => {
-                const l = list().filter(i => i.id !== item.id);
-                saveList(l);
-                render();
-                notify('Удалено');
-            }
-        });
-    }
-
-    function clearAll() {
-        Lampa.Modal.confirm({
-            title: 'Очистить',
-            text: 'Все закладки?',
-            onConfirm: () => {
-                saveList([]);
-                render();
-                notify('Очищено');
-            }
-        });
-    }
-
     // ================= BUTTON =================
 
-    function button() {
+    function addButton() {
         if ($('[data-bf]').length) return;
 
         const btn = $(`
-            <li class="menu__item selector" data-bf>
+            <li class="menu__item selector bf-btn" data-bf>
                 <div class="menu__text">Закладки</div>
             </li>
         `);
 
-        btn.on('hover:enter', () => {
-            if (cfg().ui === 'advanced') openManager();
-            else save();
+        btn.on('hover:enter', (e) => {
+            e.stopPropagation();
+            openManager();
         });
 
+        const menu = $('.menu .menu__list');
+
+        if (!menu.length) return;
+
         if (cfg().button === 'top')
-            $('.menu .menu__list').eq(0).prepend(btn);
+            menu.eq(0).prepend(btn);
         else
-            $('.menu .menu__list').eq(1).prepend(btn);
+            menu.eq(1).prepend(btn);
     }
-
-    // ================= SYNC =================
-
-    const Sync = {
-        push(data) {
-            const c = cfg();
-
-            if (c.sync === 'gist') {
-                console.log('sync gist', data);
-                // TODO: fetch POST
-            }
-
-            if (c.sync === 'firebase') {
-                console.log('sync firebase');
-            }
-        }
-    };
 
     // ================= SETTINGS =================
 
@@ -241,25 +244,79 @@
 
         Lampa.SettingsApi.addParam({
             component: 'bf',
-            field: { name: 'UI', type: 'select', values: { simple: 'Простой', advanced: 'Расширенный' } },
-            onChange: v => { let c = cfg(); c.ui = v; saveCfg(c); location.reload(); }
+            param: {
+                name: 'bf_ui',
+                type: 'select',
+                values: {
+                    simple: 'Простой',
+                    advanced: 'Расширенный'
+                },
+                default: 'simple'
+            },
+            field: {
+                name: 'Интерфейс'
+            },
+            onChange: v => {
+                let c = cfg();
+                c.ui = v;
+                saveCfg(c);
+                location.reload();
+            }
         });
 
         Lampa.SettingsApi.addParam({
             component: 'bf',
-            field: { name: 'Синхронизация', type: 'select', values: { local: 'Локально', gist: 'GitHub Gist', firebase: 'Firebase' } },
-            onChange: v => { let c = cfg(); c.sync = v; saveCfg(c); }
+            param: {
+                name: 'bf_sync',
+                type: 'select',
+                values: {
+                    local: 'Локально',
+                    gist: 'GitHub Gist',
+                    firebase: 'Firebase'
+                },
+                default: 'local'
+            },
+            field: {
+                name: 'Синхронизация'
+            },
+            onChange: v => {
+                let c = cfg();
+                c.sync = v;
+                saveCfg(c);
+            }
         });
 
         Lampa.SettingsApi.addParam({
             component: 'bf',
-            field: { name: 'Сортировка', type: 'select', values: { date: 'По дате', name: 'По имени' } },
-            onChange: v => { let c = cfg(); c.sort = v; saveCfg(c); render(); }
+            param: {
+                name: 'bf_sort',
+                type: 'select',
+                values: {
+                    date: 'По дате',
+                    name: 'По имени'
+                },
+                default: 'date'
+            },
+            field: {
+                name: 'Сортировка'
+            },
+            onChange: v => {
+                let c = cfg();
+                c.sort = v;
+                saveCfg(c);
+                render();
+            }
         });
 
         Lampa.SettingsApi.addParam({
             component: 'bf',
-            field: { name: 'Очистить', type: 'button' },
+            param: {
+                name: 'bf_clear',
+                type: 'button'
+            },
+            field: {
+                name: 'Очистить закладки'
+            },
             onChange: clearAll
         });
     }
@@ -269,12 +326,17 @@
     function init() {
         if (!cfg().enabled) return;
 
-        button();
+        addButton();
         render();
         settings();
     }
 
-    if (window.appready) init();
-    else Lampa.Listener.follow('app', e => e.type === 'ready' && init());
+    if (window.appready) {
+        init();
+    } else {
+        Lampa.Listener.follow('app', (e) => {
+            if (e.type === 'ready') init();
+        });
+    }
 
 })();
