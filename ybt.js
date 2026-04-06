@@ -4,12 +4,10 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v8';
-    const CFG = 'bf_cfg_v8';
+    const STORE = 'bf_items_v9';
+    const CFG = 'bf_cfg_v9';
 
     let lock = false;
-
-    // ========= CONFIG =========
 
     function cfg() {
         return Lampa.Storage.get(CFG, {
@@ -22,8 +20,6 @@
         Lampa.Storage.set(CFG, c, true);
     }
 
-    // ========= STORAGE =========
-
     function list() {
         return Lampa.Storage.get(STORE, []) || [];
     }
@@ -35,8 +31,6 @@
     function notify(t) {
         Lampa.Noty.show(t);
     }
-
-    // ========= LOGIC =========
 
     function isAllowed() {
         const act = Lampa.Activity.active();
@@ -62,15 +56,12 @@
         return {
             id: Date.now(),
             name: a.title || 'Закладка',
-
             url: a.url,
             component: a.component || 'category_full',
             source: a.source || 'tmdb',
-
             genres: a.genres,
             params: a.params,
             page: a.page || 1,
-
             created: Date.now()
         };
     }
@@ -85,8 +76,6 @@
             Lampa.Controller.toggle('content');
         }, 200);
     }
-
-    // ========= SAVE =========
 
     function save() {
         if (lock) return;
@@ -121,8 +110,6 @@
         }, unlock);
     }
 
-    // ========= REMOVE =========
-
     function remove(item) {
         const l = list().filter(i => i.id !== item.id);
         saveList(l);
@@ -134,8 +121,6 @@
 
         notify('Удалено');
     }
-
-    // ========= OPEN =========
 
     function open(item) {
         Lampa.Activity.push({
@@ -149,8 +134,6 @@
         });
     }
 
-    // ========= RENDER =========
-
     function render() {
         $('.bf-item').remove();
 
@@ -160,7 +143,9 @@
         list().forEach(item => {
             const el = $(`
                 <li class="menu__item selector bf-item">
-                    <div class="menu__ico">bookmark_border</div>
+                    <div class="menu__ico">
+                        ${Lampa.Template.get('icon','bookmark_border')}
+                    </div>
                     <div class="menu__text">${item.name}</div>
                 </li>
             `);
@@ -192,22 +177,20 @@
         });
     }
 
-    // ========= BUTTON =========
-
     function addButton() {
         if ($('[data-bf-save]').length) return;
 
         const c = cfg();
 
-        // ===== ВЕРХНЯЯ ПАНЕЛЬ =====
         if (c.button === 'top') {
-
             const head = $('.head__actions, .head__buttons').first();
             if (!head.length) return;
 
             const btn = $(`
                 <div class="head__action selector" data-bf-save>
-                    <div class="head__action-ico">plus</div>
+                    <div class="head__action-ico">
+                        ${Lampa.Template.get('icon','plus')}
+                    </div>
                 </div>
             `);
 
@@ -217,16 +200,15 @@
             });
 
             head.prepend(btn);
-        }
-
-        // ===== БОКОВОЕ МЕНЮ =====
-        else {
+        } else {
             const menu = $('.menu .menu__list');
             if (!menu.length) return;
 
             const btn = $(`
                 <li class="menu__item selector" data-bf-save>
-                    <div class="menu__ico">plus</div>
+                    <div class="menu__ico">
+                        ${Lampa.Template.get('icon','plus')}
+                    </div>
                     <div class="menu__text">Добавить закладку</div>
                 </li>
             `);
@@ -239,8 +221,6 @@
             menu.eq(1).prepend(btn);
         }
     }
-
-    // ========= SETTINGS =========
 
     function settings() {
         Lampa.SettingsApi.addComponent({
@@ -293,24 +273,16 @@
                             render();
                             notify('Очищено');
                         }
-                    },
-                    onBack: () => {
-                        Lampa.Controller.toggle('content');
                     }
                 });
             }
         });
     }
 
-    // ========= INIT =========
-
     function init() {
         if (!cfg().enabled) return;
 
-        setTimeout(() => {
-            addButton();
-        }, 500);
-
+        setTimeout(addButton, 500);
         render();
         settings();
     }
