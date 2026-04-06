@@ -4,8 +4,8 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v7';
-    const CFG = 'bf_cfg_v7';
+    const STORE = 'bf_items_v8';
+    const CFG = 'bf_cfg_v8';
 
     let lock = false;
 
@@ -42,7 +42,6 @@
         const act = Lampa.Activity.active();
         if (!act || !act.url) return false;
 
-        // базовые разделы
         if (
             act.url === 'movie' ||
             act.url === 'tv' ||
@@ -50,11 +49,9 @@
             act.url === 'catalog'
         ) return false;
 
-        // фильтры / подборки
         if (act.params || act.genres || act.sort || act.filter)
             return true;
 
-        // discover (ЕЩЁ)
         if (act.url.indexOf('discover') !== -1 && act.url.indexOf('?') !== -1)
             return true;
 
@@ -163,7 +160,7 @@
         list().forEach(item => {
             const el = $(`
                 <li class="menu__item selector bf-item">
-                    <div class="menu__ico">bookmark</div>
+                    <div class="menu__ico">bookmark_border</div>
                     <div class="menu__text">${item.name}</div>
                 </li>
             `);
@@ -210,7 +207,7 @@
 
             const btn = $(`
                 <div class="head__action selector" data-bf-save>
-                    <div class="head__action-ico">add</div>
+                    <div class="head__action-ico">plus</div>
                 </div>
             `);
 
@@ -229,7 +226,7 @@
 
             const btn = $(`
                 <li class="menu__item selector" data-bf-save>
-                    <div class="menu__ico">add</div>
+                    <div class="menu__ico">plus</div>
                     <div class="menu__text">Добавить закладку</div>
                 </li>
             `);
