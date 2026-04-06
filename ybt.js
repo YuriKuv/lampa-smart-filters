@@ -4,8 +4,8 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v12';
-    const CFG = 'bf_cfg_v12';
+    const STORE = 'bf_items_v13';
+    const CFG = 'bf_cfg_v13';
 
     let lock = false;
 
@@ -19,6 +19,8 @@
         return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4h12v16l-6-4-6 4z"/></svg>';
     }
 
+    // ========= CONFIG =========
+
     function cfg() {
         return Lampa.Storage.get(CFG, {
             enabled: true,
@@ -29,6 +31,8 @@
     function saveCfg(c) {
         Lampa.Storage.set(CFG, c, true);
     }
+
+    // ========= STORAGE =========
 
     function list() {
         return Lampa.Storage.get(STORE, []) || [];
@@ -41,6 +45,8 @@
     function notify(t) {
         Lampa.Noty.show(t);
     }
+
+    // ========= LOGIC =========
 
     function isAllowed() {
         var act = Lampa.Activity.active();
@@ -153,6 +159,8 @@
         });
     }
 
+    // ========= RENDER =========
+
     function render() {
         $('.bf-item').remove();
 
@@ -195,6 +203,8 @@
             root.append(el);
         });
     }
+
+    // ========= BUTTON =========
 
     function addButton() {
         if ($('[data-bf-save]').length) return;
@@ -240,13 +250,67 @@
         }
     }
 
+    // ========= SETTINGS =========
+
     function settings() {
+
         Lampa.SettingsApi.addComponent({
             component: 'bf',
             name: 'Закладки+',
-            icon: 'bookmark'
+            icon: '⭐' // универсально и не ломается
+        });
+
+        Lampa.SettingsApi.addParam({
+            component: 'bf',
+            param: {
+                name: 'bf_button',
+                type: 'select',
+                values: {
+                    side: 'Боковое меню',
+                    top: 'Верхняя панель'
+                },
+                default: 'side'
+            },
+            field: {
+                name: 'Кнопка добавления'
+            },
+            onChange: function (v) {
+                var c = cfg();
+                c.button = v;
+                saveCfg(c);
+                location.reload();
+            }
+        });
+
+        Lampa.SettingsApi.addParam({
+            component: 'bf',
+            param: {
+                name: 'bf_clear',
+                type: 'button'
+            },
+            field: {
+                name: 'Очистить все закладки'
+            },
+            onChange: function () {
+                Lampa.Select.show({
+                    title: 'Удалить все закладки?',
+                    items: [
+                        { title: 'Нет', action: 'cancel' },
+                        { title: 'Да', action: 'clear' }
+                    ],
+                    onSelect: function (a) {
+                        if (a.action === 'clear') {
+                            saveList([]);
+                            render();
+                            notify('Очищено');
+                        }
+                    }
+                });
+            }
         });
     }
+
+    // ========= INIT =========
 
     function init() {
         if (!cfg().enabled) return;
