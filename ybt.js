@@ -4,33 +4,61 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v4';
-    const CFG = 'bf_cfg_v4';
+    const STORE = 'bf_items_v5';
+    const CFG = 'bf_cfg_v5';
 
     let lock = false;
+
+    // ========= CONFIG =========
 
     function cfg() {
         return Lampa.Storage.get(CFG, {
             enabled: true,
             sort: 'date'
-        });
+        }) || {};
     }
 
+    function saveCfg(c) {
+        Lampa.Storage.set(CFG, c, true);
+    }
+
+    // ========= STORAGE =========
+
     function list() {
-        return Lampa.Storage.get(STORE, []);
+        return Lampa.Storage.get(STORE, []) || [];
     }
 
     function saveList(l) {
-        Lampa.Storage.set(STORE, l);
+        Lampa.Storage.set(STORE, l, true); // важно!
     }
 
     function notify(t) {
         Lampa.Noty.show(t);
     }
 
+    // ========= LOGIC =========
+
     function isAllowed() {
         const act = Lampa.Activity.active();
-        return act && act.url && act.url.indexOf('discover') !== -1;
+        if (!act || !act.url) return false;
+
+        // ❌ базовые разделы
+        if (
+            act.url === 'movie' ||
+            act.url === 'tv' ||
+            act.url === 'anime' ||
+            act.url === 'catalog'
+        ) return false;
+
+        // ✅ фильтры / подборки
+        if (act.params || act.genres || act.sort || act.filter)
+            return true;
+
+        // ✅ discover с параметрами (ЕЩЁ)
+        if (act.url.indexOf('discover') !== -1 && act.url.indexOf('?') !== -1)
+            return true;
+
+        return false;
     }
 
     function normalize(a) {
@@ -73,7 +101,7 @@
         const act = Lampa.Activity.active();
 
         if (!isAllowed()) {
-            notify('Недоступно');
+            notify('Здесь нельзя создать закладку');
             return unlock();
         }
 
@@ -209,7 +237,7 @@
             onChange: v => {
                 const c = cfg();
                 c.sort = v;
-                Lampa.Storage.set(CFG, c);
+                saveCfg(c);
                 render();
             }
         });
