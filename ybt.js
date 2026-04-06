@@ -177,25 +177,48 @@
 
     function addButton() {
         if ($('[data-bf-save]').length) return;
-
+    
         const btn = $(`
+            <div class="head__action selector" data-bf-save>
+                <div class="head__action-ico">add</div>
+            </div>
+        `);
+    
+        const sideBtn = $(`
             <li class="menu__item selector" data-bf-save>
                 <div class="menu__ico">add</div>
                 <div class="menu__text">Добавить закладку</div>
             </li>
         `);
-
-        btn.on('hover:enter', (e) => {
-            e.stopPropagation();
-            save();
-        });
-
-        const menu = $('.menu .menu__list');
-
-        if (cfg().button === 'top')
-            menu.eq(0).prepend(btn);
-        else
-            menu.eq(1).prepend(btn);
+    
+        const c = cfg();
+    
+        // ===== ВЕРХНЯЯ ПАНЕЛЬ =====
+        if (c.button === 'top') {
+            const head = $('.head__actions, .head__buttons').first();
+    
+            if (!head.length) return;
+    
+            btn.on('hover:enter', (e) => {
+                e.stopPropagation();
+                save();
+            });
+    
+            head.prepend(btn);
+        }
+    
+        // ===== БОКОВАЯ ПАНЕЛЬ =====
+        else {
+            const menu = $('.menu .menu__list');
+            if (!menu.length) return;
+    
+            sideBtn.on('hover:enter', (e) => {
+                e.stopPropagation();
+                save();
+            });
+    
+            menu.eq(1).prepend(sideBtn);
+        }
     }
 
     function settings() {
@@ -260,13 +283,13 @@
 
     function init() {
         if (!cfg().enabled) return;
-
-        addButton();
+    
+        setTimeout(() => {
+            addButton();
+        }, 500);
+    
         render();
         settings();
     }
-
-    if (window.appready) init();
-    else Lampa.Listener.follow('app', e => e.type === 'ready' && init());
 
 })();
