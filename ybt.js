@@ -4,8 +4,8 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v8';
-    const CFG = 'bf_cfg_v8';
+    const STORE = 'bf_items_v9';
+    const CFG = 'bf_cfg_v9';
 
     let lock = false;
 
@@ -22,6 +22,21 @@
             <path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/>
         </svg>
     `;
+
+    // ========= CSS FIX =========
+
+    function injectStyles() {
+        if ($('#bf-style').length) return;
+
+        $('head').append(`
+            <style id="bf-style">
+                .bf-item .menu__text {
+                    line-height: 1.35 !important;
+                    white-space: normal;
+                }
+            </style>
+        `);
+    }
 
     // ========= CONFIG =========
 
@@ -100,8 +115,6 @@
         }, 200);
     }
 
-    // ========= SAVE =========
-
     function save() {
         if (lock) return;
         lock = true;
@@ -135,8 +148,6 @@
         }, unlock);
     }
 
-    // ========= REMOVE =========
-
     function remove(item) {
         const l = list().filter(i => i.id !== item.id);
         saveList(l);
@@ -149,8 +160,6 @@
         notify('Удалено');
     }
 
-    // ========= OPEN =========
-
     function open(item) {
         Lampa.Activity.push({
             url: item.url,
@@ -162,8 +171,6 @@
             page: item.page
         });
     }
-
-    // ========= RENDER =========
 
     function render() {
         $('.bf-item').remove();
@@ -206,14 +213,11 @@
         });
     }
 
-    // ========= BUTTON =========
-
     function addButton() {
         if ($('[data-bf-save]').length) return;
 
         const c = cfg();
 
-        // ===== ВЕРХ =====
         if (c.button === 'top') {
             const head = $('.head__actions, .head__buttons').first();
             if (!head.length) return;
@@ -230,10 +234,7 @@
             });
 
             head.prepend(btn);
-        }
-
-        // ===== БОК =====
-        else {
+        } else {
             const menu = $('.menu .menu__list');
             if (!menu.length) return;
 
@@ -252,8 +253,6 @@
             menu.eq(1).prepend(btn);
         }
     }
-
-    // ========= SETTINGS =========
 
     function settings() {
         Lampa.SettingsApi.addComponent({
@@ -315,10 +314,10 @@
         });
     }
 
-    // ========= INIT =========
-
     function init() {
         if (!cfg().enabled) return;
+
+        injectStyles();
 
         setTimeout(() => {
             addButton();
