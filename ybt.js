@@ -4,8 +4,8 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v3';
-    const CFG = 'bf_cfg_v3';
+    const STORE = 'bf_items_v4';
+    const CFG = 'bf_cfg_v4';
 
     let lock = false;
 
@@ -105,6 +105,11 @@
         const l = list().filter(i => i.id !== item.id);
         saveList(l);
         render();
+
+        setTimeout(() => {
+            Lampa.Controller.toggle('content');
+        }, 100);
+
         notify('Удалено');
     }
 
@@ -125,22 +130,31 @@
                 </li>
             `);
 
-            let pressTime = 0;
-
+            // открыть
             el.on('hover:enter', (e) => {
                 e.stopPropagation();
-
-                const now = Date.now();
-
-                // двойное нажатие = удалить
-                if (now - pressTime < 400) {
-                    remove(item);
-                    return;
-                }
-
-                pressTime = now;
-
                 Lampa.Activity.push(item);
+            });
+
+            // долгое нажатие = удалить
+            el.on('hover:long', (e) => {
+                e.stopPropagation();
+
+                Lampa.Select.show({
+                    title: `Удалить "${item.name}"?`,
+                    items: [
+                        { title: 'Нет', action: 'cancel' },
+                        { title: 'Да', action: 'remove' }
+                    ],
+                    onSelect: (a) => {
+                        if (a.action === 'remove') {
+                            remove(item);
+                        }
+                    },
+                    onBack: () => {
+                        Lampa.Controller.toggle('content');
+                    }
+                });
             });
 
             root.append(el);
@@ -163,7 +177,10 @@
             save();
         });
 
-        $('.menu .menu__list').eq(1).prepend(btn);
+        const menu = $('.menu .menu__list');
+        if (!menu.length) return;
+
+        menu.eq(1).prepend(btn);
     }
 
     // ========= SETTINGS =========
@@ -207,9 +224,23 @@
                 name: 'Очистить все закладки'
             },
             onChange: () => {
-                saveList([]);
-                render();
-                notify('Очищено');
+                Lampa.Select.show({
+                    title: 'Удалить все закладки?',
+                    items: [
+                        { title: 'Нет', action: 'cancel' },
+                        { title: 'Да', action: 'clear' }
+                    ],
+                    onSelect: (a) => {
+                        if (a.action === 'clear') {
+                            saveList([]);
+                            render();
+                            notify('Очищено');
+                        }
+                    },
+                    onBack: () => {
+                        Lampa.Controller.toggle('content');
+                    }
+                });
             }
         });
     }
