@@ -31,7 +31,7 @@
         $('head').append(`
             <style id="bf-style">
                 .bf-item .menu__text {
-                    line-height: 1.35 !important;
+                    line-height: 1.2 !important;
                     white-space: normal;
                 }
             </style>
