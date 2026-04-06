@@ -4,8 +4,8 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v9';
-    const CFG = 'bf_cfg_v9';
+    const STORE = 'bf_items_v10';
+    const CFG = 'bf_cfg_v10';
 
     let lock = false;
 
@@ -143,9 +143,7 @@
         list().forEach(item => {
             const el = $(`
                 <li class="menu__item selector bf-item">
-                    <div class="menu__ico">
-                        ${Lampa.Template.get('icon','bookmark_border')}
-                    </div>
+                    <div class="menu__ico" data-ico="bookmark_border"></div>
                     <div class="menu__text">${item.name}</div>
                 </li>
             `);
@@ -159,16 +157,13 @@
                 e.stopPropagation();
 
                 Lampa.Select.show({
-                    title: `Удалить "${item.name}"?`,
+                    title: \`Удалить "\${item.name}"?\`,
                     items: [
                         { title: 'Нет', action: 'cancel' },
                         { title: 'Да', action: 'remove' }
                     ],
                     onSelect: (a) => {
                         if (a.action === 'remove') remove(item);
-                    },
-                    onBack: () => {
-                        Lampa.Controller.toggle('content');
                     }
                 });
             });
@@ -188,9 +183,7 @@
 
             const btn = $(`
                 <div class="head__action selector" data-bf-save>
-                    <div class="head__action-ico">
-                        ${Lampa.Template.get('icon','plus')}
-                    </div>
+                    <div class="head__action-ico" data-ico="plus"></div>
                 </div>
             `);
 
@@ -206,9 +199,7 @@
 
             const btn = $(`
                 <li class="menu__item selector" data-bf-save>
-                    <div class="menu__ico">
-                        ${Lampa.Template.get('icon','plus')}
-                    </div>
+                    <div class="menu__ico" data-ico="plus"></div>
                     <div class="menu__text">Добавить закладку</div>
                 </li>
             `);
