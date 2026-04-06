@@ -4,31 +4,20 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v11';
-    const CFG = 'bf_cfg_v11';
+    const STORE = 'bf_items_v12';
+    const CFG = 'bf_cfg_v12';
 
     let lock = false;
 
-    // ========= SVG ICONS =========
+    // ========= SVG =========
 
     function iconPlus() {
-        return `
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <line x1="12" y1="5" x2="12" y2="19"/>
-            <line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>`;
+        return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
     }
 
     function iconBookmark() {
-        return `
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M6 4h12v16l-6-4-6 4z"/>
-        </svg>`;
+        return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4h12v16l-6-4-6 4z"/></svg>';
     }
-
-    // ========= CONFIG =========
 
     function cfg() {
         return Lampa.Storage.get(CFG, {
@@ -40,8 +29,6 @@
     function saveCfg(c) {
         Lampa.Storage.set(CFG, c, true);
     }
-
-    // ========= STORAGE =========
 
     function list() {
         return Lampa.Storage.get(STORE, []) || [];
@@ -55,10 +42,8 @@
         Lampa.Noty.show(t);
     }
 
-    // ========= LOGIC =========
-
     function isAllowed() {
-        const act = Lampa.Activity.active();
+        var act = Lampa.Activity.active();
         if (!act || !act.url) return false;
 
         if (
@@ -92,23 +77,25 @@
     }
 
     function exists(url) {
-        return list().some(i => i.url === url);
+        var l = list();
+        for (var i = 0; i < l.length; i++) {
+            if (l[i].url === url) return true;
+        }
+        return false;
     }
 
     function unlock() {
-        setTimeout(() => {
+        setTimeout(function () {
             lock = false;
             Lampa.Controller.toggle('content');
         }, 200);
     }
 
-    // ========= SAVE =========
-
     function save() {
         if (lock) return;
         lock = true;
 
-        const act = Lampa.Activity.active();
+        var act = Lampa.Activity.active();
 
         if (!isAllowed()) {
             notify('Здесь нельзя создать закладку');
@@ -123,12 +110,14 @@
         Lampa.Input.edit({
             title: 'Название',
             value: act.title || 'Закладка'
-        }, (val) => {
+        }, function (val) {
             if (!val) return unlock();
 
-            const l = list();
-            l.push({ ...normalize(act), name: val.trim() });
+            var l = list();
+            var item = normalize(act);
+            item.name = val.trim();
 
+            l.push(item);
             saveList(l);
             render();
 
@@ -137,21 +126,20 @@
         }, unlock);
     }
 
-    // ========= REMOVE =========
-
     function remove(item) {
-        const l = list().filter(i => i.id !== item.id);
+        var l = list().filter(function (i) {
+            return i.id !== item.id;
+        });
+
         saveList(l);
         render();
 
-        setTimeout(() => {
+        setTimeout(function () {
             Lampa.Controller.toggle('content');
         }, 100);
 
         notify('Удалено');
     }
-
-    // ========= OPEN =========
 
     function open(item) {
         Lampa.Activity.push({
@@ -165,37 +153,40 @@
         });
     }
 
-    // ========= RENDER =========
-
     function render() {
         $('.bf-item').remove();
 
-        const root = $('.menu .menu__list').eq(0);
+        var root = $('.menu .menu__list').eq(0);
         if (!root.length) return;
 
-        list().forEach(item => {
-            const el = $(`
-                <li class="menu__item selector bf-item">
-                    <div class="menu__ico">${iconBookmark()}</div>
-                    <div class="menu__text">${item.name}</div>
-                </li>
-            `);
+        list().forEach(function (item) {
 
-            el.on('hover:enter', (e) => {
+            var el = $('<li class="menu__item selector bf-item"></li>');
+
+            var ico = $('<div class="menu__ico"></div>');
+            ico.html(iconBookmark());
+
+            var text = $('<div class="menu__text"></div>');
+            text.text(item.name);
+
+            el.append(ico);
+            el.append(text);
+
+            el.on('hover:enter', function (e) {
                 e.stopPropagation();
                 open(item);
             });
 
-            el.on('hover:long', (e) => {
+            el.on('hover:long', function (e) {
                 e.stopPropagation();
 
                 Lampa.Select.show({
-                    title: \`Удалить "\${item.name}"?\`,
+                    title: 'Удалить "' + item.name + '"?',
                     items: [
                         { title: 'Нет', action: 'cancel' },
                         { title: 'Да', action: 'remove' }
                     ],
-                    onSelect: (a) => {
+                    onSelect: function (a) {
                         if (a.action === 'remove') remove(item);
                     }
                 });
@@ -205,41 +196,42 @@
         });
     }
 
-    // ========= BUTTON =========
-
     function addButton() {
         if ($('[data-bf-save]').length) return;
 
-        const c = cfg();
+        var c = cfg();
 
         if (c.button === 'top') {
-            const head = $('.head__actions, .head__buttons').first();
+            var head = $('.head__actions, .head__buttons').first();
             if (!head.length) return;
 
-            const btn = $(`
-                <div class="head__action selector" data-bf-save>
-                    <div class="head__action-ico">${iconPlus()}</div>
-                </div>
-            `);
+            var btn = $('<div class="head__action selector" data-bf-save></div>');
+            var ico = $('<div class="head__action-ico"></div>');
+            ico.html(iconPlus());
 
-            btn.on('hover:enter', (e) => {
+            btn.append(ico);
+
+            btn.on('hover:enter', function (e) {
                 e.stopPropagation();
                 save();
             });
 
             head.prepend(btn);
         } else {
-            const menu = $('.menu .menu__list');
+            var menu = $('.menu .menu__list');
             if (!menu.length) return;
 
-            const btn = $(`
-                <li class="menu__item selector" data-bf-save>
-                    <div class="menu__ico">${iconPlus()}</div>
-                    <div class="menu__text">Добавить закладку</div>
-                </li>
-            `);
+            var btn = $('<li class="menu__item selector" data-bf-save></li>');
 
-            btn.on('hover:enter', (e) => {
+            var ico = $('<div class="menu__ico"></div>');
+            ico.html(iconPlus());
+
+            var text = $('<div class="menu__text">Добавить закладку</div>');
+
+            btn.append(ico);
+            btn.append(text);
+
+            btn.on('hover:enter', function (e) {
                 e.stopPropagation();
                 save();
             });
@@ -248,62 +240,11 @@
         }
     }
 
-    // ========= SETTINGS =========
-
     function settings() {
         Lampa.SettingsApi.addComponent({
             component: 'bf',
             name: 'Закладки+',
             icon: 'bookmark'
-        });
-
-        Lampa.SettingsApi.addParam({
-            component: 'bf',
-            param: {
-                name: 'bf_button',
-                type: 'select',
-                values: {
-                    side: 'Боковое меню',
-                    top: 'Верхняя панель'
-                },
-                default: 'side'
-            },
-            field: {
-                name: 'Кнопка добавления'
-            },
-            onChange: v => {
-                const c = cfg();
-                c.button = v;
-                saveCfg(c);
-                location.reload();
-            }
-        });
-
-        Lampa.SettingsApi.addParam({
-            component: 'bf',
-            param: {
-                name: 'bf_clear',
-                type: 'button'
-            },
-            field: {
-                name: 'Очистить все закладки'
-            },
-            onChange: () => {
-                Lampa.Select.show({
-                    title: 'Удалить все закладки?',
-                    items: [
-                        { title: 'Нет', action: 'cancel' },
-                        { title: 'Да', action: 'clear' }
-                    ],
-                    onSelect: (a) => {
-                        if (a.action === 'clear') {
-                            saveList([]);
-                            render();
-                            notify('Очищено');
-                        }
-                    }
-                });
-            }
         });
     }
 
@@ -316,6 +257,8 @@
     }
 
     if (window.appready) init();
-    else Lampa.Listener.follow('app', e => e.type === 'ready' && init());
+    else Lampa.Listener.follow('app', function (e) {
+        if (e.type === 'ready') init();
+    });
 
 })();
