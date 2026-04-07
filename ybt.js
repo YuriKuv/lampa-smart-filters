@@ -36,6 +36,11 @@
                     line-height: 1.35 !important;
                     white-space: normal;
                 }
+                .bf-sync-status {
+                    font-size: 0.8em;
+                    opacity: 0.7;
+                    margin-left: 5px;
+                }
             </style>
         `);
     }
@@ -426,7 +431,7 @@
         }
     }
 
-    // ========= НАСТРОЙКИ GITHUB =========
+    // ========= НАСТРОЙКИ GITHUB (БЕЗ ИКОНОК) =========
 
     function showGistSetup() {
         const c = cfg();
@@ -456,7 +461,6 @@
                             saveCfg(c);
                             notify('Токен сохранён');
                         }
-                        Lampa.Controller.toggle('content');
                         showGistSetup();
                     });
                 } else if (item.action === 'id') {
@@ -470,21 +474,14 @@
                             saveCfg(c);
                             notify('Gist ID сохранён');
                         }
-                        Lampa.Controller.toggle('content');
                         showGistSetup();
                     });
                 } else if (item.action === 'upload') {
                     syncToGist(true);
-                    setTimeout(() => {
-                        Lampa.Controller.toggle('content');
-                        showGistSetup();
-                    }, 1500);
+                    setTimeout(() => showGistSetup(), 1500);
                 } else if (item.action === 'download') {
                     syncFromGist(true);
-                    setTimeout(() => {
-                        Lampa.Controller.toggle('content');
-                        showGistSetup();
-                    }, 1500);
+                    setTimeout(() => showGistSetup(), 1500);
                 } else if (item.action === 'events') {
                     showSyncEventsSetup();
                 }
@@ -560,7 +557,6 @@
                                 notify('Минимальный интервал 5 минут');
                             }
                         }
-                        Lampa.Controller.toggle('content');
                         showSyncEventsSetup();
                     });
                 } else if (item.action === 'back') {
@@ -641,7 +637,6 @@
                             render();
                             notify('Очищено');
                         }
-                        Lampa.Controller.toggle('content');
                     },
                     onBack: () => {
                         Lampa.Controller.toggle('content');
