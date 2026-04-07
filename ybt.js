@@ -466,6 +466,8 @@
                             saveCfg(c);
                             notify('Токен сохранён');
                         }
+                        // Закрываем меню настроек и возвращаем фокус
+                        Lampa.Controller.toggle('content');
                         showGistSetup();
                     });
                 } else if (item.action === 'id') {
@@ -479,20 +481,27 @@
                             saveCfg(c);
                             notify('Gist ID сохранён');
                         }
+                        Lampa.Controller.toggle('content');
                         showGistSetup();
                     });
                 } else if (item.action === 'upload') {
                     syncToGist(true);
-                    setTimeout(() => showGistSetup(), 1500);
+                    setTimeout(() => {
+                        Lampa.Controller.toggle('content');
+                        showGistSetup();
+                    }, 1500);
                 } else if (item.action === 'download') {
                     syncFromGist(true);
-                    setTimeout(() => showGistSetup(), 1500);
+                    setTimeout(() => {
+                        Lampa.Controller.toggle('content');
+                        showGistSetup();
+                    }, 1500);
                 } else if (item.action === 'events') {
                     showSyncEventsSetup();
                 }
             },
             onBack: () => {
-                closeSettingsMenu();
+                Lampa.Controller.toggle('content');
             }
         });
     }
@@ -562,6 +571,7 @@
                                 notify('Минимальный интервал 5 минут');
                             }
                         }
+                        Lampa.Controller.toggle('content');
                         showSyncEventsSetup();
                     });
                 } else if (item.action === 'back') {
@@ -642,10 +652,10 @@
                             render();
                             notify('Очищено');
                         }
-                        closeSettingsMenu();
+                        Lampa.Controller.toggle('content');
                     },
                     onBack: () => {
-                        closeSettingsMenu();
+                        Lampa.Controller.toggle('content');
                     }
                 });
             }
