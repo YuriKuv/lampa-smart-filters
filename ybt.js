@@ -4,26 +4,40 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v11';
-    const CFG = 'bf_cfg_v11';
+    const STORE = 'bf_items_v12';
+    const CFG = 'bf_cfg_v12';
 
     let lock = false;
 
     const ICON_ADD = `<svg viewBox="0 0 24 24"><path fill="currentColor" d="M11 5h2v14h-2zM5 11h14v2H5z"/></svg>`;
     const ICON_FLAG = `<svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/></svg>`;
 
+    // ========= CONFIG (FIXED) =========
+
     function cfg() {
-        return Lampa.Storage.get(CFG, {
+        let c = Lampa.Storage.get(CFG, {}) || {};
+
+        const def = {
             enabled: true,
             button: 'side',
             gist_id: '',
             gist_token: ''
-        }) || {};
+        };
+
+        c = Object.assign({}, def, c);
+
+        if (!['side', 'top'].includes(c.button)) {
+            c.button = 'side';
+        }
+
+        return c;
     }
 
     function saveCfg(c) {
         Lampa.Storage.set(CFG, c, true);
     }
+
+    // ========= STORAGE =========
 
     function list() {
         return Lampa.Storage.get(STORE, []) || [];
@@ -331,15 +345,15 @@
         render();
         settings();
 
-        // 🔥 AUTO PULL ПРИ СТАРТЕ
+        // авто pull
         setTimeout(() => {
             syncPull(true);
         }, 1500);
 
-        // 🔥 ПЕРИОДИЧЕСКИЙ SYNC
+        // периодический sync
         setInterval(() => {
             syncPull(true);
-        }, 300000); // каждые 5 минут
+        }, 300000);
     }
 
     if (window.appready) init();
