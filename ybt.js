@@ -7,7 +7,6 @@
     const STORE = 'bf_items_v10';
     const CFG = 'bf_cfg_v10';
     const GIST_CACHE = 'bf_gist_cache';
-    const WEBDAV_CACHE = 'bf_webdav_cache';
 
     let lock = false;
     let syncTimer = null;
@@ -52,17 +51,8 @@
         return Lampa.Storage.get(CFG, {
             enabled: true,
             button: 'side',
-            // GitHub
             gist_token: '',
             gist_id: '',
-            // WebDAV
-            webdav_enabled: false,
-            webdav_url: 'https://webdav.yandex.ru',
-            webdav_login: '',
-            webdav_password: '',
-            webdav_path: '/lampa_bookmarks.json',
-            // Общие настройки синхронизации
-            sync_method: 'none',
             sync_on_start: true,
             sync_on_close: false,
             sync_on_add: true,
@@ -110,115 +100,7 @@
         return list().some(i => i.key === key);
     }
 
-    // ========= WEBDAV СИНХРОНИЗАЦИЯ =========
-
-    function getWebDAVData() {
-        const c = cfg();
-        if (!c.webdav_enabled) return null;
-        if (!c.webdav_login || !c.webdav_password) return null;
-        return {
-            url: c.webdav_url,
-            login: c.webdav_login,
-            password: c.webdav_password,
-            path: c.webdav_path || '/lampa_bookmarks.json'
-        };
-    }
-
-    function syncToWebDAV(showNotify = true) {
-        const webdav = getWebDAVData();
-        if (!webdav) {
-            if (showNotify) notify('WebDAV не настроен');
-            return false;
-        }
-
-        const data = JSON.stringify({
-            version: 2,
-            updated: new Date().toISOString(),
-            bookmarks: list()
-        }, null, 2);
-
-        const fullUrl = webdav.url.replace(/\/$/, '') + webdav.path;
-        const auth = btoa(webdav.login + ':' + webdav.password);
-
-        $.ajax({
-            url: fullUrl,
-            method: 'PUT',
-            headers: {
-                'Authorization': 'Basic ' + auth,
-                'Content-Type': 'application/json'
-            },
-            data: data,
-            success: function() {
-                if (showNotify) notify('Закладки синхронизированы с Яндекс Диск');
-                Lampa.Storage.set(WEBDAV_CACHE + '_last_sync', Date.now());
-            },
-            error: function(xhr) {
-                console.error('[WebDAV] Error:', xhr);
-                if (showNotify) notify('Ошибка синхронизации: ' + (xhr.status === 401 ? 'Неверный логин/пароль' : 'Ошибка соединения'));
-            }
-        });
-    }
-
-    function syncFromWebDAV(showNotify = true) {
-        const webdav = getWebDAVData();
-        if (!webdav) {
-            if (showNotify) notify('WebDAV не настроен');
-            return false;
-        }
-
-        const fullUrl = webdav.url.replace(/\/$/, '') + webdav.path;
-        const auth = btoa(webdav.login + ':' + webdav.password);
-
-        $.ajax({
-            url: fullUrl,
-            method: 'GET',
-            headers: {
-                'Authorization': 'Basic ' + auth,
-                'Accept': 'application/json'
-            },
-            success: function(data) {
-                try {
-                    let remote;
-                    if (typeof data === 'string') {
-                        remote = JSON.parse(data);
-                    } else {
-                        remote = data;
-                    }
-
-                    const remoteList = remote.bookmarks || [];
-                    const localList = list();
-
-                    const merged = [...remoteList];
-                    localList.forEach(local => {
-                        if (!merged.some(m => m.key === local.key)) {
-                            merged.push(local);
-                        }
-                    });
-
-                    merged.sort((a, b) => (b.created || b.id) - (a.created || a.id));
-
-                    saveList(merged);
-                    render();
-
-                    if (showNotify) notify(`Загружено ${remoteList.length} закладок из Яндекс Диск`);
-                } catch(e) {
-                    console.error('[WebDAV] Parse error:', e);
-                    if (showNotify) notify('Ошибка чтения данных');
-                }
-            },
-            error: function(xhr) {
-                console.error('[WebDAV] Error:', xhr);
-                if (xhr.status === 404) {
-                    if (showNotify) notify('Файл не найден, будет создан при первой синхронизации');
-                    syncToWebDAV(false);
-                } else if (showNotify) {
-                    notify('Ошибка загрузки: ' + (xhr.status === 401 ? 'Неверный логин/пароль' : 'Ошибка соединения'));
-                }
-            }
-        });
-    }
-
-    // ========= GITHUB GIST СИНХРОНИЗАЦИЯ =========
+    // ========= GITHUB GIST SYNC =========
 
     function getGistData() {
         const c = cfg();
@@ -317,43 +199,16 @@
         });
     }
 
-    // ========= ОСНОВНАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ =========
-
-    function syncToCloud(showNotify = true) {
-        const c = cfg();
-        const method = c.sync_method;
-        
-        if (method === 'webdav') {
-            syncToWebDAV(showNotify);
-        } else if (method === 'gist') {
-            syncToGist(showNotify);
-        }
-    }
-
-    function syncFromCloud(showNotify = true) {
-        const c = cfg();
-        const method = c.sync_method;
-        
-        if (method === 'webdav') {
-            syncFromWebDAV(showNotify);
-        } else if (method === 'gist') {
-            syncFromGist(showNotify);
-        }
-    }
-
     function checkAutoSync() {
         const c = cfg();
-        if (!c.sync_auto_interval || c.sync_method === 'none') return;
+        if (!c.sync_auto_interval) return;
         
-        const lastSync = Lampa.Storage.get(
-            c.sync_method === 'webdav' ? WEBDAV_CACHE + '_last_sync' : GIST_CACHE + '_last_sync', 
-            0
-        );
+        const lastSync = Lampa.Storage.get(GIST_CACHE + '_last_sync', 0);
         const now = Date.now();
         const interval = (c.sync_interval_minutes || 60) * 60 * 1000;
         
         if (now - lastSync > interval) {
-            syncFromCloud(false);
+            syncFromGist(false);
         }
     }
 
@@ -446,8 +301,8 @@
             render();
 
             const c = cfg();
-            if (c.sync_on_add && c.sync_method !== 'none') {
-                syncToCloud(false);
+            if (c.sync_on_add && c.gist_token && c.gist_id) {
+                syncToGist(false);
             }
 
             notify('Сохранено');
@@ -463,8 +318,8 @@
         render();
 
         const c = cfg();
-        if (c.sync_on_remove && c.sync_method !== 'none') {
-            syncToCloud(false);
+        if (c.sync_on_remove && c.gist_token && c.gist_id) {
+            syncToGist(false);
         }
 
         setTimeout(() => {
@@ -576,101 +431,7 @@
         }
     }
 
-    // ========= НАСТРОЙКИ WEBDAV =========
-
-    function showWebDAVSetup() {
-        const c = cfg();
-        
-        Lampa.Select.show({
-            title: 'Яндекс Диск (WebDAV)',
-            items: [
-                { title: `Сервер: ${c.webdav_url || 'https://webdav.yandex.ru'}`, action: 'url' },
-                { title: `Логин: ${c.webdav_login ? c.webdav_login : 'Не указан'}`, action: 'login' },
-                { title: `Пароль: ${c.webdav_password ? '••••••••' : 'Не указан'}`, action: 'password' },
-                { title: `Путь: ${c.webdav_path || '/lampa_bookmarks.json'}`, action: 'path' },
-                { title: `Статус: ${c.webdav_enabled ? '✓ Включена' : '✗ Выключена'}`, action: 'toggle' },
-                { title: '──────────', separator: true },
-                { title: '📤 Выгрузить в Яндекс Диск', action: 'upload' },
-                { title: '📥 Загрузить из Яндекс Диск', action: 'download' },
-                { title: '──────────', separator: true },
-                { title: '◀ Назад', action: 'back' },
-                { title: '❌ Отмена', action: 'cancel' }
-            ],
-            onSelect: (item) => {
-                if (item.action === 'url') {
-                    Lampa.Input.edit({
-                        title: 'WebDAV сервер',
-                        value: c.webdav_url || 'https://webdav.yandex.ru',
-                        free: true
-                    }, (val) => {
-                        if (val !== null) {
-                            c.webdav_url = val || 'https://webdav.yandex.ru';
-                            saveCfg(c);
-                            notify('Сервер сохранён');
-                        }
-                        showWebDAVSetup();
-                    });
-                } else if (item.action === 'login') {
-                    Lampa.Input.edit({
-                        title: 'Логин (Яндекс ID)',
-                        value: c.webdav_login,
-                        free: true
-                    }, (val) => {
-                        if (val !== null) {
-                            c.webdav_login = val || '';
-                            saveCfg(c);
-                            notify('Логин сохранён');
-                        }
-                        showWebDAVSetup();
-                    });
-                } else if (item.action === 'password') {
-                    Lampa.Input.edit({
-                        title: 'Пароль',
-                        value: c.webdav_password,
-                        free: true
-                    }, (val) => {
-                        if (val !== null) {
-                            c.webdav_password = val || '';
-                            saveCfg(c);
-                            notify('Пароль сохранён');
-                        }
-                        showWebDAVSetup();
-                    });
-                } else if (item.action === 'path') {
-                    Lampa.Input.edit({
-                        title: 'Путь к файлу',
-                        value: c.webdav_path || '/lampa_bookmarks.json',
-                        free: true
-                    }, (val) => {
-                        if (val !== null) {
-                            c.webdav_path = val || '/lampa_bookmarks.json';
-                            saveCfg(c);
-                            notify('Путь сохранён');
-                        }
-                        showWebDAVSetup();
-                    });
-                } else if (item.action === 'toggle') {
-                    c.webdav_enabled = !c.webdav_enabled;
-                    saveCfg(c);
-                    notify(`WebDAV синхронизация ${c.webdav_enabled ? 'включена' : 'выключена'}`);
-                    showWebDAVSetup();
-                } else if (item.action === 'upload') {
-                    syncToWebDAV(true);
-                    setTimeout(() => showWebDAVSetup(), 1500);
-                } else if (item.action === 'download') {
-                    syncFromWebDAV(true);
-                    setTimeout(() => showWebDAVSetup(), 1500);
-                } else if (item.action === 'back') {
-                    showSyncSetup();
-                }
-            },
-            onBack: () => {
-                showSyncSetup();
-            }
-        });
-    }
-
-    // ========= НАСТРОЙКИ GITHUB =========
+    // ========= НАСТРОЙКИ GITHUB (БЕЗ ИКОНОК) =========
 
     function showGistSetup() {
         const c = cfg();
@@ -681,11 +442,12 @@
                 { title: `Токен: ${c.gist_token ? '✓ Установлен' : '✗ Не установлен'}`, action: 'token' },
                 { title: `Gist ID: ${c.gist_id ? c.gist_id.substring(0, 8) + '…' : '✗ Не установлен'}`, action: 'id' },
                 { title: '──────────', separator: true },
-                { title: '📤 Выгрузить в Gist', action: 'upload' },
-                { title: '📥 Загрузить из Gist', action: 'download' },
+                { title: 'Выгрузить в Gist', action: 'upload' },
+                { title: 'Загрузить из Gist', action: 'download' },
                 { title: '──────────', separator: true },
-                { title: '◀ Назад', action: 'back' },
-                { title: '❌ Отмена', action: 'cancel' }
+                { title: 'События синхронизации →', action: 'events' },
+                { title: '──────────', separator: true },
+                { title: 'Отмена', action: 'cancel' }
             ],
             onSelect: (item) => {
                 if (item.action === 'token') {
@@ -720,65 +482,12 @@
                 } else if (item.action === 'download') {
                     syncFromGist(true);
                     setTimeout(() => showGistSetup(), 1500);
-                } else if (item.action === 'back') {
-                    showSyncSetup();
-                }
-            },
-            onBack: () => {
-                showSyncSetup();
-            }
-        });
-    }
-
-    // ========= НАСТРОЙКИ СИНХРОНИЗАЦИИ =========
-
-    function showSyncSetup() {
-        const c = cfg();
-        
-        Lampa.Select.show({
-            title: 'Синхронизация',
-            items: [
-                { title: `Метод: ${c.sync_method === 'webdav' ? 'Яндекс Диск' : c.sync_method === 'gist' ? 'GitHub Gist' : 'Отключена'}`, action: 'method' },
-                { title: `Статус: ${c.sync_method !== 'none' && ((c.sync_method === 'webdav' && c.webdav_enabled) || (c.sync_method === 'gist' && c.gist_token && c.gist_id)) ? '✓ Готов' : '✗ Не настроен'}`, action: 'status' },
-                { title: '──────────', separator: true },
-                { title: '⚙️ События синхронизации →', action: 'events' },
-                { title: '──────────', separator: true },
-                { title: '◀ Назад', action: 'back' },
-                { title: '❌ Отмена', action: 'cancel' }
-            ],
-            onSelect: (item) => {
-                if (item.action === 'method') {
-                    Lampa.Select.show({
-                        title: 'Выберите метод синхронизации',
-                        items: [
-                            { title: 'Отключена', action: 'none' },
-                            { title: 'Яндекс Диск (WebDAV)', action: 'webdav' },
-                            { title: 'GitHub Gist', action: 'gist' }
-                        ],
-                        onSelect: (method) => {
-                            c.sync_method = method.action;
-                            saveCfg(c);
-                            notify(`Метод синхронизации: ${method.title}`);
-                            showSyncSetup();
-                        }
-                    });
-                } else if (item.action === 'status') {
-                    if (c.sync_method === 'webdav') {
-                        showWebDAVSetup();
-                    } else if (c.sync_method === 'gist') {
-                        showGistSetup();
-                    } else {
-                        notify('Синхронизация отключена');
-                        showSyncSetup();
-                    }
                 } else if (item.action === 'events') {
                     showSyncEventsSetup();
-                } else if (item.action === 'back') {
-                    showFullSettings();
                 }
             },
             onBack: () => {
-                showFullSettings();
+                Lampa.Controller.toggle('content');
             }
         });
     }
@@ -798,7 +507,7 @@
                 { title: `Автосинхронизация: ${c.sync_auto_interval ? '✓ Вкл' : '✗ Выкл'}`, action: 'sync_auto_interval' },
                 { title: `Интервал: ${c.sync_interval_minutes || 60} минут`, action: 'interval' },
                 { title: '──────────', separator: true },
-                { title: '◀ Назад', action: 'back' }
+                { title: 'Назад', action: 'back' }
             ],
             onSelect: (item) => {
                 if (item.action === 'sync_on_start') {
@@ -851,30 +560,11 @@
                         showSyncEventsSetup();
                     });
                 } else if (item.action === 'back') {
-                    showSyncSetup();
+                    showGistSetup();
                 }
             },
             onBack: () => {
-                showSyncSetup();
-            }
-        });
-    }
-
-    function showFullSettings() {
-        Lampa.Select.show({
-            title: 'Закладки+',
-            items: [
-                { title: '☁️ Синхронизация →', action: 'sync' },
-                { title: '──────────', separator: true },
-                { title: '❌ Закрыть', action: 'cancel' }
-            ],
-            onSelect: (item) => {
-                if (item.action === 'sync') {
-                    showSyncSetup();
-                }
-            },
-            onBack: () => {
-                Lampa.Controller.toggle('content');
+                showGistSetup();
             }
         });
     }
@@ -913,15 +603,15 @@
         Lampa.SettingsApi.addParam({
             component: 'bf',
             param: {
-                name: 'bf_sync_settings',
+                name: 'bf_gist',
                 type: 'button'
             },
             field: {
-                name: '☁️ Синхронизация',
-                description: 'Настройка Яндекс Диск / GitHub Gist'
+                name: 'GitHub Gist синхронизация',
+                description: 'Облачное резервное копирование закладок'
             },
             onChange: () => {
-                showFullSettings();
+                showGistSetup();
             }
         });
 
@@ -960,16 +650,16 @@
 
     function onAppClose() {
         const c = cfg();
-        if (c.sync_on_close && c.sync_method !== 'none') {
-            syncToCloud(false);
+        if (c.sync_on_close && c.gist_token && c.gist_id) {
+            syncToGist(false);
         }
     }
 
     function onAppStart() {
         const c = cfg();
-        if (c.sync_on_start && c.sync_method !== 'none') {
+        if (c.sync_on_start && c.gist_token && c.gist_id) {
             setTimeout(() => {
-                syncFromCloud(false);
+                syncFromGist(false);
             }, 3000);
         }
     }
