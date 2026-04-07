@@ -11,7 +11,7 @@
     let lock = false;
     let syncTimer = null;
 
-    // ========= SVG =========
+    // ========= SVG (МОНОХРОМНЫЕ, В СТИЛЕ LAMPA) =========
 
     const ICON_ADD = `
         <svg viewBox="0 0 24 24">
@@ -24,6 +24,56 @@
             <path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/>
         </svg>
     `;
+
+    const ICON_SYNC = `
+        <svg viewBox="0 0 24 24">
+            <path fill="currentColor" d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+        </svg>
+    `;
+
+    const ICON_CLOUD = `
+        <svg viewBox="0 0 24 24">
+            <path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM19 18H6c-2.21 0-4-1.79-4-4s1.79-4 4-4h.71C7.37 7.69 9.48 6 12 6c3.04 0 5.5 2.46 5.5 5.5v.5H19c1.66 0 3 1.34 3 3s-1.34 3-3 3z"/>
+        </svg>
+    `;
+
+    const ICON_CLOUD_UPLOAD = `
+        <svg viewBox="0 0 24 24">
+            <path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+        </svg>
+    `;
+
+    const ICON_CLOUD_DOWNLOAD = `
+        <svg viewBox="0 0 24 24">
+            <path fill="currentColor" d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/>
+        </svg>
+    `;
+
+    const ICON_SETTINGS = `
+        <svg viewBox="0 0 24 24">
+            <path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.33-.02-.64-.06-.94l2.02-1.58c.18-.14.23-.38.12-.56l-1.89-3.28c-.12-.19-.36-.26-.56-.18l-2.38.96c-.5-.38-1.06-.68-1.66-.88L14.45 3.5c-.04-.2-.2-.34-.4-.34h-3.78c-.2 0-.36.14-.4.34l-.3 2.52c-.6.2-1.16.5-1.66.88l-2.38-.96c-.2-.08-.44-.01-.56.18l-1.89 3.28c-.12.19-.07.42.12.56l2.02 1.58c-.04.3-.06.61-.06.94 0 .33.02.64.06.94l-2.02 1.58c-.18.14-.23.38-.12.56l1.89 3.28c.12.19.36.26.56.18l2.38-.96c.5.38 1.06.68 1.66.88l.3 2.52c.04.2.2.34.4.34h3.78c.2 0 .36-.14.4-.34l.3-2.52c.6-.2 1.16-.5 1.66-.88l2.38.96c.2.08.44.01.56-.18l1.89-3.28c.12-.19.07-.42-.12-.56l-2.02-1.58zM12 15c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z"/>
+        </svg>
+    `;
+
+    // ========= CSS =========
+
+    function injectStyles() {
+        if ($('#bf-style').length) return;
+
+        $('head').append(`
+            <style id="bf-style">
+                .bf-item .menu__text {
+                    line-height: 1.35 !important;
+                    white-space: normal;
+                }
+                .bf-sync-status {
+                    font-size: 0.8em;
+                    opacity: 0.7;
+                    margin-left: 5px;
+                }
+            </style>
+        `);
+    }
 
     // ========= CONFIG =========
 
@@ -91,7 +141,7 @@
     function syncToGist(showNotify = true) {
         const gist = getGistData();
         if (!gist) {
-            if (showNotify) notify('⚠️ GitHub Gist не настроен');
+            if (showNotify) notify('GitHub Gist не настроен');
             return false;
         }
 
@@ -118,12 +168,12 @@
             },
             data: JSON.stringify(data),
             success: function() {
-                if (showNotify) notify('✅ Закладки синхронизированы с GitHub');
+                if (showNotify) notify('Закладки синхронизированы с GitHub');
                 Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
             },
             error: function(xhr) {
                 console.error('[Sync] Error:', xhr);
-                if (showNotify) notify('❌ Ошибка синхронизации: ' + (xhr.responseJSON?.message || 'Unknown error'));
+                if (showNotify) notify('Ошибка синхронизации: ' + (xhr.responseJSON?.message || 'Unknown error'));
             }
         });
     }
@@ -131,7 +181,7 @@
     function syncFromGist(showNotify = true) {
         const gist = getGistData();
         if (!gist) {
-            if (showNotify) notify('⚠️ GitHub Gist не настроен');
+            if (showNotify) notify('GitHub Gist не настроен');
             return false;
         }
 
@@ -146,7 +196,7 @@
                 try {
                     const content = data.files['bookmarks.json']?.content;
                     if (!content) {
-                        if (showNotify) notify('⚠️ Файл bookmarks.json не найден в Gist');
+                        if (showNotify) notify('Файл bookmarks.json не найден в Gist');
                         return;
                     }
 
@@ -154,7 +204,6 @@
                     const localList = list();
                     const remoteList = remote.bookmarks || [];
 
-                    // Объединение: remote + local без дублей по ключу
                     const merged = [...remoteList];
                     localList.forEach(local => {
                         if (!merged.some(m => m.key === local.key)) {
@@ -167,15 +216,15 @@
                     saveList(merged);
                     render();
 
-                    if (showNotify) notify(`📥 Загружено ${remoteList.length} закладок из GitHub`);
+                    if (showNotify) notify(`Загружено ${remoteList.length} закладок из GitHub`);
                 } catch(e) {
                     console.error('[Sync] Parse error:', e);
-                    if (showNotify) notify('❌ Ошибка чтения данных из Gist');
+                    if (showNotify) notify('Ошибка чтения данных из Gist');
                 }
             },
             error: function(xhr) {
                 console.error('[Sync] Error:', xhr);
-                if (showNotify) notify('❌ Ошибка загрузки из GitHub: ' + (xhr.responseJSON?.message || 'Unknown error'));
+                if (showNotify) notify('Ошибка загрузки из GitHub: ' + (xhr.responseJSON?.message || 'Unknown error'));
             }
         });
     }
@@ -204,13 +253,11 @@
         const act = Lampa.Activity.active();
         if (!act) return false;
 
-        // ✅ ПЕРСОНЫ (actor / person)
         if (act.component === 'actor' || act.component === 'person')
             return true;
 
         if (!act.url) return false;
 
-        // ❌ базовые разделы
         if (
             act.url === 'movie' ||
             act.url === 'tv' ||
@@ -218,11 +265,9 @@
             act.url === 'catalog'
         ) return false;
 
-        // ✅ фильтры
         if (act.params || act.genres || act.sort || act.filter)
             return true;
 
-        // ✅ discover (ЕЩЁ)
         if (act.url.indexOf('discover') !== -1 && act.url.indexOf('?') !== -1)
             return true;
 
@@ -235,21 +280,15 @@
         return {
             id: Date.now(),
             key: key,
-
             name: a.title || a.name || 'Закладка',
-
             url: a.url,
             component: a.component || 'category_full',
             source: a.source || 'tmdb',
-
-            // 👇 ПЕРСОНЫ
             id_person: a.id,
             job: a.job,
-
             genres: a.genres,
             params: a.params,
             page: a.page || 1,
-
             created: Date.now()
         };
     }
@@ -291,7 +330,6 @@
             saveList(l);
             render();
 
-            // 🔄 Синхронизация при добавлении
             const c = cfg();
             if (c.sync_on_add && c.gist_token && c.gist_id) {
                 syncToGist(false);
@@ -309,7 +347,6 @@
         saveList(l);
         render();
 
-        // 🔄 Синхронизация при удалении
         const c = cfg();
         if (c.sync_on_remove && c.gist_token && c.gist_id) {
             syncToGist(false);
@@ -330,11 +367,8 @@
             title: item.name,
             component: item.component,
             source: item.source,
-
-            // 👇 ПЕРСОНЫ
             id: item.id_person,
             job: item.job,
-
             genres: item.genres,
             params: item.params,
             page: item.page
@@ -391,7 +425,6 @@
 
         const c = cfg();
 
-        // ===== ВЕРХ =====
         if (c.button === 'top') {
             const head = $('.head__actions, .head__buttons').first();
             if (!head.length) return;
@@ -408,10 +441,7 @@
             });
 
             head.prepend(btn);
-        }
-
-        // ===== БОК =====
-        else {
+        } else {
             const menu = $('.menu .menu__list');
             if (!menu.length) return;
 
@@ -437,17 +467,17 @@
         const c = cfg();
         
         Lampa.Select.show({
-            title: '☁️ GitHub Gist Синхронизация',
+            title: 'GitHub Gist Синхронизация',
             items: [
-                { title: `🔑 Токен: ${c.gist_token ? '✓ Установлен' : '❌ Не установлен'}`, action: 'token' },
-                { title: `📄 Gist ID: ${c.gist_id ? c.gist_id.substring(0, 8) + '…' : '❌ Не установлен'}`, action: 'id' },
+                { title: `Токен: ${c.gist_token ? 'Установлен' : 'Не установлен'}`, action: 'token' },
+                { title: `Gist ID: ${c.gist_id ? c.gist_id.substring(0, 8) + '…' : 'Не установлен'}`, action: 'id' },
                 { title: '──────────', separator: true },
-                { title: '📤 Выгрузить в Gist', action: 'upload' },
-                { title: '📥 Загрузить из Gist', action: 'download' },
+                { title: 'Выгрузить в Gist', action: 'upload' },
+                { title: 'Загрузить из Gist', action: 'download' },
                 { title: '──────────', separator: true },
-                { title: '⚙️ События синхронизации →', action: 'events' },
+                { title: 'События синхронизации →', action: 'events' },
                 { title: '──────────', separator: true },
-                { title: '❌ Отмена', action: 'cancel' }
+                { title: 'Отмена', action: 'cancel' }
             ],
             onSelect: (item) => {
                 if (item.action === 'token') {
@@ -496,18 +526,18 @@
         const c = cfg();
         
         Lampa.Select.show({
-            title: '⚙️ События синхронизации',
+            title: 'События синхронизации',
             items: [
-                { title: `🔄 При запуске Lampa: ${c.sync_on_start ? '✅ Вкл' : '❌ Выкл'}`, action: 'sync_on_start' },
-                { title: `🔄 При закрытии Lampa: ${c.sync_on_close ? '✅ Вкл' : '❌ Выкл'}`, action: 'sync_on_close' },
-                { title: `➕ При добавлении закладки: ${c.sync_on_add ? '✅ Вкл' : '❌ Выкл'}`, action: 'sync_on_add' },
-                { title: `🗑 При удалении закладки: ${c.sync_on_remove ? '✅ Вкл' : '❌ Выкл'}`, action: 'sync_on_remove' },
-                { title: `✏️ При редактировании: ${c.sync_on_edit ? '✅ Вкл' : '❌ Выкл'}`, action: 'sync_on_edit' },
+                { title: `При запуске Lampa: ${c.sync_on_start ? 'Вкл' : 'Выкл'}`, action: 'sync_on_start' },
+                { title: `При закрытии Lampa: ${c.sync_on_close ? 'Вкл' : 'Выкл'}`, action: 'sync_on_close' },
+                { title: `При добавлении закладки: ${c.sync_on_add ? 'Вкл' : 'Выкл'}`, action: 'sync_on_add' },
+                { title: `При удалении закладки: ${c.sync_on_remove ? 'Вкл' : 'Выкл'}`, action: 'sync_on_remove' },
+                { title: `При редактировании: ${c.sync_on_edit ? 'Вкл' : 'Выкл'}`, action: 'sync_on_edit' },
                 { title: '──────────', separator: true },
-                { title: `⏱ Автосинхронизация: ${c.sync_auto_interval ? '✅ Вкл' : '❌ Выкл'}`, action: 'sync_auto_interval' },
-                { title: `🕐 Интервал: ${c.sync_interval_minutes || 60} минут`, action: 'interval' },
+                { title: `Автосинхронизация: ${c.sync_auto_interval ? 'Вкл' : 'Выкл'}`, action: 'sync_auto_interval' },
+                { title: `Интервал: ${c.sync_interval_minutes || 60} минут`, action: 'interval' },
                 { title: '──────────', separator: true },
-                { title: '◀ Назад', action: 'back' }
+                { title: 'Назад', action: 'back' }
             ],
             onSelect: (item) => {
                 if (item.action === 'sync_on_start') {
@@ -607,7 +637,7 @@
                 type: 'button'
             },
             field: {
-                name: '☁️ GitHub Gist синхронизация',
+                name: 'GitHub Gist синхронизация',
                 description: 'Облачное резервное копирование закладок'
             },
             onChange: () => {
@@ -622,7 +652,7 @@
                 type: 'button'
             },
             field: {
-                name: '🗑 Очистить все закладки'
+                name: 'Очистить все закладки'
             },
             onChange: () => {
                 Lampa.Select.show({
@@ -669,6 +699,8 @@
     function init() {
         if (!cfg().enabled) return;
 
+        injectStyles();
+
         setTimeout(() => {
             addButton();
         }, 500);
@@ -676,13 +708,9 @@
         render();
         settings();
         
-        // Запуск автосинхронизации
         startAutoSync();
-        
-        // Событие при запуске
         onAppStart();
         
-        // Перехват закрытия приложения
         window.addEventListener('beforeunload', onAppClose);
     }
 
