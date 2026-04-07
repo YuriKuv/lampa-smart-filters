@@ -4,34 +4,26 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v10';
-    const CFG = 'bf_cfg_v10';
+    const STORE = 'bf_items_v11';
+    const CFG = 'bf_cfg_v11';
 
     let lock = false;
 
-    // ========= SVG =========
-
     const ICON_ADD = `<svg viewBox="0 0 24 24"><path fill="currentColor" d="M11 5h2v14h-2zM5 11h14v2H5z"/></svg>`;
     const ICON_FLAG = `<svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/></svg>`;
-
-    // ========= CONFIG =========
 
     function cfg() {
         return Lampa.Storage.get(CFG, {
             enabled: true,
             button: 'side',
-            sync_type: 'off',
             gist_id: '',
-            gist_token: '',
-            auto_sync: true
+            gist_token: ''
         }) || {};
     }
 
     function saveCfg(c) {
         Lampa.Storage.set(CFG, c, true);
     }
-
-    // ========= STORAGE =========
 
     function list() {
         return Lampa.Storage.get(STORE, []) || [];
@@ -60,7 +52,6 @@
 
         [...local, ...remote].forEach(item => {
             const key = itemKey(item);
-
             if (!map[key] || map[key].created < item.created) {
                 map[key] = item;
             }
@@ -71,31 +62,27 @@
 
     // ========= SYNC =========
 
-    function syncPull() {
+    function syncPull(silent) {
         const c = cfg();
         if (!c.gist_id) return;
 
         $.get(`https://api.github.com/gists/${c.gist_id}`, (res) => {
             try {
                 const file = res.files['bookmarks.json'];
-                if (!file) throw 'no file';
+                if (!file) return;
 
                 const remote = JSON.parse(file.content);
-                const local = list();
-
-                const merged = mergeLists(local, remote);
+                const merged = mergeLists(list(), remote);
 
                 saveList(merged);
                 render();
 
-                notify('Sync ↓');
-            } catch {
-                notify('Ошибка sync ↓');
-            }
+                if (!silent) notify('Синхронизация ↓');
+            } catch {}
         });
     }
 
-    function syncPush() {
+    function syncPush(silent) {
         const c = cfg();
         if (!c.gist_id || !c.gist_token) return;
 
@@ -103,9 +90,8 @@
             try {
                 const file = res.files['bookmarks.json'];
                 const remote = file ? JSON.parse(file.content) : [];
-                const local = list();
 
-                const merged = mergeLists(local, remote);
+                const merged = mergeLists(list(), remote);
 
                 $.ajax({
                     url: `https://api.github.com/gists/${c.gist_id}`,
@@ -123,18 +109,12 @@
                     success: () => {
                         saveList(merged);
                         render();
-                        notify('Sync ↑');
+                        if (!silent) notify('Синхронизация ↑');
                     }
                 });
 
-            } catch {
-                notify('Ошибка sync ↑');
-            }
+            } catch {}
         });
-    }
-
-    function autoSync() {
-        if (cfg().auto_sync) syncPush();
     }
 
     // ========= LOGIC =========
@@ -207,7 +187,7 @@
             saveList(l);
             render();
 
-            autoSync();
+            syncPush(true);
 
             notify('Сохранено');
             unlock();
@@ -217,7 +197,9 @@
     function remove(item) {
         saveList(list().filter(i => i.id !== item.id));
         render();
-        autoSync();
+
+        syncPush(true);
+
         notify('Удалено');
     }
 
@@ -242,7 +224,19 @@
             `);
 
             el.on('hover:enter', () => open(item));
-            el.on('hover:long', () => remove(item));
+
+            el.on('hover:long', () => {
+                Lampa.Select.show({
+                    title: `Удалить "${item.name}"?`,
+                    items: [
+                        { title: 'Нет', action: 'no' },
+                        { title: 'Да', action: 'yes' }
+                    ],
+                    onSelect: (a) => {
+                        if (a.action === 'yes') remove(item);
+                    }
+                });
+            });
 
             root.append(el);
         });
@@ -282,6 +276,7 @@
     // ========= SETTINGS =========
 
     function settings() {
+
         Lampa.SettingsApi.addComponent({
             component: 'bf',
             name: 'Закладки+',
@@ -290,47 +285,61 @@
 
         Lampa.SettingsApi.addParam({
             component: 'bf',
-            param: { name: 'sync', type: 'title' },
+            param: { name: 'bf_title_sync', type: 'title' },
             field: { name: 'Синхронизация' }
         });
 
         Lampa.SettingsApi.addParam({
             component: 'bf',
-            param: { name: 'gist_id', type: 'input' },
+            param: { name: 'bf_gist_id', type: 'input', default: '' },
             field: { name: 'Gist ID' },
             onChange: v => { let c = cfg(); c.gist_id = v; saveCfg(c); }
         });
 
         Lampa.SettingsApi.addParam({
             component: 'bf',
-            param: { name: 'token', type: 'input' },
+            param: { name: 'bf_token', type: 'input', default: '' },
             field: { name: 'Token' },
             onChange: v => { let c = cfg(); c.gist_token = v; saveCfg(c); }
         });
 
         Lampa.SettingsApi.addParam({
             component: 'bf',
-            param: { name: 'push', type: 'button' },
-            field: { name: 'Отправить' },
-            onChange: syncPush
-        });
-
-        Lampa.SettingsApi.addParam({
-            component: 'bf',
-            param: { name: 'pull', type: 'button' },
-            field: { name: 'Загрузить' },
-            onChange: syncPull
+            param: {
+                name: 'bf_button',
+                type: 'select',
+                values: {
+                    side: 'Боковое меню',
+                    top: 'Верхняя панель'
+                },
+                default: 'side'
+            },
+            field: { name: 'Позиция кнопки' },
+            onChange: v => {
+                let c = cfg();
+                c.button = v;
+                saveCfg(c);
+                location.reload();
+            }
         });
     }
+
+    // ========= INIT =========
 
     function init() {
         setTimeout(addButton, 500);
         render();
         settings();
 
+        // 🔥 AUTO PULL ПРИ СТАРТЕ
         setTimeout(() => {
-            if (cfg().gist_id) syncPull();
+            syncPull(true);
         }, 1500);
+
+        // 🔥 ПЕРИОДИЧЕСКИЙ SYNC
+        setInterval(() => {
+            syncPull(true);
+        }, 300000); // каждые 5 минут
     }
 
     if (window.appready) init();
