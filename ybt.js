@@ -6,10 +6,8 @@
 
     const STORE = 'bf_items_v9';
     const CFG = 'bf_cfg_v9';
-    const GIST_CACHE = 'bf_gist_cache';
 
     let lock = false;
-    let syncTimer = null;
 
     // ========= SVG =========
 
@@ -25,41 +23,12 @@
         </svg>
     `;
 
-    const ICON_SYNC = `
-        <svg viewBox="0 0 24 24">
-            <path fill="currentColor" d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
-        </svg>
-    `;
-
-    // ========= CSS =========
-
-    function injectStyles() {
-        if ($('#bf-style').length) return;
-
-        $('head').append(`
-            <style id="bf-style">
-                .bf-item .menu__text {
-                    line-height: 1.35 !important;
-                    white-space: normal;
-                }
-                .bf-sync-status {
-                    font-size: 0.8em;
-                    opacity: 0.7;
-                    margin-left: 5px;
-                }
-            </style>
-        `);
-    }
-
     // ========= CONFIG =========
 
     function cfg() {
         return Lampa.Storage.get(CFG, {
             enabled: true,
-            button: 'side',
-            gist_token: '',
-            gist_id: '',
-            auto_sync: true
+            button: 'side'
         }) || {};
     }
 
@@ -81,122 +50,21 @@
         Lampa.Noty.show(t);
     }
 
-    // ========= GITHUB GIST SYNC =========
+    // ========= KEY =========
 
-    function getGistData() {
-        const c = cfg();
-        if (!c.gist_token || !c.gist_id) return null;
-        return { token: c.gist_token, id: c.gist_id };
+    function makeKey(a) {
+        return [
+            a.url || '',
+            a.component || '',
+            a.source || '',
+            JSON.stringify(a.genres || ''),
+            JSON.stringify(a.params || '')
+        ].join('|');
     }
 
-    function syncToGist(showNotify = true) {
-        const gist = getGistData();
-        if (!gist) {
-            if (showNotify) notify('⚠️ GitHub Gist не настроен');
-            return false;
-        }
-
-        const data = {
-            description: 'Lampa Bookmarks Backup',
-            public: false,
-            files: {
-                'bookmarks.json': {
-                    content: JSON.stringify({
-                        version: 1,
-                        updated: new Date().toISOString(),
-                        bookmarks: list()
-                    }, null, 2)
-                }
-            }
-        };
-
-        $.ajax({
-            url: `https://api.github.com/gists/${gist.id}`,
-            method: 'PATCH',
-            headers: {
-                'Authorization': `token ${gist.token}`,
-                'Accept': 'application/vnd.github.v3+json'
-            },
-            data: JSON.stringify(data),
-            success: function() {
-                if (showNotify) notify('✅ Закладки синхронизированы с GitHub');
-                Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
-            },
-            error: function(xhr) {
-                console.error('[Sync] Error:', xhr);
-                if (showNotify) notify('❌ Ошибка синхронизации: ' + (xhr.responseJSON?.message || 'Unknown error'));
-            }
-        });
-    }
-
-    function syncFromGist(showNotify = true) {
-        const gist = getGistData();
-        if (!gist) {
-            if (showNotify) notify('⚠️ GitHub Gist не настроен');
-            return false;
-        }
-
-        $.ajax({
-            url: `https://api.github.com/gists/${gist.id}`,
-            method: 'GET',
-            headers: {
-                'Authorization': `token ${gist.token}`,
-                'Accept': 'application/vnd.github.v3+json'
-            },
-            success: function(data) {
-                try {
-                    const content = data.files['bookmarks.json']?.content;
-                    if (!content) {
-                        if (showNotify) notify('⚠️ Файл bookmarks.json не найден в Gist');
-                        return;
-                    }
-
-                    const remote = JSON.parse(content);
-                    const localList = list();
-                    const remoteList = remote.bookmarks || [];
-
-                    // Объединение: local + remote без дублей
-                    const merged = [...remoteList];
-                    localList.forEach(local => {
-                        if (!merged.some(m => m.id === local.id && m.url === local.url)) {
-                            merged.push(local);
-                        }
-                    });
-
-                    merged.sort((a, b) => (b.created || b.id) - (a.created || a.id));
-
-                    saveList(merged);
-                    render();
-
-                    if (showNotify) notify(`📥 Загружено ${remoteList.length} закладок из GitHub`);
-                } catch(e) {
-                    console.error('[Sync] Parse error:', e);
-                    if (showNotify) notify('❌ Ошибка чтения данных из Gist');
-                }
-            },
-            error: function(xhr) {
-                console.error('[Sync] Error:', xhr);
-                if (showNotify) notify('❌ Ошибка загрузки из GitHub: ' + (xhr.responseJSON?.message || 'Unknown error'));
-            }
-        });
-    }
-
-    function autoSync() {
-        const c = cfg();
-        if (!c.auto_sync) return;
-        
-        const lastSync = Lampa.Storage.get(GIST_CACHE + '_last_sync', 0);
-        const now = Date.now();
-        const hour = 60 * 60 * 1000;
-        
-        if (now - lastSync > hour) {
-            syncFromGist(false);
-        }
-    }
-
-    function startAutoSync() {
-        if (syncTimer) clearInterval(syncTimer);
-        syncTimer = setInterval(() => autoSync(), 30 * 60 * 1000);
+    function exists(act) {
+        const key = makeKey(act);
+        return list().some(i => i.key === key);
     }
 
     // ========= LOGIC =========
@@ -205,6 +73,7 @@
         const act = Lampa.Activity.active();
         if (!act || !act.url) return false;
 
+        // ❌ базовые
         if (
             act.url === 'movie' ||
             act.url === 'tv' ||
@@ -212,9 +81,14 @@
             act.url === 'catalog'
         ) return false;
 
+        // ✅ ПЕРСОНЫ
+        if (act.component === 'person') return true;
+
+        // ✅ фильтры
         if (act.params || act.genres || act.sort || act.filter)
             return true;
 
+        // ✅ discover (ЕЩЁ)
         if (act.url.indexOf('discover') !== -1 && act.url.indexOf('?') !== -1)
             return true;
 
@@ -222,21 +96,24 @@
     }
 
     function normalize(a) {
+        const key = makeKey(a);
+
         return {
             id: Date.now(),
+            key: key,
+
             name: a.title || 'Закладка',
+
             url: a.url,
             component: a.component || 'category_full',
             source: a.source || 'tmdb',
+
             genres: a.genres,
             params: a.params,
             page: a.page || 1,
+
             created: Date.now()
         };
-    }
-
-    function exists(url) {
-        return list().some(i => i.url === url);
     }
 
     function unlock() {
@@ -245,6 +122,8 @@
             Lampa.Controller.toggle('content');
         }, 200);
     }
+
+    // ========= SAVE =========
 
     function save() {
         if (lock) return;
@@ -257,7 +136,7 @@
             return unlock();
         }
 
-        if (exists(act.url)) {
+        if (exists(act)) {
             notify('Уже есть');
             return unlock();
         }
@@ -273,27 +152,18 @@
 
             saveList(l);
             render();
-            
-            // Автосинхронизация после сохранения
-            const c = cfg();
-            if (c.auto_sync && c.gist_token && c.gist_id) {
-                syncToGist(false);
-            }
 
             notify('Сохранено');
             unlock();
         }, unlock);
     }
 
+    // ========= REMOVE =========
+
     function remove(item) {
         const l = list().filter(i => i.id !== item.id);
         saveList(l);
         render();
-
-        const c = cfg();
-        if (c.auto_sync && c.gist_token && c.gist_id) {
-            syncToGist(false);
-        }
 
         setTimeout(() => {
             Lampa.Controller.toggle('content');
@@ -301,6 +171,8 @@
 
         notify('Удалено');
     }
+
+    // ========= OPEN =========
 
     function open(item) {
         Lampa.Activity.push({
@@ -313,6 +185,8 @@
             page: item.page
         });
     }
+
+    // ========= RENDER =========
 
     function render() {
         $('.bf-item').remove();
@@ -355,11 +229,14 @@
         });
     }
 
+    // ========= BUTTON =========
+
     function addButton() {
         if ($('[data-bf-save]').length) return;
 
         const c = cfg();
 
+        // ===== ВЕРХ =====
         if (c.button === 'top') {
             const head = $('.head__actions, .head__buttons').first();
             if (!head.length) return;
@@ -376,7 +253,10 @@
             });
 
             head.prepend(btn);
-        } else {
+        }
+
+        // ===== БОК =====
+        else {
             const menu = $('.menu .menu__list');
             if (!menu.length) return;
 
@@ -396,70 +276,7 @@
         }
     }
 
-    // ========= НАСТРОЙКИ GITHUB =========
-
-    function showGistSetup() {
-        const c = cfg();
-        
-        Lampa.Select.show({
-            title: 'GitHub Gist Синхронизация',
-            items: [
-                { title: `🔑 Токен: ${c.gist_token ? '✓ Установлен' : '❌ Не установлен'}`, action: 'token' },
-                { title: `📄 Gist ID: ${c.gist_id ? c.gist_id.substring(0, 8) + '…' : '❌ Не установлен'}`, action: 'id' },
-                { title: `🔄 Автосинхронизация: ${c.auto_sync ? '✅ Вкл' : '❌ Выкл'}`, action: 'auto' },
-                { title: '──────────', separator: true },
-                { title: '📤 Выгрузить в Gist', action: 'upload' },
-                { title: '📥 Загрузить из Gist', action: 'download' },
-                { title: '──────────', separator: true },
-                { title: '❌ Отмена', action: 'cancel' }
-            ],
-            onSelect: (item) => {
-                if (item.action === 'token') {
-                    Lampa.Input.edit({
-                        title: 'GitHub Personal Access Token',
-                        value: c.gist_token,
-                        free: true
-                    }, (val) => {
-                        if (val !== null) {
-                            c.gist_token = val || '';
-                            saveCfg(c);
-                            notify('Токен сохранён');
-                        }
-                        showGistSetup();
-                    });
-                } else if (item.action === 'id') {
-                    Lampa.Input.edit({
-                        title: 'Gist ID',
-                        value: c.gist_id,
-                        free: true
-                    }, (val) => {
-                        if (val !== null) {
-                            c.gist_id = val || '';
-                            saveCfg(c);
-                            notify('Gist ID сохранён');
-                        }
-                        showGistSetup();
-                    });
-                } else if (item.action === 'auto') {
-                    c.auto_sync = !c.auto_sync;
-                    saveCfg(c);
-                    notify(`Автосинхронизация ${c.auto_sync ? 'включена' : 'выключена'}`);
-                    showGistSetup();
-                } else if (item.action === 'upload') {
-                    syncToGist(true);
-                    setTimeout(() => showGistSetup(), 1500);
-                } else if (item.action === 'download') {
-                    syncFromGist(true);
-                    setTimeout(() => showGistSetup(), 1500);
-                }
-            },
-            onBack: () => {
-                Lampa.Controller.toggle('content');
-            }
-        });
-    }
-
-    // ========= НАСТРОЙКИ =========
+    // ========= SETTINGS =========
 
     function settings() {
         Lampa.SettingsApi.addComponent({
@@ -493,26 +310,11 @@
         Lampa.SettingsApi.addParam({
             component: 'bf',
             param: {
-                name: 'bf_gist',
-                type: 'button'
-            },
-            field: {
-                name: '☁️ GitHub Gist синхронизация',
-                description: 'Настройка облачного резервного копирования'
-            },
-            onChange: () => {
-                showGistSetup();
-            }
-        });
-
-        Lampa.SettingsApi.addParam({
-            component: 'bf',
-            param: {
                 name: 'bf_clear',
                 type: 'button'
             },
             field: {
-                name: '🗑 Очистить все закладки'
+                name: 'Очистить все закладки'
             },
             onChange: () => {
                 Lampa.Select.show({
@@ -536,12 +338,10 @@
         });
     }
 
-    // ========= ИНИЦИАЛИЗАЦИЯ =========
+    // ========= INIT =========
 
     function init() {
         if (!cfg().enabled) return;
-
-        injectStyles();
 
         setTimeout(() => {
             addButton();
@@ -549,17 +349,6 @@
 
         render();
         settings();
-        
-        // Запуск автосинхронизации
-        startAutoSync();
-        
-        // Первая синхронизация через 5 секунд после загрузки
-        setTimeout(() => {
-            const c = cfg();
-            if (c.auto_sync && c.gist_token && c.gist_id) {
-                syncFromGist(false);
-            }
-        }, 5000);
     }
 
     if (window.appready) init();
