@@ -469,8 +469,8 @@
         Lampa.Select.show({
             title: 'GitHub Gist Синхронизация',
             items: [
-                { title: `Токен: ${c.gist_token ? 'Установлен' : 'Не установлен'}`, action: 'token' },
-                { title: `Gist ID: ${c.gist_id ? c.gist_id.substring(0, 8) + '…' : 'Не установлен'}`, action: 'id' },
+                { title: `Токен: ${c.gist_token ? '✓ Установлен' : '✗ Не установлен'}`, action: 'token' },
+                { title: `Gist ID: ${c.gist_id ? c.gist_id.substring(0, 8) + '…' : '✗ Не установлен'}`, action: 'id' },
                 { title: '──────────', separator: true },
                 { title: 'Выгрузить в Gist', action: 'upload' },
                 { title: 'Загрузить из Gist', action: 'download' },
@@ -528,13 +528,13 @@
         Lampa.Select.show({
             title: 'События синхронизации',
             items: [
-                { title: `При запуске Lampa: ${c.sync_on_start ? 'Вкл' : 'Выкл'}`, action: 'sync_on_start' },
-                { title: `При закрытии Lampa: ${c.sync_on_close ? 'Вкл' : 'Выкл'}`, action: 'sync_on_close' },
-                { title: `При добавлении закладки: ${c.sync_on_add ? 'Вкл' : 'Выкл'}`, action: 'sync_on_add' },
-                { title: `При удалении закладки: ${c.sync_on_remove ? 'Вкл' : 'Выкл'}`, action: 'sync_on_remove' },
-                { title: `При редактировании: ${c.sync_on_edit ? 'Вкл' : 'Выкл'}`, action: 'sync_on_edit' },
+                { title: `При запуске Lampa: ${c.sync_on_start ? '✅ Вкл' : '❌ Выкл'}`, action: 'sync_on_start' },
+                { title: `При закрытии Lampa: ${c.sync_on_close ? '✅ Вкл' : '❌ Выкл'}`, action: 'sync_on_close' },
+                { title: `При добавлении закладки: ${c.sync_on_add ? '✅ Вкл' : '❌ Выкл'}`, action: 'sync_on_add' },
+                { title: `При удалении закладки: ${c.sync_on_remove ? '✅ Вкл' : '❌ Выкл'}`, action: 'sync_on_remove' },
+                { title: `При редактировании: ${c.sync_on_edit ? '✅ Вкл' : '❌ Выкл'}`, action: 'sync_on_edit' },
                 { title: '──────────', separator: true },
-                { title: `Автосинхронизация: ${c.sync_auto_interval ? 'Вкл' : 'Выкл'}`, action: 'sync_auto_interval' },
+                { title: `Автосинхронизация: ${c.sync_auto_interval ? '✅ Вкл' : '❌ Выкл'}`, action: 'sync_auto_interval' },
                 { title: `Интервал: ${c.sync_interval_minutes || 60} минут`, action: 'interval' },
                 { title: '──────────', separator: true },
                 { title: 'Назад', action: 'back' }
@@ -598,7 +598,6 @@
             }
         });
     }
-
     // ========= НАСТРОЙКИ =========
 
     function settings() {
