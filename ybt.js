@@ -11,7 +11,7 @@
     let lock = false;
     let syncTimer = null;
 
-    // ========= SVG (только для кнопок в меню) =========
+    // ========= SVG =========
 
     const ICON_ADD = `
         <svg viewBox="0 0 24 24">
@@ -426,16 +426,6 @@
         }
     }
 
-    // ========= ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ ЗАКРЫТИЯ МЕНЮ =========
-
-    function closeSettingsMenu() {
-        setTimeout(() => {
-            $('.settings').removeClass('active');
-            $('.settings__layer').trigger('click');
-            Lampa.Controller.toggle('content');
-        }, 100);
-    }
-
     // ========= НАСТРОЙКИ GITHUB =========
 
     function showGistSetup() {
@@ -466,7 +456,6 @@
                             saveCfg(c);
                             notify('Токен сохранён');
                         }
-                        // Закрываем меню настроек и возвращаем фокус
                         Lampa.Controller.toggle('content');
                         showGistSetup();
                     });
