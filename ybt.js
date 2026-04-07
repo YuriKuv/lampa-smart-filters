@@ -4,8 +4,8 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v9';
-    const CFG = 'bf_cfg_v9';
+    const STORE = 'bf_items_v10';
+    const CFG = 'bf_cfg_v10';
 
     let lock = false;
 
@@ -57,6 +57,8 @@
             a.url || '',
             a.component || '',
             a.source || '',
+            a.id || '',
+            a.job || '',
             JSON.stringify(a.genres || ''),
             JSON.stringify(a.params || '')
         ].join('|');
@@ -71,18 +73,21 @@
 
     function isAllowed() {
         const act = Lampa.Activity.active();
-        if (!act || !act.url) return false;
+        if (!act) return false;
 
-        // ❌ базовые
+        // ✅ ПЕРСОНЫ (actor / person)
+        if (act.component === 'actor' || act.component === 'person')
+            return true;
+
+        if (!act.url) return false;
+
+        // ❌ базовые разделы
         if (
             act.url === 'movie' ||
             act.url === 'tv' ||
             act.url === 'anime' ||
             act.url === 'catalog'
         ) return false;
-
-        // ✅ ПЕРСОНЫ
-        if (act.component === 'person') return true;
 
         // ✅ фильтры
         if (act.params || act.genres || act.sort || act.filter)
@@ -102,11 +107,15 @@
             id: Date.now(),
             key: key,
 
-            name: a.title || 'Закладка',
+            name: a.title || a.name || 'Закладка',
 
             url: a.url,
             component: a.component || 'category_full',
             source: a.source || 'tmdb',
+
+            // 👇 ПЕРСОНЫ
+            id_person: a.id,
+            job: a.job,
 
             genres: a.genres,
             params: a.params,
@@ -143,7 +152,7 @@
 
         Lampa.Input.edit({
             title: 'Название',
-            value: act.title || 'Закладка'
+            value: act.title || act.name || 'Закладка'
         }, (val) => {
             if (!val) return unlock();
 
@@ -180,6 +189,11 @@
             title: item.name,
             component: item.component,
             source: item.source,
+
+            // 👇 ПЕРСОНЫ
+            id: item.id_person,
+            job: item.job,
+
             genres: item.genres,
             params: item.params,
             page: item.page
