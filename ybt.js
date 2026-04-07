@@ -4,46 +4,26 @@
     if (window.bf_init) return;
     window.bf_init = true;
 
-    const STORE = 'bf_items_v9';
-    const CFG = 'bf_cfg_v9';
+    const STORE = 'bf_items_v10';
+    const CFG = 'bf_cfg_v10';
 
     let lock = false;
 
     // ========= SVG =========
 
-    const ICON_ADD = `
-        <svg viewBox="0 0 24 24">
-            <path fill="currentColor" d="M11 5h2v14h-2zM5 11h14v2H5z"/>
-        </svg>
-    `;
-
-    const ICON_FLAG = `
-        <svg viewBox="0 0 24 24">
-            <path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/>
-        </svg>
-    `;
-
-    // ========= CSS FIX =========
-
-    function injectStyles() {
-        if ($('#bf-style').length) return;
-
-        $('head').append(`
-            <style id="bf-style">
-                .bf-item .menu__text {
-                    line-height: 1.15 !important;
-                    white-space: normal;
-                }
-            </style>
-        `);
-    }
+    const ICON_ADD = `<svg viewBox="0 0 24 24"><path fill="currentColor" d="M11 5h2v14h-2zM5 11h14v2H5z"/></svg>`;
+    const ICON_FLAG = `<svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/></svg>`;
 
     // ========= CONFIG =========
 
     function cfg() {
         return Lampa.Storage.get(CFG, {
             enabled: true,
-            button: 'side'
+            button: 'side',
+            sync_type: 'off',
+            gist_id: '',
+            gist_token: '',
+            auto_sync: true
         }) || {};
     }
 
@@ -65,24 +45,109 @@
         Lampa.Noty.show(t);
     }
 
+    // ========= MERGE =========
+
+    function itemKey(i) {
+        return [
+            i.url,
+            JSON.stringify(i.genres || {}),
+            JSON.stringify(i.params || {})
+        ].join('|');
+    }
+
+    function mergeLists(local, remote) {
+        const map = {};
+
+        [...local, ...remote].forEach(item => {
+            const key = itemKey(item);
+
+            if (!map[key] || map[key].created < item.created) {
+                map[key] = item;
+            }
+        });
+
+        return Object.values(map);
+    }
+
+    // ========= SYNC =========
+
+    function syncPull() {
+        const c = cfg();
+        if (!c.gist_id) return;
+
+        $.get(`https://api.github.com/gists/${c.gist_id}`, (res) => {
+            try {
+                const file = res.files['bookmarks.json'];
+                if (!file) throw 'no file';
+
+                const remote = JSON.parse(file.content);
+                const local = list();
+
+                const merged = mergeLists(local, remote);
+
+                saveList(merged);
+                render();
+
+                notify('Sync ↓');
+            } catch {
+                notify('Ошибка sync ↓');
+            }
+        });
+    }
+
+    function syncPush() {
+        const c = cfg();
+        if (!c.gist_id || !c.gist_token) return;
+
+        $.get(`https://api.github.com/gists/${c.gist_id}`, (res) => {
+            try {
+                const file = res.files['bookmarks.json'];
+                const remote = file ? JSON.parse(file.content) : [];
+                const local = list();
+
+                const merged = mergeLists(local, remote);
+
+                $.ajax({
+                    url: `https://api.github.com/gists/${c.gist_id}`,
+                    method: 'PATCH',
+                    headers: {
+                        Authorization: 'token ' + c.gist_token
+                    },
+                    data: JSON.stringify({
+                        files: {
+                            'bookmarks.json': {
+                                content: JSON.stringify(merged, null, 2)
+                            }
+                        }
+                    }),
+                    success: () => {
+                        saveList(merged);
+                        render();
+                        notify('Sync ↑');
+                    }
+                });
+
+            } catch {
+                notify('Ошибка sync ↑');
+            }
+        });
+    }
+
+    function autoSync() {
+        if (cfg().auto_sync) syncPush();
+    }
+
     // ========= LOGIC =========
 
     function isAllowed() {
-        const act = Lampa.Activity.active();
-        if (!act || !act.url) return false;
+        const a = Lampa.Activity.active();
+        if (!a || !a.url) return false;
 
-        if (
-            act.url === 'movie' ||
-            act.url === 'tv' ||
-            act.url === 'anime' ||
-            act.url === 'catalog'
-        ) return false;
+        if (['movie','tv','anime','catalog'].includes(a.url)) return false;
 
-        if (act.params || act.genres || act.sort || act.filter)
-            return true;
+        if (a.params || a.genres) return true;
 
-        if (act.url.indexOf('discover') !== -1 && act.url.indexOf('?') !== -1)
-            return true;
+        if (a.url.includes('discover') && a.url.includes('?')) return true;
 
         return false;
     }
@@ -91,15 +156,12 @@
         return {
             id: Date.now(),
             name: a.title || 'Закладка',
-
             url: a.url,
             component: a.component || 'category_full',
             source: a.source || 'tmdb',
-
             genres: a.genres,
             params: a.params,
             page: a.page || 1,
-
             created: Date.now()
         };
     }
@@ -115,6 +177,8 @@
         }, 200);
     }
 
+    // ========= SAVE =========
+
     function save() {
         if (lock) return;
         lock = true;
@@ -122,7 +186,7 @@
         const act = Lampa.Activity.active();
 
         if (!isAllowed()) {
-            notify('Здесь нельзя создать закладку');
+            notify('Недоступно');
             return unlock();
         }
 
@@ -143,34 +207,25 @@
             saveList(l);
             render();
 
+            autoSync();
+
             notify('Сохранено');
             unlock();
         }, unlock);
     }
 
     function remove(item) {
-        const l = list().filter(i => i.id !== item.id);
-        saveList(l);
+        saveList(list().filter(i => i.id !== item.id));
         render();
-
-        setTimeout(() => {
-            Lampa.Controller.toggle('content');
-        }, 100);
-
+        autoSync();
         notify('Удалено');
     }
 
     function open(item) {
-        Lampa.Activity.push({
-            url: item.url,
-            title: item.name,
-            component: item.component,
-            source: item.source,
-            genres: item.genres,
-            params: item.params,
-            page: item.page
-        });
+        Lampa.Activity.push(item);
     }
+
+    // ========= UI =========
 
     function render() {
         $('.bf-item').remove();
@@ -186,28 +241,8 @@
                 </li>
             `);
 
-            el.on('hover:enter', (e) => {
-                e.stopPropagation();
-                open(item);
-            });
-
-            el.on('hover:long', (e) => {
-                e.stopPropagation();
-
-                Lampa.Select.show({
-                    title: `Удалить "${item.name}"?`,
-                    items: [
-                        { title: 'Нет', action: 'cancel' },
-                        { title: 'Да', action: 'remove' }
-                    ],
-                    onSelect: (a) => {
-                        if (a.action === 'remove') remove(item);
-                    },
-                    onBack: () => {
-                        Lampa.Controller.toggle('content');
-                    }
-                });
-            });
+            el.on('hover:enter', () => open(item));
+            el.on('hover:long', () => remove(item));
 
             root.append(el);
         });
@@ -219,8 +254,7 @@
         const c = cfg();
 
         if (c.button === 'top') {
-            const head = $('.head__actions, .head__buttons').first();
-            if (!head.length) return;
+            const head = $('.head__actions').first();
 
             const btn = $(`
                 <div class="head__action selector" data-bf-save>
@@ -228,15 +262,10 @@
                 </div>
             `);
 
-            btn.on('hover:enter', (e) => {
-                e.stopPropagation();
-                save();
-            });
-
+            btn.on('hover:enter', save);
             head.prepend(btn);
         } else {
             const menu = $('.menu .menu__list');
-            if (!menu.length) return;
 
             const btn = $(`
                 <li class="menu__item selector" data-bf-save>
@@ -245,14 +274,12 @@
                 </li>
             `);
 
-            btn.on('hover:enter', (e) => {
-                e.stopPropagation();
-                save();
-            });
-
+            btn.on('hover:enter', save);
             menu.eq(1).prepend(btn);
         }
     }
+
+    // ========= SETTINGS =========
 
     function settings() {
         Lampa.SettingsApi.addComponent({
@@ -263,68 +290,47 @@
 
         Lampa.SettingsApi.addParam({
             component: 'bf',
-            param: {
-                name: 'bf_button',
-                type: 'select',
-                values: {
-                    side: 'Боковое меню',
-                    top: 'Верхняя панель'
-                },
-                default: 'side'
-            },
-            field: {
-                name: 'Кнопка добавления'
-            },
-            onChange: v => {
-                const c = cfg();
-                c.button = v;
-                saveCfg(c);
-                location.reload();
-            }
+            param: { name: 'sync', type: 'title' },
+            field: { name: 'Синхронизация' }
         });
 
         Lampa.SettingsApi.addParam({
             component: 'bf',
-            param: {
-                name: 'bf_clear',
-                type: 'button'
-            },
-            field: {
-                name: 'Очистить все закладки'
-            },
-            onChange: () => {
-                Lampa.Select.show({
-                    title: 'Удалить все закладки?',
-                    items: [
-                        { title: 'Нет', action: 'cancel' },
-                        { title: 'Да', action: 'clear' }
-                    ],
-                    onSelect: (a) => {
-                        if (a.action === 'clear') {
-                            saveList([]);
-                            render();
-                            notify('Очищено');
-                        }
-                    },
-                    onBack: () => {
-                        Lampa.Controller.toggle('content');
-                    }
-                });
-            }
+            param: { name: 'gist_id', type: 'input' },
+            field: { name: 'Gist ID' },
+            onChange: v => { let c = cfg(); c.gist_id = v; saveCfg(c); }
+        });
+
+        Lampa.SettingsApi.addParam({
+            component: 'bf',
+            param: { name: 'token', type: 'input' },
+            field: { name: 'Token' },
+            onChange: v => { let c = cfg(); c.gist_token = v; saveCfg(c); }
+        });
+
+        Lampa.SettingsApi.addParam({
+            component: 'bf',
+            param: { name: 'push', type: 'button' },
+            field: { name: 'Отправить' },
+            onChange: syncPush
+        });
+
+        Lampa.SettingsApi.addParam({
+            component: 'bf',
+            param: { name: 'pull', type: 'button' },
+            field: { name: 'Загрузить' },
+            onChange: syncPull
         });
     }
 
     function init() {
-        if (!cfg().enabled) return;
-
-        injectStyles();
-
-        setTimeout(() => {
-            addButton();
-        }, 500);
-
+        setTimeout(addButton, 500);
         render();
         settings();
+
+        setTimeout(() => {
+            if (cfg().gist_id) syncPull();
+        }, 1500);
     }
 
     if (window.appready) init();
