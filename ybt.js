@@ -575,7 +575,7 @@
         Lampa.SettingsApi.addComponent({
             component: 'bf',
             name: 'Закладки+',
-            icon: ICON_FLAG
+            icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/></svg>'
         });
 
         Lampa.SettingsApi.addParam({
@@ -607,7 +607,7 @@
                 type: 'button'
             },
             field: {
-                name: '☁️ GitHub Gist синхронизация',
+                name: 'GitHub Gist синхронизация',
                 description: 'Облачное резервное копирование закладок'
             },
             onChange: () => {
@@ -622,7 +622,7 @@
                 type: 'button'
             },
             field: {
-                name: '🗑 Очистить все закладки'
+                name: 'Очистить все закладки'
             },
             onChange: () => {
                 Lampa.Select.show({
@@ -645,7 +645,7 @@
             }
         });
     }
-
+    
     // ========= ОБРАБОТЧИКИ СОБЫТИЙ =========
 
     function onAppClose() {
