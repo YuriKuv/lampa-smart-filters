@@ -11,7 +11,7 @@
     let lock = false;
     let syncTimer = null;
 
-    // ========= SVG =========
+    // ========= SVG (только для кнопок в меню) =========
 
     const ICON_ADD = `
         <svg viewBox="0 0 24 24">
@@ -372,17 +372,9 @@
                     ],
                     onSelect: (a) => {
                         if (a.action === 'remove') remove(item);
-                        // Возвращаем фокус в основное меню настроек
-                        setTimeout(() => {
-                            $('.settings .settings__item.selector').first().focus();
-                            Lampa.Controller.toggle('content');
-                        }, 100);
                     },
                     onBack: () => {
-                        setTimeout(() => {
-                            $('.settings .settings__item.selector').first().focus();
-                            Lampa.Controller.toggle('content');
-                        }, 100);
+                        Lampa.Controller.toggle('content');
                     }
                 });
             });
@@ -434,18 +426,17 @@
         }
     }
 
-    // ========= НАСТРОЙКИ GITHUB =========
+    // ========= ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ ЗАКРЫТИЯ МЕНЮ =========
 
-    function closeAndReturnToSettings() {
+    function closeSettingsMenu() {
         setTimeout(() => {
-            // Возвращаем фокус в основное окно настроек Lampa
-            const settingsItem = $('.settings .settings__item.selector').first();
-            if (settingsItem.length) {
-                settingsItem.focus();
-            }
+            $('.settings').removeClass('active');
+            $('.settings__layer').trigger('click');
             Lampa.Controller.toggle('content');
         }, 100);
     }
+
+    // ========= НАСТРОЙКИ GITHUB =========
 
     function showGistSetup() {
         const c = cfg();
@@ -461,7 +452,7 @@
                 { title: '──────────', separator: true },
                 { title: 'События синхронизации →', action: 'events' },
                 { title: '──────────', separator: true },
-                { title: 'Назад', action: 'back' }
+                { title: 'Отмена', action: 'cancel' }
             ],
             onSelect: (item) => {
                 if (item.action === 'token') {
@@ -498,12 +489,10 @@
                     setTimeout(() => showGistSetup(), 1500);
                 } else if (item.action === 'events') {
                     showSyncEventsSetup();
-                } else if (item.action === 'back') {
-                    closeAndReturnToSettings();
                 }
             },
             onBack: () => {
-                closeAndReturnToSettings();
+                closeSettingsMenu();
             }
         });
     }
@@ -653,10 +642,10 @@
                             render();
                             notify('Очищено');
                         }
-                        closeAndReturnToSettings();
+                        closeSettingsMenu();
                     },
                     onBack: () => {
-                        closeAndReturnToSettings();
+                        closeSettingsMenu();
                     }
                 });
             }
