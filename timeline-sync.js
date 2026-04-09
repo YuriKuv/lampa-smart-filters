@@ -4,11 +4,6 @@
     if (window.tl_sync_init) return;
     window.tl_sync_init = true;
 
-    const STORAGE_KEYS = {
-        FILE_VIEW: 'file_view',
-        TIMETABLE: 'timetable'
-    };
-    
     const CFG_KEY = 'timeline_sync_cfg';
     let syncTimer = null;
 
@@ -34,19 +29,66 @@
         Lampa.Noty.show(text);
     }
 
-    // ========= ОСНОВНЫЕ ФУНКЦИИ =========
+    // ========= ПОЛУЧЕНИЕ ДАННЫХ С УЧЁТОМ ПРОФИЛЯ =========
+
+    function getCurrentProfileId() {
+        // Берём profile_id из Storage (устанавливается плагином Profiles)
+        const profileId = Lampa.Storage.get('profile_id', '');
+        if (profileId) {
+            console.log(`[TimelineSync] Используем профиль: ${profileId}`);
+            return profileId;
+        }
+        
+        // Fallback: пробуем найти из account_user
+        const accountUser = Lampa.Storage.get('account_user', {});
+        if (accountUser.profile) {
+            console.log(`[TimelineSync] Профиль из account_user: ${accountUser.profile}`);
+            return String(accountUser.profile);
+        }
+        
+        console.log('[TimelineSync] Профиль не найден, используем глобальное хранилище');
+        return '';
+    }
+
+    function getFileViewKey() {
+        const profileId = getCurrentProfileId();
+        return profileId ? `file_view_${profileId}` : 'file_view';
+    }
+
+    function getTimetableKey() {
+        const profileId = getCurrentProfileId();
+        return profileId ? `timetable_${profileId}` : 'timetable';
+    }
 
     function getFileView() {
-        return Lampa.Storage.get(STORAGE_KEYS.FILE_VIEW, {});
+        const key = getFileViewKey();
+        const data = Lampa.Storage.get(key, {});
+        console.log(`[TimelineSync] Чтение ${key}:`, Object.keys(data).length, 'таймкодов');
+        return data;
     }
 
     function getTimetable() {
-        return Lampa.Storage.get(STORAGE_KEYS.TIMETABLE, []);
+        const key = getTimetableKey();
+        return Lampa.Storage.get(key, []);
+    }
+
+    function setFileView(data) {
+        const key = getFileViewKey();
+        Lampa.Storage.set(key, data, true);
+        console.log(`[TimelineSync] Запись ${key}:`, Object.keys(data).length, 'таймкодов');
+        return data;
+    }
+
+    function setTimetable(data) {
+        const key = getTimetableKey();
+        Lampa.Storage.set(key, data, true);
+        return data;
     }
 
     function getProgressData() {
         return {
             version: 2,
+            profile_id: getCurrentProfileId(),
             device: cfg().device_name,
             updated: Date.now(),
             file_view: getFileView(),
@@ -101,16 +143,22 @@
     function applyRemoteData(remote) {
         if (!remote || !remote.file_view) return false;
         
+        const currentProfile = getCurrentProfileId();
+        if (remote.profile_id && remote.profile_id !== currentProfile) {
+            console.log(`[TimelineSync] Данные для другого профиля (${remote.profile_id}), текущий: ${currentProfile}`);
+            return false;
+        }
+        
         const mergedFileView = mergeFileView(getFileView(), remote.file_view);
-        Lampa.Storage.set(STORAGE_KEYS.FILE_VIEW, mergedFileView);
+        setFileView(mergedFileView);
         
         const mergedTimetable = mergeTimetable(getTimetable(), remote.timetable || []);
-        Lampa.Storage.set(STORAGE_KEYS.TIMETABLE, mergedTimetable);
+        setTimetable(mergedTimetable);
         
         // Триггерим обновление интерфейса Lampa
         try {
-            Lampa.Storage.listener.send('file_view', { type: 'set', value: mergedFileView });
-            Lampa.Storage.listener.send('timetable', { type: 'set', value: mergedTimetable });
+            const fileViewKey = getFileViewKey();
+            Lampa.Storage.listener.send(fileViewKey, { type: 'set', value: mergedFileView });
         } catch(e) {}
         
         return true;
@@ -125,12 +173,21 @@
             return;
         }
         
-        const data = {
+        const data = getProgressData();
+        
+        // Проверяем, есть ли что отправлять
+        const fileViewCount = Object.keys(data.file_view).length;
+        if (fileViewCount === 0) {
+            console.log('[TimelineSync] Нет таймкодов для отправки');
+            return;
+        }
+        
+        const payload = {
             description: 'Lampa Timeline Sync',
             public: false,
             files: {
                 'timeline.json': {
-                    content: JSON.stringify(getProgressData(), null, 2)
+                    content: JSON.stringify(data, null, 2)
                 }
             }
         };
@@ -142,7 +199,7 @@
                 'Authorization': `token ${c.gist_token}`,
                 'Accept': 'application/vnd.github.v3+json'
             },
-            data: JSON.stringify(data),
+            data: JSON.stringify(payload),
             success: function() {
                 if (showNotify) notify('✅ Таймкоды синхронизированы');
                 Lampa.Storage.set('timeline_last_sync', Date.now());
@@ -332,6 +389,10 @@
 
     function init() {
         if (!cfg().enabled) return;
+        
+        const profileId = getCurrentProfileId();
+        console.log(`[TimelineSync] Инициализация. Профиль: ${profileId || 'глобальный'}`);
+        console.log(`[TimelineSync] Ключ file_view: ${getFileViewKey()}`);
         
         hookPlayerEvents();
         addSettings();
