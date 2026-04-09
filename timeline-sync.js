@@ -6,30 +6,36 @@
 
     const STORAGE_KEYS = {
         FILE_VIEW: 'file_view',
-        TIMETABLE: 'timetable',
-        PROGRESS: 'progress_data'
+        TIMETABLE: 'timetable'
     };
     
     const CFG_KEY = 'timeline_sync_cfg';
-    const SYNC_LOCK_KEY = 'timeline_sync_locking';
+    const CORS_PROXY = 'https://cors-anywhere.herokuapp.com/';
     
     let syncTimer = null;
     let isSyncing = false;
 
-    // ========= CONFIG =========
+    function utf8ToBase64(str) {
+        try {
+            return btoa(str);
+        } catch(e) {
+            return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {
+                return String.fromCharCode(parseInt(p1, 16));
+            }));
+        }
+    }
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
             enabled: true,
-            webdav_url: '',
+            webdav_url: 'https://webdav.yandex.ru',
             webdav_login: '',
             webdav_password: '',
+            use_proxy: true,
             device_name: Lampa.Platform.get() || 'Unknown',
-            sync_on_pause: true,
             sync_on_stop: true,
-            sync_interval: 300, // секунд (5 минут)
-            merge_strategy: 'newest',
-            auto_restore: true
+            sync_interval: 300,
+            merge_strategy: 'newest'
         }) || {};
     }
 
@@ -41,8 +47,6 @@
         Lampa.Noty.show(text);
     }
 
-    // ========= ОСНОВНЫЕ ФУНКЦИИ =========
-
     function getFileView() {
         return Lampa.Storage.get(STORAGE_KEYS.FILE_VIEW, {});
     }
@@ -52,7 +56,6 @@
     }
 
     function getProgressData() {
-        // Собираем все данные для синхронизации
         return {
             version: 2,
             device: cfg().device_name,
@@ -62,7 +65,25 @@
         };
     }
 
-    // ========= MERGE STRATEGY =========
+    function getWebDavUrl() {
+        const c = cfg();
+        if (!c.webdav_url) return null;
+        
+        let url = c.webdav_url;
+        if (!url.endsWith('/')) url += '/';
+        url += 'lampa_timeline.json';
+        
+        if (c.use_proxy) {
+            return CORS_PROXY + url;
+        }
+        return url;
+    }
+
+    function getAuth() {
+        const c = cfg();
+        if (!c.webdav_login || !c.webdav_password) return null;
+        return utf8ToBase64(`${c.webdav_login}:${c.webdav_password}`);
+    }
 
     function mergeFileView(local, remote) {
         const strategy = cfg().merge_strategy;
@@ -80,10 +101,8 @@
             const remoteUpdated = remote[hash]?.updated || 0;
             
             if (strategy === 'newest') {
-                // Выбираем более поздний по времени
                 result[hash] = remoteUpdated > localUpdated ? remote[hash] : local[hash];
             } else if (strategy === 'further') {
-                // Выбираем тот, где дальше прогресс
                 result[hash] = remoteTime > localTime ? remote[hash] : local[hash];
             } else if (strategy === 'remote') {
                 result[hash] = remote[hash];
@@ -97,59 +116,35 @@
 
     function mergeTimetable(local, remote) {
         const result = [...local];
-        const localIds = new Set(local.map(item => item.id));
+        const localIds = new Set(local.map(item => `${item.id}_${item.type || 'movie'}`));
         
         for (const item of remote) {
-            if (!localIds.has(item.id)) {
+            const key = `${item.id}_${item.type || 'movie'}`;
+            if (!localIds.has(key)) {
                 result.push(item);
             }
         }
         
-        // Сортируем по времени просмотра (новые сверху)
         result.sort((a, b) => (b.last_watch || 0) - (a.last_watch || 0));
-        
-        // Ограничиваем количество (не более 100)
         return result.slice(0, 100);
     }
 
     function applyRemoteData(remote) {
         if (!remote || !remote.file_view) return false;
         
-        // Объединяем file_view
         const mergedFileView = mergeFileView(getFileView(), remote.file_view);
         Lampa.Storage.set(STORAGE_KEYS.FILE_VIEW, mergedFileView);
         
-        // Объединяем timetable
         const mergedTimetable = mergeTimetable(getTimetable(), remote.timetable || []);
         Lampa.Storage.set(STORAGE_KEYS.TIMETABLE, mergedTimetable);
         
-        // Триггерим обновление интерфейса Lampa
+        // Триггерим обновление интерфейса
         try {
             Lampa.Storage.listener.send('file_view', { type: 'set', value: mergedFileView });
             Lampa.Storage.listener.send('timetable', { type: 'set', value: mergedTimetable });
-        } catch(e) {
-            console.log('[TimelineSync] Cannot trigger event');
-        }
+        } catch(e) {}
         
         return true;
-    }
-
-    // ========= WEBAVD (Яндекс.Диск) =========
-
-    function getWebDavUrl() {
-        const c = cfg();
-        if (!c.webdav_url) return null;
-        
-        // Нормализуем URL
-        let url = c.webdav_url;
-        if (!url.endsWith('/')) url += '/';
-        return url + 'lampa_timeline.json';
-    }
-
-    function getAuth() {
-        const c = cfg();
-        if (!c.webdav_login || !c.webdav_password) return null;
-        return btoa(`${c.webdav_login}:${c.webdav_password}`);
     }
 
     function syncToWebDav(showNotify = true) {
@@ -166,7 +161,6 @@
         }
         
         const data = getProgressData();
-        const jsonData = JSON.stringify(data, null, 2);
         
         $.ajax({
             url: url,
@@ -175,10 +169,10 @@
                 'Authorization': `Basic ${auth}`,
                 'Content-Type': 'application/json'
             },
-            data: jsonData,
+            data: JSON.stringify(data),
             success: function() {
                 if (showNotify) notify('✅ Таймкоды синхронизированы');
-                Lampa.Storage.set(SYNC_LOCK_KEY + '_last_sync', Date.now());
+                Lampa.Storage.set('timeline_last_sync', Date.now());
             },
             error: function(xhr) {
                 console.error('[TimelineSync] Upload error:', xhr);
@@ -225,7 +219,7 @@
             },
             error: function(xhr) {
                 if (xhr.status === 404) {
-                    if (showNotify) notify('📭 Файл синхронизации ещё не создан');
+                    if (showNotify) notify('📭 Файл синхронизации будет создан');
                 } else {
                     console.error('[TimelineSync] Download error:', xhr);
                     if (showNotify) notify('❌ Ошибка загрузки');
@@ -237,13 +231,10 @@
         });
     }
 
-    // ========= ПЕРЕХВАТ СОБЫТИЙ ПЛЕЕРА =========
-
     function hookPlayerEvents() {
         let lastSyncTime = 0;
         const minInterval = (cfg().sync_interval || 300) * 1000;
         
-        // Функция синхронизации с защитой от частых вызовов
         function throttledSync() {
             const now = Date.now();
             if (now - lastSyncTime < minInterval) return;
@@ -251,34 +242,12 @@
             syncToWebDav(false);
         }
         
-        // При паузе
         Lampa.Listener.follow('player', function(e) {
-            if (e.type === 'pause' && cfg().sync_on_pause) {
+            if ((e.type === 'stop' || e.type === 'pause') && cfg().sync_on_stop) {
                 throttledSync();
-            }
-            if (e.type === 'stop' && cfg().sync_on_stop) {
-                throttledSync();
-            }
-        });
-        
-        // Периодическая синхронизация во время воспроизведения
-        let playInterval = null;
-        Lampa.Listener.follow('player', function(e) {
-            if (e.type === 'play') {
-                if (playInterval) clearInterval(playInterval);
-                playInterval = setInterval(() => {
-                    if (cfg().sync_on_pause) throttledSync();
-                }, minInterval);
-            } else if (e.type === 'stop') {
-                if (playInterval) {
-                    clearInterval(playInterval);
-                    playInterval = null;
-                }
             }
         });
     }
-
-    // ========= НАСТРОЙКИ =========
 
     function showWebDavSetup() {
         const c = cfg();
@@ -286,9 +255,9 @@
         Lampa.Select.show({
             title: 'WebDAV (Яндекс.Диск)',
             items: [
-                { title: `🔗 URL: ${c.webdav_url ? '✓ Установлен' : '❌ Не установлен'}`, action: 'url' },
-                { title: `👤 Логин: ${c.webdav_login ? '✓ Установлен' : '❌ Не установлен'}`, action: 'login' },
-                { title: `🔑 Пароль: ${c.webdav_password ? '✓ Установлен' : '❌ Не установлен'}`, action: 'password' },
+                { title: `🔗 Прокси CORS: ${c.use_proxy ? '✅ Вкл' : '❌ Выкл'}`, action: 'proxy' },
+                { title: `🔑 Логин: ${c.webdav_login ? '✓ Установлен' : '❌ Не установлен'}`, action: 'login' },
+                { title: `🔒 Пароль: ${c.webdav_password ? '✓ Установлен' : '❌ Не установлен'}`, action: 'password' },
                 { title: `📱 Устройство: ${c.device_name}`, action: 'device' },
                 { title: '──────────', separator: true },
                 { title: '🔄 Принудительная синхронизация', action: 'force' },
@@ -296,19 +265,11 @@
                 { title: '❌ Отмена', action: 'cancel' }
             ],
             onSelect: (item) => {
-                if (item.action === 'url') {
-                    Lampa.Input.edit({
-                        title: 'WebDAV URL',
-                        value: c.webdav_url,
-                        free: true
-                    }, (val) => {
-                        if (val !== null) {
-                            c.webdav_url = val || '';
-                            saveCfg(c);
-                            notify('URL сохранён');
-                        }
-                        showWebDavSetup();
-                    });
+                if (item.action === 'proxy') {
+                    c.use_proxy = !c.use_proxy;
+                    saveCfg(c);
+                    notify(`Прокси ${c.use_proxy ? 'включён' : 'выключен'}`);
+                    showWebDavSetup();
                 } else if (item.action === 'login') {
                     Lampa.Input.edit({
                         title: 'Логин (Яндекс ID)',
@@ -364,7 +325,7 @@
         Lampa.SettingsApi.addComponent({
             component: 'timeline_sync',
             name: 'Синхронизация таймкодов',
-            icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.4 0-8-3.6-8-8s3.6-8 8-8 8 3.6 8 8-3.6 8-8 8zm.5-13h-1v6l5.2 3.2.8-1.3-4.5-2.7V7z"/></svg>'
+            icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/></svg>'
         });
 
         Lampa.SettingsApi.addParam({
@@ -387,7 +348,7 @@
                 },
                 default: 'newest'
             },
-            field: { name: 'Стратегия слияния', description: 'Как разрешать конфликты' },
+            field: { name: 'Стратегия слияния' },
             onChange: v => {
                 const c = cfg();
                 c.merge_strategy = v;
@@ -407,15 +368,12 @@
         });
     }
 
-    // ========= ЗАПУСК =========
-
     function init() {
         if (!cfg().enabled) return;
         
         hookPlayerEvents();
         addSettings();
         
-        // Первоначальная загрузка
         setTimeout(() => {
             syncFromWebDav(false);
         }, 5000);
