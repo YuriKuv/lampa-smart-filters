@@ -10,28 +10,15 @@
     };
     
     const CFG_KEY = 'timeline_sync_cfg';
-    const CORS_PROXY = 'https://cors-anywhere.herokuapp.com/';
-    
     let syncTimer = null;
-    let isSyncing = false;
 
-    function utf8ToBase64(str) {
-        try {
-            return btoa(str);
-        } catch(e) {
-            return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {
-                return String.fromCharCode(parseInt(p1, 16));
-            }));
-        }
-    }
+    // ========= CONFIG =========
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
             enabled: true,
-            webdav_url: 'https://webdav.yandex.ru',
-            webdav_login: '',
-            webdav_password: '',
-            use_proxy: true,
+            gist_token: '',
+            gist_id: '',
             device_name: Lampa.Platform.get() || 'Unknown',
             sync_on_stop: true,
             sync_interval: 300,
@@ -46,6 +33,8 @@
     function notify(text) {
         Lampa.Noty.show(text);
     }
+
+    // ========= ОСНОВНЫЕ ФУНКЦИИ =========
 
     function getFileView() {
         return Lampa.Storage.get(STORAGE_KEYS.FILE_VIEW, {});
@@ -65,25 +54,7 @@
         };
     }
 
-    function getWebDavUrl() {
-        const c = cfg();
-        if (!c.webdav_url) return null;
-        
-        let url = c.webdav_url;
-        if (!url.endsWith('/')) url += '/';
-        url += 'lampa_timeline.json';
-        
-        if (c.use_proxy) {
-            return CORS_PROXY + url;
-        }
-        return url;
-    }
-
-    function getAuth() {
-        const c = cfg();
-        if (!c.webdav_login || !c.webdav_password) return null;
-        return utf8ToBase64(`${c.webdav_login}:${c.webdav_password}`);
-    }
+    // ========= MERGE STRATEGY =========
 
     function mergeFileView(local, remote) {
         const strategy = cfg().merge_strategy;
@@ -106,8 +77,6 @@
                 result[hash] = remoteTime > localTime ? remote[hash] : local[hash];
             } else if (strategy === 'remote') {
                 result[hash] = remote[hash];
-            } else {
-                result[hash] = local[hash];
             }
         }
         
@@ -138,7 +107,7 @@
         const mergedTimetable = mergeTimetable(getTimetable(), remote.timetable || []);
         Lampa.Storage.set(STORAGE_KEYS.TIMETABLE, mergedTimetable);
         
-        // Триггерим обновление интерфейса
+        // Триггерим обновление интерфейса Lampa
         try {
             Lampa.Storage.listener.send('file_view', { type: 'set', value: mergedFileView });
             Lampa.Storage.listener.send('timetable', { type: 'set', value: mergedTimetable });
@@ -147,27 +116,31 @@
         return true;
     }
 
-    function syncToWebDav(showNotify = true) {
-        if (isSyncing) return;
-        isSyncing = true;
-        
-        const url = getWebDavUrl();
-        const auth = getAuth();
-        
-        if (!url || !auth) {
-            if (showNotify) notify('⚠️ WebDAV не настроен');
-            isSyncing = false;
+    // ========= GITHUB GIST СИНХРОНИЗАЦИЯ =========
+
+    function syncToGist(showNotify = true) {
+        const c = cfg();
+        if (!c.gist_token || !c.gist_id) {
+            if (showNotify) notify('⚠️ GitHub Gist не настроен');
             return;
         }
         
-        const data = getProgressData();
+        const data = {
+            description: 'Lampa Timeline Sync',
+            public: false,
+            files: {
+                'timeline.json': {
+                    content: JSON.stringify(getProgressData(), null, 2)
+                }
+            }
+        };
         
         $.ajax({
-            url: url,
-            method: 'PUT',
+            url: `https://api.github.com/gists/${c.gist_id}`,
+            method: 'PATCH',
             headers: {
-                'Authorization': `Basic ${auth}`,
-                'Content-Type': 'application/json'
+                'Authorization': `token ${c.gist_token}`,
+                'Accept': 'application/vnd.github.v3+json'
             },
             data: JSON.stringify(data),
             success: function() {
@@ -175,61 +148,52 @@
                 Lampa.Storage.set('timeline_last_sync', Date.now());
             },
             error: function(xhr) {
-                console.error('[TimelineSync] Upload error:', xhr);
-                if (showNotify && xhr.status !== 404) {
-                    notify('❌ Ошибка синхронизации');
-                }
-            },
-            complete: function() {
-                isSyncing = false;
+                console.error('[TimelineSync] Error:', xhr);
+                if (showNotify) notify('❌ Ошибка синхронизации');
             }
         });
     }
 
-    function syncFromWebDav(showNotify = true) {
-        if (isSyncing) return;
-        isSyncing = true;
-        
-        const url = getWebDavUrl();
-        const auth = getAuth();
-        
-        if (!url || !auth) {
-            if (showNotify) notify('⚠️ WebDAV не настроен');
-            isSyncing = false;
+    function syncFromGist(showNotify = true) {
+        const c = cfg();
+        if (!c.gist_token || !c.gist_id) {
+            if (showNotify) notify('⚠️ GitHub Gist не настроен');
             return;
         }
         
         $.ajax({
-            url: url,
+            url: `https://api.github.com/gists/${c.gist_id}`,
             method: 'GET',
             headers: {
-                'Authorization': `Basic ${auth}`,
-                'Accept': 'application/json'
+                'Authorization': `token ${c.gist_token}`,
+                'Accept': 'application/vnd.github.v3+json'
             },
             success: function(data) {
-                if (data && data.file_view) {
-                    applyRemoteData(data);
+                try {
+                    const content = data.files['timeline.json']?.content;
+                    if (!content) return;
+                    
+                    const remote = JSON.parse(content);
+                    applyRemoteData(remote);
+                    
                     if (showNotify) {
-                        const count = Object.keys(data.file_view).length;
+                        const count = Object.keys(remote.file_view || {}).length;
                         notify(`📥 Загружено ${count} таймкодов`);
                     }
-                } else if (showNotify) {
-                    notify('⚠️ Нет данных для синхронизации');
+                } catch(e) {
+                    console.error('[TimelineSync] Parse error:', e);
                 }
             },
             error: function(xhr) {
-                if (xhr.status === 404) {
-                    if (showNotify) notify('📭 Файл синхронизации будет создан');
-                } else {
-                    console.error('[TimelineSync] Download error:', xhr);
-                    if (showNotify) notify('❌ Ошибка загрузки');
+                console.error('[TimelineSync] Error:', xhr);
+                if (showNotify && xhr.status !== 404) {
+                    notify('❌ Ошибка загрузки');
                 }
-            },
-            complete: function() {
-                isSyncing = false;
             }
         });
     }
+
+    // ========= ПЕРЕХВАТ СОБЫТИЙ ПЛЕЕРА =========
 
     function hookPlayerEvents() {
         let lastSyncTime = 0;
@@ -239,7 +203,7 @@
             const now = Date.now();
             if (now - lastSyncTime < minInterval) return;
             lastSyncTime = now;
-            syncToWebDav(false);
+            syncToGist(false);
         }
         
         Lampa.Listener.follow('player', function(e) {
@@ -249,15 +213,16 @@
         });
     }
 
-    function showWebDavSetup() {
+    // ========= НАСТРОЙКИ =========
+
+    function showGistSetup() {
         const c = cfg();
         
         Lampa.Select.show({
-            title: 'WebDAV (Яндекс.Диск)',
+            title: 'GitHub Gist Синхронизация',
             items: [
-                { title: `🔗 Прокси CORS: ${c.use_proxy ? '✅ Вкл' : '❌ Выкл'}`, action: 'proxy' },
-                { title: `🔑 Логин: ${c.webdav_login ? '✓ Установлен' : '❌ Не установлен'}`, action: 'login' },
-                { title: `🔒 Пароль: ${c.webdav_password ? '✓ Установлен' : '❌ Не установлен'}`, action: 'password' },
+                { title: `🔑 Токен: ${c.gist_token ? '✓ Установлен' : '❌ Не установлен'}`, action: 'token' },
+                { title: `📄 Gist ID: ${c.gist_id ? c.gist_id.substring(0, 8) + '…' : '❌ Не установлен'}`, action: 'id' },
                 { title: `📱 Устройство: ${c.device_name}`, action: 'device' },
                 { title: '──────────', separator: true },
                 { title: '🔄 Принудительная синхронизация', action: 'force' },
@@ -265,36 +230,31 @@
                 { title: '❌ Отмена', action: 'cancel' }
             ],
             onSelect: (item) => {
-                if (item.action === 'proxy') {
-                    c.use_proxy = !c.use_proxy;
-                    saveCfg(c);
-                    notify(`Прокси ${c.use_proxy ? 'включён' : 'выключен'}`);
-                    showWebDavSetup();
-                } else if (item.action === 'login') {
+                if (item.action === 'token') {
                     Lampa.Input.edit({
-                        title: 'Логин (Яндекс ID)',
-                        value: c.webdav_login,
+                        title: 'GitHub Personal Access Token',
+                        value: c.gist_token,
                         free: true
                     }, (val) => {
                         if (val !== null) {
-                            c.webdav_login = val || '';
+                            c.gist_token = val || '';
                             saveCfg(c);
-                            notify('Логин сохранён');
+                            notify('Токен сохранён');
                         }
-                        showWebDavSetup();
+                        showGistSetup();
                     });
-                } else if (item.action === 'password') {
+                } else if (item.action === 'id') {
                     Lampa.Input.edit({
-                        title: 'Пароль приложения',
-                        value: c.webdav_password,
+                        title: 'Gist ID',
+                        value: c.gist_id,
                         free: true
                     }, (val) => {
                         if (val !== null) {
-                            c.webdav_password = val || '';
+                            c.gist_id = val || '';
                             saveCfg(c);
-                            notify('Пароль сохранён');
+                            notify('Gist ID сохранён');
                         }
-                        showWebDavSetup();
+                        showGistSetup();
                     });
                 } else if (item.action === 'device') {
                     Lampa.Input.edit({
@@ -307,12 +267,12 @@
                             saveCfg(c);
                             notify('Имя устройства сохранено');
                         }
-                        showWebDavSetup();
+                        showGistSetup();
                     });
                 } else if (item.action === 'force') {
-                    syncToWebDav(true);
-                    setTimeout(() => syncFromWebDav(true), 500);
-                    setTimeout(() => showWebDavSetup(), 2000);
+                    syncToGist(true);
+                    setTimeout(() => syncFromGist(true), 1000);
+                    setTimeout(() => showGistSetup(), 2000);
                 }
             },
             onBack: () => {
@@ -325,14 +285,14 @@
         Lampa.SettingsApi.addComponent({
             component: 'timeline_sync',
             name: 'Синхронизация таймкодов',
-            icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/></svg>'
+            icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm.5 13h-1v-6l5.2 3.2.8-1.3-4.5-2.7V7z"/></svg>'
         });
 
         Lampa.SettingsApi.addParam({
             component: 'timeline_sync',
-            param: { name: 'webdav_setup', type: 'button' },
-            field: { name: 'Настройка WebDAV (Яндекс.Диск)' },
-            onChange: () => showWebDavSetup()
+            param: { name: 'gist_setup', type: 'button' },
+            field: { name: 'Настройка GitHub Gist' },
+            onChange: () => showGistSetup()
         });
 
         Lampa.SettingsApi.addParam({
@@ -348,7 +308,7 @@
                 },
                 default: 'newest'
             },
-            field: { name: 'Стратегия слияния' },
+            field: { name: 'Стратегия слияния', description: 'Как разрешать конфликты' },
             onChange: v => {
                 const c = cfg();
                 c.merge_strategy = v;
@@ -359,14 +319,16 @@
         Lampa.SettingsApi.addParam({
             component: 'timeline_sync',
             param: { name: 'sync_interval', type: 'number', default: 300 },
-            field: { name: 'Интервал синхронизации (секунд)', description: 'Минимум 30 секунд' },
+            field: { name: 'Интервал синхронизации (секунд)', description: 'Рекомендуется 60-300 секунд' },
             onChange: v => {
                 const c = cfg();
-                c.sync_interval = Math.max(30, v || 300);
+                c.sync_interval = Math.max(60, v || 300);
                 saveCfg(c);
             }
         });
     }
+
+    // ========= ЗАПУСК =========
 
     function init() {
         if (!cfg().enabled) return;
@@ -375,7 +337,7 @@
         addSettings();
         
         setTimeout(() => {
-            syncFromWebDav(false);
+            syncFromGist(false);
         }, 5000);
     }
 
