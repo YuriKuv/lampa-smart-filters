@@ -30,35 +30,24 @@
         Lampa.Noty.show(text);
     }
 
-    // ========= ПОЛУЧЕНИЕ ПРОФИЛЯ (ИСПРАВЛЕНО) =========
+    // ========= ПОЛУЧЕНИЕ ПРОФИЛЯ =========
 
     function getCurrentProfileId() {
-        // 1. Ручной ID из настроек (приоритет)
         const c = cfg();
-        if (c.manual_profile_id) {
-            return c.manual_profile_id;
-        }
+        if (c.manual_profile_id) return c.manual_profile_id;
         
-        // 2. Стандартный profile_id от плагина Profiles
         let profileId = Lampa.Storage.get('profile_id', '');
         if (profileId) return profileId;
         
-        // 3. Из account_user.profile (главный источник для CUB)
         const accountUser = Lampa.Storage.get('account_user', {});
-        if (accountUser.profile) {
-            return String(accountUser.profile);
-        }
+        if (accountUser.profile) return String(accountUser.profile);
         
-        // 4. Поиск любого file_view_* ключа
         try {
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
                 if (key && key.startsWith('file_view_')) {
                     const match = key.match(/^file_view_(\d+)$/);
-                    if (match) {
-                        console.log(`[TimelineSync] Найден профиль из ключа: ${match[1]}`);
-                        return match[1];
-                    }
+                    if (match) return match[1];
                 }
             }
         } catch(e) {}
@@ -78,9 +67,7 @@
 
     function getFileView() {
         const key = getFileViewKey();
-        const data = Lampa.Storage.get(key, {});
-        console.log(`[TimelineSync] Чтение ${key}:`, Object.keys(data).length, 'таймкодов');
-        return data;
+        return Lampa.Storage.get(key, {});
     }
 
     function getTimetable() {
@@ -91,7 +78,6 @@
     function setFileView(data) {
         const key = getFileViewKey();
         Lampa.Storage.set(key, data, true);
-        console.log(`[TimelineSync] Запись ${key}:`, Object.keys(data).length, 'таймкодов');
         return data;
     }
 
@@ -113,27 +99,31 @@
         };
     }
 
-    // ========= MERGE STRATEGY =========
+    // ========= MERGE STRATEGY (ОБНОВЛЁННАЯ) =========
 
     function mergeFileView(local, remote) {
         const strategy = cfg().merge_strategy;
         const result = { ...local };
         
         for (const hash in remote) {
+            const remoteTime = remote[hash]?.time || 0;
+            const localTime = local[hash]?.time || 0;
+            const remoteUpdated = remote[hash]?.updated || 0;
+            const localUpdated = local[hash]?.updated || 0;
+            
             if (!local[hash]) {
                 result[hash] = remote[hash];
                 continue;
             }
             
-            const localTime = local[hash]?.time || 0;
-            const remoteTime = remote[hash]?.time || 0;
-            const localUpdated = local[hash]?.updated || 0;
-            const remoteUpdated = remote[hash]?.updated || 0;
-            
             if (strategy === 'newest') {
-                result[hash] = remoteUpdated > localUpdated ? remote[hash] : local[hash];
+                if (remoteUpdated > localUpdated) {
+                    result[hash] = remote[hash];
+                }
             } else if (strategy === 'further') {
-                result[hash] = remoteTime > localTime ? remote[hash] : local[hash];
+                if (remoteTime > localTime) {
+                    result[hash] = remote[hash];
+                }
             } else if (strategy === 'remote') {
                 result[hash] = remote[hash];
             }
@@ -144,37 +134,46 @@
 
     function mergeTimetable(local, remote) {
         const result = [...local];
-        const localIds = new Set(local.map(item => `${item.id}_${item.type || 'movie'}`));
         
-        for (const item of remote) {
-            const key = `${item.id}_${item.type || 'movie'}`;
-            if (!localIds.has(key)) {
-                result.push(item);
+        for (let i = 0; i < remote.length; i++) {
+            const remoteItem = remote[i];
+            const remoteKey = `${remoteItem.id}_${remoteItem.type || 'movie'}_${remoteItem.season || 0}`;
+            
+            let found = false;
+            for (let j = 0; j < result.length; j++) {
+                const localItem = result[j];
+                const localKey = `${localItem.id}_${localItem.type || 'movie'}_${localItem.season || 0}`;
+                
+                if (remoteKey === localKey) {
+                    const remoteTime = remoteItem.scaned_time || 0;
+                    const localTime = localItem.scaned_time || 0;
+                    if (remoteTime > localTime) {
+                        result[j] = remoteItem;
+                    }
+                    found = true;
+                    break;
+                }
+            }
+            
+            if (!found) {
+                result.push(remoteItem);
             }
         }
         
-        result.sort((a, b) => (b.last_watch || 0) - (a.last_watch || 0));
+        result.sort((a, b) => (b.scaned_time || 0) - (a.scaned_time || 0));
         return result.slice(0, 100);
     }
 
     function applyRemoteData(remote) {
         if (!remote || !remote.file_view) return false;
         
-        const currentProfile = getCurrentProfileId();
-        const remoteProfile = remote.profile_id || '';
-        
-        console.log(`[TimelineSync] Текущий профиль: ${currentProfile}, удалённый: ${remoteProfile}`);
-        
-        // Если профили разные, но у текущего нет данных — загружаем
-        if (remoteProfile && remoteProfile !== currentProfile && Object.keys(getFileView()).length === 0) {
-            console.log(`[TimelineSync] Загружаем данные из профиля ${remoteProfile}`);
-        }
-        
         const mergedFileView = mergeFileView(getFileView(), remote.file_view);
         setFileView(mergedFileView);
         
         const mergedTimetable = mergeTimetable(getTimetable(), remote.timetable || []);
         setTimetable(mergedTimetable);
+        
+        console.log(`[TimelineSync] После слияния: file_view=${Object.keys(mergedFileView).length}, timetable=${mergedTimetable.length}`);
         
         return true;
     }
@@ -191,12 +190,7 @@
         const data = getProgressData();
         const fileViewCount = Object.keys(data.file_view).length;
         
-        console.log(`[TimelineSync] Отправка ${fileViewCount} таймкодов, профиль: ${data.profile_id}`);
-        
-        if (fileViewCount === 0) {
-            console.log('[TimelineSync] Нет таймкодов для отправки');
-            return;
-        }
+        console.log(`[TimelineSync] Отправка: file_view=${fileViewCount}, timetable=${data.timetable.length}, профиль=${data.profile_id}`);
         
         const payload = {
             description: 'Lampa Timeline Sync',
@@ -423,6 +417,7 @@
         const profileId = getCurrentProfileId();
         console.log(`[TimelineSync] Инициализация. Профиль: ${profileId || 'глобальный'}`);
         console.log(`[TimelineSync] Ключ file_view: ${getFileViewKey()}`);
+        console.log(`[TimelineSync] Стратегия слияния: ${cfg().merge_strategy}`);
         
         hookPlayerEvents();
         addSettings();
