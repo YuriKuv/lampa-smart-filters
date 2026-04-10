@@ -15,6 +15,7 @@
             gist_token: '',
             gist_id: '',
             device_name: Lampa.Platform.get() || 'Unknown',
+            manual_profile_id: '',
             sync_on_stop: true,
             sync_interval: 300,
             merge_strategy: 'newest'
@@ -29,24 +30,39 @@
         Lampa.Noty.show(text);
     }
 
-    // ========= ПОЛУЧЕНИЕ ДАННЫХ С УЧЁТОМ ПРОФИЛЯ =========
+    // ========= ПОЛУЧЕНИЕ ПРОФИЛЯ (ИСПРАВЛЕНО) =========
 
     function getCurrentProfileId() {
-        // Берём profile_id из Storage (устанавливается плагином Profiles)
-        const profileId = Lampa.Storage.get('profile_id', '');
-        if (profileId) {
-            console.log(`[TimelineSync] Используем профиль: ${profileId}`);
-            return profileId;
+        // 1. Ручной ID из настроек (приоритет)
+        const c = cfg();
+        if (c.manual_profile_id) {
+            return c.manual_profile_id;
         }
         
-        // Fallback: пробуем найти из account_user
+        // 2. Стандартный profile_id от плагина Profiles
+        let profileId = Lampa.Storage.get('profile_id', '');
+        if (profileId) return profileId;
+        
+        // 3. Из account_user.profile (главный источник для CUB)
         const accountUser = Lampa.Storage.get('account_user', {});
         if (accountUser.profile) {
-            console.log(`[TimelineSync] Профиль из account_user: ${accountUser.profile}`);
             return String(accountUser.profile);
         }
         
-        console.log('[TimelineSync] Профиль не найден, используем глобальное хранилище');
+        // 4. Поиск любого file_view_* ключа
+        try {
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('file_view_')) {
+                    const match = key.match(/^file_view_(\d+)$/);
+                    if (match) {
+                        console.log(`[TimelineSync] Найден профиль из ключа: ${match[1]}`);
+                        return match[1];
+                    }
+                }
+            }
+        } catch(e) {}
+        
         return '';
     }
 
@@ -86,9 +102,10 @@
     }
 
     function getProgressData() {
+        const profileId = getCurrentProfileId();
         return {
             version: 2,
-            profile_id: getCurrentProfileId(),
+            profile_id: profileId,
             device: cfg().device_name,
             updated: Date.now(),
             file_view: getFileView(),
@@ -144,9 +161,13 @@
         if (!remote || !remote.file_view) return false;
         
         const currentProfile = getCurrentProfileId();
-        if (remote.profile_id && remote.profile_id !== currentProfile) {
-            console.log(`[TimelineSync] Данные для другого профиля (${remote.profile_id}), текущий: ${currentProfile}`);
-            return false;
+        const remoteProfile = remote.profile_id || '';
+        
+        console.log(`[TimelineSync] Текущий профиль: ${currentProfile}, удалённый: ${remoteProfile}`);
+        
+        // Если профили разные, но у текущего нет данных — загружаем
+        if (remoteProfile && remoteProfile !== currentProfile && Object.keys(getFileView()).length === 0) {
+            console.log(`[TimelineSync] Загружаем данные из профиля ${remoteProfile}`);
         }
         
         const mergedFileView = mergeFileView(getFileView(), remote.file_view);
@@ -154,12 +175,6 @@
         
         const mergedTimetable = mergeTimetable(getTimetable(), remote.timetable || []);
         setTimetable(mergedTimetable);
-        
-        // Триггерим обновление интерфейса Lampa
-        try {
-            const fileViewKey = getFileViewKey();
-            Lampa.Storage.listener.send(fileViewKey, { type: 'set', value: mergedFileView });
-        } catch(e) {}
         
         return true;
     }
@@ -174,9 +189,10 @@
         }
         
         const data = getProgressData();
-        
-        // Проверяем, есть ли что отправлять
         const fileViewCount = Object.keys(data.file_view).length;
+        
+        console.log(`[TimelineSync] Отправка ${fileViewCount} таймкодов, профиль: ${data.profile_id}`);
+        
         if (fileViewCount === 0) {
             console.log('[TimelineSync] Нет таймкодов для отправки');
             return;
@@ -281,6 +297,7 @@
                 { title: `🔑 Токен: ${c.gist_token ? '✓ Установлен' : '❌ Не установлен'}`, action: 'token' },
                 { title: `📄 Gist ID: ${c.gist_id ? c.gist_id.substring(0, 8) + '…' : '❌ Не установлен'}`, action: 'id' },
                 { title: `📱 Устройство: ${c.device_name}`, action: 'device' },
+                { title: `👤 ID профиля: ${c.manual_profile_id || 'авто'}`, action: 'profile' },
                 { title: '──────────', separator: true },
                 { title: '🔄 Принудительная синхронизация', action: 'force' },
                 { title: '──────────', separator: true },
@@ -323,6 +340,19 @@
                             c.device_name = val.trim();
                             saveCfg(c);
                             notify('Имя устройства сохранено');
+                        }
+                        showGistSetup();
+                    });
+                } else if (item.action === 'profile') {
+                    Lampa.Input.edit({
+                        title: 'ID профиля (оставьте пустым для авто)',
+                        value: c.manual_profile_id || '',
+                        free: true
+                    }, (val) => {
+                        if (val !== null) {
+                            c.manual_profile_id = val || '';
+                            saveCfg(c);
+                            notify(`ID профиля ${c.manual_profile_id || 'авто'} сохранён`);
                         }
                         showGistSetup();
                     });
