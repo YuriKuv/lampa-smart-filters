@@ -5,9 +5,6 @@
     window.tl_sync_init = true;
 
     const CFG_KEY = 'timeline_sync_cfg';
-    let syncTimer = null;
-
-    // ========= CONFIG =========
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -17,8 +14,7 @@
             device_name: Lampa.Platform.get() || 'Unknown',
             manual_profile_id: '',
             sync_on_stop: true,
-            sync_interval: 300,
-            merge_strategy: 'newest'
+            sync_interval: 300
         }) || {};
     }
 
@@ -30,8 +26,6 @@
         Lampa.Noty.show(text);
     }
 
-    // ========= ПОЛУЧЕНИЕ ПРОФИЛЯ =========
-
     function getCurrentProfileId() {
         const c = cfg();
         if (c.manual_profile_id) return c.manual_profile_id;
@@ -42,16 +36,6 @@
         const accountUser = Lampa.Storage.get('account_user', {});
         if (accountUser.profile) return String(accountUser.profile);
         
-        try {
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key && key.startsWith('file_view_')) {
-                    const match = key.match(/^file_view_(\d+)$/);
-                    if (match) return match[1];
-                }
-            }
-        } catch(e) {}
-        
         return '';
     }
 
@@ -60,19 +44,9 @@
         return profileId ? `file_view_${profileId}` : 'file_view';
     }
 
-    function getTimetableKey() {
-        const profileId = getCurrentProfileId();
-        return profileId ? `timetable_${profileId}` : 'timetable';
-    }
-
     function getFileView() {
         const key = getFileViewKey();
         return Lampa.Storage.get(key, {});
-    }
-
-    function getTimetable() {
-        const key = getTimetableKey();
-        return Lampa.Storage.get(key, []);
     }
 
     function setFileView(data) {
@@ -81,104 +55,86 @@
         return data;
     }
 
-    function setTimetable(data) {
-        const key = getTimetableKey();
-        Lampa.Storage.set(key, data, true);
-        return data;
+    // Нормализация ключа — используем TMDB ID вместо хеша
+    function normalizeKey(hash, item) {
+        // Пытаемся извлечь TMDB ID из разных источников
+        if (item && item.tmdb_id) return `tmdb_${item.tmdb_id}`;
+        if (item && item.id) return `tmdb_${item.id}`;
+        
+        // Если есть информация о фильме в самом хеше — пробуем извлечь
+        const match = hash.match(/(\d+)/);
+        if (match) return `tmdb_${match[1]}`;
+        
+        return hash;
+    }
+
+    // Конвертация старого формата в новый
+    function convertToStableFormat(oldFileView) {
+        const newFileView = {};
+        
+        for (const hash in oldFileView) {
+            const item = oldFileView[hash];
+            const stableKey = normalizeKey(hash, item);
+            
+            if (!newFileView[stableKey] || (item.time || 0) > (newFileView[stableKey]?.time || 0)) {
+                newFileView[stableKey] = item;
+            }
+        }
+        
+        return newFileView;
     }
 
     function getProgressData() {
-        const profileId = getCurrentProfileId();
+        let fileView = getFileView();
+        
+        // Конвертируем в стабильный формат, если ещё не сконвертировано
+        if (!Lampa.Storage.get('timeline_converted', false)) {
+            fileView = convertToStableFormat(fileView);
+            setFileView(fileView);
+            Lampa.Storage.set('timeline_converted', true);
+            console.log('[TimelineSync] Данные сконвертированы в стабильный формат');
+        }
+        
         return {
-            version: 2,
-            profile_id: profileId,
+            version: 3,
+            profile_id: getCurrentProfileId(),
             device: cfg().device_name,
             updated: Date.now(),
-            file_view: getFileView(),
-            timetable: getTimetable()
+            file_view: fileView
         };
     }
 
-    // ========= MERGE STRATEGY (ОБНОВЛЁННАЯ) =========
-
     function mergeFileView(local, remote) {
-        const strategy = cfg().merge_strategy;
         const result = { ...local };
         
-        for (const hash in remote) {
-            const remoteTime = remote[hash]?.time || 0;
-            const localTime = local[hash]?.time || 0;
-            const remoteUpdated = remote[hash]?.updated || 0;
-            const localUpdated = local[hash]?.updated || 0;
+        for (const key in remote) {
+            const remoteTime = remote[key]?.time || 0;
+            const localTime = local[key]?.time || 0;
             
-            if (!local[hash]) {
-                result[hash] = remote[hash];
-                continue;
-            }
-            
-            if (strategy === 'newest') {
-                if (remoteUpdated > localUpdated) {
-                    result[hash] = remote[hash];
-                }
-            } else if (strategy === 'further') {
-                if (remoteTime > localTime) {
-                    result[hash] = remote[hash];
-                }
-            } else if (strategy === 'remote') {
-                result[hash] = remote[hash];
+            if (!local[key]) {
+                result[key] = remote[key];
+                console.log(`[TimelineSync] Новый таймкод: ${key}`);
+            } else if (remoteTime > localTime) {
+                result[key] = remote[key];
+                console.log(`[TimelineSync] Обновлён ${key}: ${localTime} -> ${remoteTime}`);
             }
         }
         
         return result;
     }
 
-    function mergeTimetable(local, remote) {
-        const result = [...local];
-        
-        for (let i = 0; i < remote.length; i++) {
-            const remoteItem = remote[i];
-            const remoteKey = `${remoteItem.id}_${remoteItem.type || 'movie'}_${remoteItem.season || 0}`;
-            
-            let found = false;
-            for (let j = 0; j < result.length; j++) {
-                const localItem = result[j];
-                const localKey = `${localItem.id}_${localItem.type || 'movie'}_${localItem.season || 0}`;
-                
-                if (remoteKey === localKey) {
-                    const remoteTime = remoteItem.scaned_time || 0;
-                    const localTime = localItem.scaned_time || 0;
-                    if (remoteTime > localTime) {
-                        result[j] = remoteItem;
-                    }
-                    found = true;
-                    break;
-                }
-            }
-            
-            if (!found) {
-                result.push(remoteItem);
-            }
-        }
-        
-        result.sort((a, b) => (b.scaned_time || 0) - (a.scaned_time || 0));
-        return result.slice(0, 100);
-    }
-
     function applyRemoteData(remote) {
         if (!remote || !remote.file_view) return false;
         
-        const mergedFileView = mergeFileView(getFileView(), remote.file_view);
+        const localFileView = getFileView();
+        const mergedFileView = mergeFileView(localFileView, remote.file_view);
         setFileView(mergedFileView);
         
-        const mergedTimetable = mergeTimetable(getTimetable(), remote.timetable || []);
-        setTimetable(mergedTimetable);
-        
-        console.log(`[TimelineSync] После слияния: file_view=${Object.keys(mergedFileView).length}, timetable=${mergedTimetable.length}`);
-        
+        console.log(`[TimelineSync] После слияния: ${Object.keys(mergedFileView).length} таймкодов`);
         return true;
     }
 
-    // ========= GITHUB GIST СИНХРОНИЗАЦИЯ =========
+    // ========= GITHUB GIST =========
 
     function syncToGist(showNotify = true) {
         const c = cfg();
@@ -188,9 +144,9 @@
         }
         
         const data = getProgressData();
-        const fileViewCount = Object.keys(data.file_view).length;
+        const count = Object.keys(data.file_view).length;
         
-        console.log(`[TimelineSync] Отправка: file_view=${fileViewCount}, timetable=${data.timetable.length}, профиль=${data.profile_id}`);
+        console.log(`[TimelineSync] Отправка ${count} таймкодов`);
         
         const payload = {
             description: 'Lampa Timeline Sync',
@@ -212,7 +168,6 @@
             data: JSON.stringify(payload),
             success: function() {
                 if (showNotify) notify('✅ Таймкоды синхронизированы');
-                Lampa.Storage.set('timeline_last_sync', Date.now());
             },
             error: function(xhr) {
                 console.error('[TimelineSync] Error:', xhr);
@@ -260,7 +215,7 @@
         });
     }
 
-    // ========= ПЕРЕХВАТ СОБЫТИЙ ПЛЕЕРА =========
+    // ========= СОБЫТИЯ =========
 
     function hookPlayerEvents() {
         let lastSyncTime = 0;
@@ -300,7 +255,7 @@
             onSelect: (item) => {
                 if (item.action === 'token') {
                     Lampa.Input.edit({
-                        title: 'GitHub Personal Access Token',
+                        title: 'GitHub Token',
                         value: c.gist_token,
                         free: true
                     }, (val) => {
@@ -333,20 +288,20 @@
                         if (val !== null && val.trim()) {
                             c.device_name = val.trim();
                             saveCfg(c);
-                            notify('Имя устройства сохранено');
+                            notify('Имя сохранено');
                         }
                         showGistSetup();
                     });
                 } else if (item.action === 'profile') {
                     Lampa.Input.edit({
-                        title: 'ID профиля (оставьте пустым для авто)',
+                        title: 'ID профиля',
                         value: c.manual_profile_id || '',
                         free: true
                     }, (val) => {
                         if (val !== null) {
                             c.manual_profile_id = val || '';
                             saveCfg(c);
-                            notify(`ID профиля ${c.manual_profile_id || 'авто'} сохранён`);
+                            notify(`Профиль ${c.manual_profile_id || 'авто'} сохранён`);
                         }
                         showGistSetup();
                     });
@@ -366,41 +321,20 @@
         Lampa.SettingsApi.addComponent({
             component: 'timeline_sync',
             name: 'Синхронизация таймкодов',
-            icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm.5 13h-1v-6l5.2 3.2.8-1.3-4.5-2.7V7z"/></svg>'
+            icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/></svg>'
         });
 
         Lampa.SettingsApi.addParam({
             component: 'timeline_sync',
             param: { name: 'gist_setup', type: 'button' },
-            field: { name: 'Настройка GitHub Gist' },
+            field: { name: 'GitHub Gist' },
             onChange: () => showGistSetup()
         });
 
         Lampa.SettingsApi.addParam({
             component: 'timeline_sync',
-            param: {
-                name: 'merge_strategy',
-                type: 'select',
-                values: {
-                    'newest': 'По времени обновления',
-                    'further': 'По дальше просмотра',
-                    'remote': 'Только облачный',
-                    'local': 'Только локальный'
-                },
-                default: 'newest'
-            },
-            field: { name: 'Стратегия слияния', description: 'Как разрешать конфликты' },
-            onChange: v => {
-                const c = cfg();
-                c.merge_strategy = v;
-                saveCfg(c);
-            }
-        });
-
-        Lampa.SettingsApi.addParam({
-            component: 'timeline_sync',
             param: { name: 'sync_interval', type: 'number', default: 300 },
-            field: { name: 'Интервал синхронизации (секунд)', description: 'Рекомендуется 60-300 секунд' },
+            field: { name: 'Интервал синхронизации (сек)' },
             onChange: v => {
                 const c = cfg();
                 c.sync_interval = Math.max(60, v || 300);
@@ -414,17 +348,21 @@
     function init() {
         if (!cfg().enabled) return;
         
-        const profileId = getCurrentProfileId();
-        console.log(`[TimelineSync] Инициализация. Профиль: ${profileId || 'глобальный'}`);
-        console.log(`[TimelineSync] Ключ file_view: ${getFileViewKey()}`);
-        console.log(`[TimelineSync] Стратегия слияния: ${cfg().merge_strategy}`);
+        console.log(`[TimelineSync] Профиль: ${getCurrentProfileId() || 'глобальный'}`);
+        
+        // При первом запуске конвертируем данные
+        const fileView = getFileView();
+        if (Object.keys(fileView).length > 0 && !Lampa.Storage.get('timeline_converted', false)) {
+            console.log('[TimelineSync] Конвертация данных в стабильный формат...');
+            const converted = convertToStableFormat(fileView);
+            setFileView(converted);
+            Lampa.Storage.set('timeline_converted', true);
+        }
         
         hookPlayerEvents();
         addSettings();
         
-        setTimeout(() => {
-            syncFromGist(false);
-        }, 5000);
+        setTimeout(() => syncFromGist(false), 5000);
     }
 
     if (window.appready) init();
