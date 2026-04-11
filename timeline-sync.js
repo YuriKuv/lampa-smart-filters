@@ -4,6 +4,8 @@
     if (window.tl_sync_init) return;
     window.tl_sync_init = true;
 
+    console.log('[Sync] Загрузка исправленной версии...');
+
     const CFG_KEY = 'timeline_sync_cfg';
     let lastSyncTime = 0;
     let syncInProgress = false;
@@ -50,6 +52,28 @@
 
     function setFileView(data) {
         Lampa.Storage.set(getFileViewKey(), data, true);
+        return data;
+    }
+
+    // КЛЮЧЕВАЯ ФУНКЦИЯ: сохраняет таймкод в оба хранилища
+    function saveToBothStorages(tmdbId, percent, time, updated) {
+        const timestamp = updated || Date.now();
+        const data = { percent: percent, time: time || 0, updated: timestamp };
+        
+        // 1. Сохраняем в наше хранилище
+        const fileView = getFileView();
+        fileView[tmdbId] = data;
+        setFileView(fileView);
+        
+        // 2. Сохраняем в стандартное хранилище Lampa (ВАЖНО!)
+        Lampa.Storage.set(`timeline_${tmdbId}`, { percent: percent, updated: timestamp }, true);
+        
+        // 3. Также сохраняем в общий timeline если нужно
+        const globalTimeline = Lampa.Storage.get('timeline', {});
+        globalTimeline[tmdbId] = { percent: percent, updated: timestamp };
+        Lampa.Storage.set('timeline', globalTimeline, true);
+        
+        console.log(`[Sync] 💾 Сохранён таймкод ${tmdbId}: ${percent}% (в оба хранилища)`);
         return data;
     }
 
@@ -142,58 +166,26 @@
         return { merged: result, changed };
     }
 
-    // Прямое обновление таймкодов в Lampa Timeline
-    function updateLampaTimeline(tmdbId, percent) {
-        try {
-            // Обновляем через стандартный Timeline Lampa
-            if (Lampa.Timeline && Lampa.Timeline.set) {
-                Lampa.Timeline.set(tmdbId, { percent: percent, updated: Date.now() });
+    // Применяем удалённые данные
+    function applyRemoteData(remote) {
+        if (!remote?.file_view) return false;
+        
+        const localFileView = getFileView();
+        const { merged, changed } = mergeFileView(localFileView, remote.file_view);
+        
+        if (changed) {
+            setFileView(merged);
+            console.log(`[Sync] Сохранено ${Object.keys(merged).length} таймкодов`);
+            
+            // Синхронизируем с хранилищем Lampa
+            for (const tmdbId in merged) {
+                const data = merged[tmdbId];
+                saveToBothStorages(tmdbId, data.percent, data.time, data.updated);
             }
             
-            // Обновляем через Storage
-            const storageKey = `timeline_${tmdbId}`;
-            Lampa.Storage.set(storageKey, { percent: percent, updated: Date.now() }, true);
-            
-            // Триггерим событие обновления
-            Lampa.Listener.trigger('timeline', 'update', { id: tmdbId, percent: percent });
-            
-            console.log(`[Sync] Обновлён таймкод в Lampa: ${tmdbId} - ${percent}%`);
-        } catch(e) {
-            console.error('[Sync] Ошибка обновления Timeline:', e);
+            return true;
         }
-    }
-
-    // Принудительная синхронизация с интерфейсом Lampa
-    function syncToLampaInterface() {
-        try {
-            const fileView = getFileView();
-            let count = 0;
-            
-            for (const tmdbId in fileView) {
-                const data = fileView[tmdbId];
-                if (data && data.percent !== undefined) {
-                    updateLampaTimeline(tmdbId, data.percent);
-                    count++;
-                }
-            }
-            
-            console.log(`[Sync] Синхронизировано с Lampa: ${count} таймкодов`);
-            
-            // Принудительно обновляем интерфейс
-            if (Lampa.Controller && Lampa.Controller.reloadAll) {
-                Lampa.Controller.reloadAll();
-            }
-            
-            // Обновляем текущую страницу
-            if (Lampa.Controller.current && Lampa.Controller.current().reload) {
-                Lampa.Controller.current().reload();
-            }
-            
-            return count;
-        } catch(e) {
-            console.error('[Sync] Ошибка синхронизации с Lampa:', e);
-            return 0;
-        }
+        return false;
     }
 
     function getCurrentMovieTmdbId() {
@@ -322,30 +314,26 @@
                         const remoteCount = Object.keys(remote.file_view || {}).length;
                         console.log(`[Sync] Загружено ${remoteCount} таймкодов`);
                         
-                        const localFileView = getFileView();
-                        const { merged, changed } = mergeFileView(localFileView, remote.file_view);
+                        const changed = applyRemoteData(remote);
                         
-                        if (changed) {
-                            setFileView(merged);
-                            console.log(`[Sync] Сохранено ${Object.keys(merged).length} таймкодов`);
-                            
-                            // КЛЮЧЕВОЕ: синхронизируем с Lampa Timeline
-                            const syncedCount = syncToLampaInterface();
-                            console.log(`[Sync] В Lampa обновлено ${syncedCount} таймкодов`);
-                            
-                            if (applyToPlayer) {
-                                const currentTmdbId = getCurrentMovieTmdbId();
-                                if (currentTmdbId && merged[currentTmdbId]) {
+                        if (changed && showNotify) {
+                            notify(`📥 Загружено ${remoteCount} таймкодов`);
+                        } else if (showNotify && !changed) {
+                            notify('✅ Данные актуальны');
+                        }
+                        
+                        if (applyToPlayer) {
+                            const currentTmdbId = getCurrentMovieTmdbId();
+                            if (currentTmdbId) {
+                                const fileView = getFileView();
+                                if (fileView[currentTmdbId]) {
                                     setTimeout(() => {
-                                        applyToCurrentPlayer(currentTmdbId, merged[currentTmdbId].percent);
+                                        applyToCurrentPlayer(currentTmdbId, fileView[currentTmdbId].percent);
                                     }, 500);
                                 }
                             }
-                            
-                            if (showNotify) notify(`📥 Загружено ${remoteCount} таймкодов`);
-                        } else if (showNotify) {
-                            notify('✅ Данные актуальны');
                         }
+                        
                         if (callback) callback(true);
                     } else {
                         if (showNotify) notify('❌ Нет данных');
@@ -407,16 +395,7 @@
                     
                     const tmdbId = getCurrentMovieTmdbId();
                     if (tmdbId) {
-                        const fileView = getFileView();
-                        fileView[tmdbId] = {
-                            percent: percent,
-                            time: e.time,
-                            updated: Date.now(),
-                            device: cfg().device_name
-                        };
-                        setFileView(fileView);
-                        // Обновляем в Lampa Timeline
-                        updateLampaTimeline(tmdbId, percent);
+                        saveToBothStorages(tmdbId, percent, e.time);
                         console.log(`[Sync] Прогресс: ${tmdbId} - ${percent}%`);
                     }
                     
@@ -463,7 +442,6 @@
                 { title: `⏱ Интервал: ${c.sync_interval} сек`, action: 'interval' },
                 { title: '──────────', separator: true },
                 { title: '🔄 Полная синхронизация', action: 'force', accent: true },
-                { title: '🔄 Обновить интерфейс', action: 'refresh' },
                 { title: '──────────', separator: true },
                 { title: '❌ Отмена', action: 'cancel' }
             ],
@@ -484,22 +462,18 @@
                         showGistSetup();
                     });
                 } else if (item.action === 'profile') {
-                    Lampa.Input.edit({ title: 'ID профиля', value: c.manual_profile_id, free: true }, (val) => {
+                    Lampa.Input.edit({ title: 'ID профиля (пусто = авто)', value: c.manual_profile_id, free: true }, (val) => {
                         if (val !== null) { c.manual_profile_id = val || ''; saveCfg(c); notify('Профиль сохранён'); }
                         showGistSetup();
                     });
                 } else if (item.action === 'interval') {
-                    Lampa.Input.edit({ title: 'Интервал (сек)', value: c.sync_interval, free: true }, (val) => {
+                    Lampa.Input.edit({ title: 'Интервал (сек, мин 15)', value: c.sync_interval, free: true }, (val) => {
                         if (val !== null && val >= 15) { c.sync_interval = val; saveCfg(c); notify(`Интервал: ${val} сек`); }
                         showGistSetup();
                     });
                 } else if (item.action === 'force') {
                     forceFullSync();
                     setTimeout(() => showGistSetup(), 2000);
-                } else if (item.action === 'refresh') {
-                    syncToLampaInterface();
-                    notify('🔄 Интерфейс обновлён');
-                    setTimeout(() => showGistSetup(), 1000);
                 }
             },
             onBack: () => {
@@ -534,22 +508,31 @@
         });
     }
 
+    // Импорт существующих таймкодов из старого хранилища
+    function importExistingTimelines() {
+        const profileId = getCurrentProfileId();
+        if (!profileId) return;
+        
+        const oldKey = `file_view_${profileId}`;
+        const oldData = Lampa.Storage.get(oldKey, {});
+        
+        if (Object.keys(oldData).length > 0) {
+            console.log(`[Sync] Импорт ${Object.keys(oldData).length} существующих таймкодов...`);
+            for (const tmdbId in oldData) {
+                const data = oldData[tmdbId];
+                saveToBothStorages(tmdbId, data.percent, data.time, data.updated);
+            }
+        }
+    }
+
     function init() {
         if (!cfg().enabled) return;
         
-        console.log(`[Sync] Инициализация. Профиль: ${getCurrentProfileId() || 'глобальный'}`);
+        const profileId = getCurrentProfileId();
+        console.log(`[Sync] Инициализация. Профиль: ${profileId || 'глобальный'}`);
         
-        // Нормализация ключей
-        const current = getFileView();
-        const normalized = normalizeKeys(current);
-        if (JSON.stringify(current) !== JSON.stringify(normalized)) {
-            setFileView(normalized);
-        }
-        
-        // Синхронизируем существующие таймкоды с Lampa
-        setTimeout(() => {
-            syncToLampaInterface();
-        }, 1000);
+        // Импортируем существующие таймкоды
+        importExistingTimelines();
         
         hookPlayerOpen();
         hookPlayerEvents();
@@ -557,7 +540,7 @@
         startBackgroundSync();
         
         setTimeout(() => {
-            if (cfg().enabled) {
+            if (cfg().enabled && cfg().gist_token && cfg().gist_id) {
                 syncFromGist(false, null, true);
             }
         }, 5000);
