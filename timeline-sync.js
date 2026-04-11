@@ -17,7 +17,7 @@
             device_name: Lampa.Platform.get() || 'Unknown',
             manual_profile_id: '',
             sync_on_stop: true,
-            sync_interval: 30 // Уменьшил интервал по умолчанию
+            sync_interval: 30
         }) || {};
     }
 
@@ -124,7 +124,86 @@
         return { merged: result, changed };
     }
 
-    function applyRemoteData(remote) {
+    // Получить TMDB ID текущего фильма в плеере
+    function getCurrentMovieTmdbId() {
+        try {
+            const activity = Lampa.Activity.active();
+            if (activity && activity.movie) {
+                const movie = activity.movie;
+                return extractTmdbIdFromItem(movie);
+            }
+            
+            // Альтернативный способ через плеер
+            if (Lampa.Player && Lampa.Player.current()) {
+                const player = Lampa.Player.current();
+                if (player.movie) {
+                    return extractTmdbIdFromItem(player.movie);
+                }
+            }
+        } catch(e) {
+            console.error('[Sync] Ошибка получения текущего фильма:', e);
+        }
+        return null;
+    }
+
+    // Применить таймкод к текущему плееру
+    function applyToCurrentPlayer(tmdbId, percent) {
+        try {
+            const player = Lampa.Player.current();
+            if (!player) return false;
+            
+            const currentMovieId = getCurrentMovieTmdbId();
+            if (currentMovieId && String(currentMovieId) === String(tmdbId)) {
+                const duration = player.duration ? player.duration() : (player.video ? player.video.duration : 0);
+                if (duration > 0) {
+                    const seekTime = (percent / 100) * duration;
+                    console.log(`[Sync] 🎯 Применяем таймкод к текущему плееру: ${percent}% (${Math.floor(seekTime)}с)`);
+                    
+                    if (player.seek) {
+                        player.seek(seekTime);
+                    } else if (player.setCurrentTime) {
+                        player.setCurrentTime(seekTime);
+                    } else if (player.video) {
+                        player.video.currentTime = seekTime;
+                    }
+                    return true;
+                }
+            }
+        } catch(e) {
+            console.error('[Sync] Ошибка применения таймкода:', e);
+        }
+        return false;
+    }
+
+    // Обновить интерфейс таймкодов для карточек
+    function refreshTimelineUI() {
+        try {
+            // Обновляем компоненты, которые показывают таймкоды
+            if (Lampa.Component && Lampa.Component.list) {
+                Lampa.Component.list().forEach(component => {
+                    if (component.update && component.type === 'timeline') {
+                        component.update();
+                    }
+                });
+            }
+            
+            // Обновляем контент на главной
+            if (Lampa.Controller && Lampa.Controller.content) {
+                const content = Lampa.Controller.content();
+                if (content && content.render) {
+                    content.render();
+                }
+            }
+            
+            // Триггерим событие обновления таймкодов
+            Lampa.Listener.trigger('timeline', 'update');
+            console.log('[Sync] UI обновлён');
+        } catch(e) {
+            console.error('[Sync] Ошибка обновления UI:', e);
+        }
+    }
+
+    function applyRemoteData(remote, applyToPlayer = true) {
         if (!remote?.file_view) return false;
         
         const localFileView = getFileView();
@@ -133,12 +212,24 @@
         if (changed) {
             setFileView(merged);
             console.log(`[Sync] Итог: ${Object.keys(merged).length} таймкодов`);
+            
+            // Обновляем UI
+            refreshTimelineUI();
+            
+            // Применяем к текущему плееру, если есть подходящий таймкод
+            if (applyToPlayer) {
+                const currentTmdbId = getCurrentMovieTmdbId();
+                if (currentTmdbId && merged[currentTmdbId]) {
+                    const percent = merged[currentTmdbId].percent;
+                    applyToCurrentPlayer(currentTmdbId, percent);
+                }
+            }
+            
             return true;
         }
         return false;
     }
 
-    // Принудительная полная синхронизация
     function forceFullSync() {
         return new Promise((resolve) => {
             syncToGist(true, () => {
@@ -209,7 +300,7 @@
         });
     }
 
-    function syncFromGist(showNotify = true, callback = null) {
+    function syncFromGist(showNotify = true, callback = null, applyToPlayer = true) {
         if (syncInProgress) {
             if (callback) callback(false);
             return;
@@ -240,7 +331,7 @@
                         const count = Object.keys(remote.file_view || {}).length;
                         console.log(`[Sync] Загружено ${count} таймкодов (источник: ${remote.source || 'unknown'})`);
                         
-                        const changed = applyRemoteData(remote);
+                        const changed = applyRemoteData(remote, applyToPlayer);
                         if (showNotify && changed) {
                             notify(`📥 Загружено ${count} таймкодов`);
                         } else if (showNotify && !changed) {
@@ -267,8 +358,26 @@
         });
     }
 
+    // Следим за открытием плеера и применяем таймкод
+    function hookPlayerOpen() {
+        Lampa.Listener.follow('player', (e) => {
+            if (e.type === 'open' && e.movie) {
+                const tmdbId = extractTmdbIdFromItem(e.movie);
+                if (tmdbId) {
+                    setTimeout(() => {
+                        const fileView = getFileView();
+                        if (fileView[tmdbId] && fileView[tmdbId].percent) {
+                            const percent = fileView[tmdbId].percent;
+                            console.log(`[Sync] Найден таймкод для открытого фильма: ${percent}%`);
+                            applyToCurrentPlayer(tmdbId, percent);
+                        }
+                    }, 1000); // Даём плееру время инициализироваться
+                }
+            }
+        });
+    }
+
     function hookPlayerEvents() {
-        let lastSyncCheck = 0;
         let lastPercent = 0;
         
         function throttledSync(force = false) {
@@ -283,7 +392,6 @@
         Lampa.Listener.follow('player', (e) => {
             if (e.type === 'timeupdate' && e.time && e.duration) {
                 const percent = Math.floor((e.time / e.duration) * 100);
-                // Сохраняем при изменении процента на 5%
                 if (Math.abs(percent - lastPercent) >= 5) {
                     lastPercent = percent;
                     throttledSync();
@@ -298,13 +406,12 @@
         });
     }
 
-    // Периодическая фоновая синхронизация
     function startBackgroundSync() {
         setInterval(() => {
             if (!syncInProgress && cfg().enabled) {
-                syncFromGist(false);
+                syncFromGist(false, null, true); // Применяем к плееру если нужно
             }
-        }, 60000); // Каждую минуту проверяем наличие обновлений
+        }, 60000);
     }
 
     function showGistSetup() {
@@ -321,6 +428,7 @@
                 { title: '🔄 Полная синхронизация', action: 'force', accent: true },
                 { title: '📤 Только отправить', action: 'upload' },
                 { title: '📥 Только загрузить', action: 'download' },
+                { title: '🔄 Применить к плееру', action: 'apply' },
                 { title: '──────────', separator: true },
                 { title: '❌ Отмена', action: 'cancel' }
             ],
@@ -359,8 +467,22 @@
                     syncToGist(true);
                     setTimeout(() => showGistSetup(), 1000);
                 } else if (item.action === 'download') {
-                    syncFromGist(true);
+                    syncFromGist(true, null, true);
                     setTimeout(() => showGistSetup(), 1000);
+                } else if (item.action === 'apply') {
+                    const currentTmdbId = getCurrentMovieTmdbId();
+                    if (currentTmdbId) {
+                        const fileView = getFileView();
+                        if (fileView[currentTmdbId]) {
+                            applyToCurrentPlayer(currentTmdbId, fileView[currentTmdbId].percent);
+                            notify(`🎯 Применён таймкод: ${fileView[currentTmdbId].percent}%`);
+                        } else {
+                            notify('❌ Нет таймкода для текущего фильма');
+                        }
+                    } else {
+                        notify('❌ Нет активного плеера');
+                    }
+                    setTimeout(() => showGistSetup(), 1500);
                 }
             },
             onBack: () => {
@@ -393,6 +515,12 @@
             field: { name: 'Синхронизировать при остановке' },
             onChange: v => { const c = cfg(); c.sync_on_stop = v; saveCfg(c); }
         });
+        Lampa.SettingsApi.addParam({
+            component: 'timeline_sync',
+            param: { name: 'auto_apply', type: 'toggle', default: true },
+            field: { name: 'Автоприменение таймкодов' },
+            onChange: v => { const c = cfg(); c.auto_apply = v; saveCfg(c); }
+        });
     }
 
     function init() {
@@ -401,7 +529,6 @@
         const currentSource = Lampa.Storage.field('source') || 'tmdb';
         console.log(`[Sync] Инициализация. Профиль: ${getCurrentProfileId() || 'глобальный'}, источник: ${currentSource}`);
         
-        // Нормализация существующих ключей
         const current = getFileView();
         const normalized = normalizeKeys(current);
         if (JSON.stringify(current) !== JSON.stringify(normalized)) {
@@ -409,14 +536,14 @@
             setFileView(normalized);
         }
         
-        hookPlayerEvents();
+        hookPlayerOpen();     // Применяем таймкод при открытии плеера
+        hookPlayerEvents();   // Синхронизируем прогресс
         addSettings();
-        startBackgroundSync();
+        startBackgroundSync(); // Фоновая синхронизация
         
-        // Первая синхронизация через 3 секунды
         setTimeout(() => {
             if (cfg().enabled) {
-                syncFromGist(false);
+                syncFromGist(false, null, cfg().auto_apply !== false);
             }
         }, 3000);
     }
