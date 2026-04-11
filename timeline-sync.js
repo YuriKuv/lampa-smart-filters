@@ -51,18 +51,43 @@
         return data;
     }
 
+    // Извлекаем TMDB ID из любого ключа
+    function extractTmdbId(key, item) {
+        // Если ключ — число, пробуем использовать его как TMDB ID
+        if (/^\d+$/.test(key)) return key;
+        
+        // Если ключ вида tmdb_12345
+        if (key.startsWith('tmdb_')) return key.replace('tmdb_', '');
+        
+        // Если в объекте есть поле tmdb_id
+        if (item && item.tmdb_id) return String(item.tmdb_id);
+        
+        // Если в объекте есть поле id
+        if (item && item.id) return String(item.id);
+        
+        return null;
+    }
+
+    // Нормализация: все ключи заменяем на TMDB ID
     function normalizeKeys(data) {
         const result = {};
         for (const key in data) {
-            let numericKey = key.startsWith('tmdb_') ? key.replace('tmdb_', '') : key;
-            result[numericKey] = data[key];
+            const tmdbId = extractTmdbId(key, data[key]);
+            if (tmdbId) {
+                // Если уже есть запись с таким TMDB ID, берём с бОльшим прогрессом
+                if (!result[tmdbId] || (data[key].percent || 0) > (result[tmdbId].percent || 0)) {
+                    result[tmdbId] = { ...data[key], tmdb_id: tmdbId };
+                }
+            } else {
+                result[key] = data[key];
+            }
         }
         return result;
     }
 
     function getProgressData() {
         return {
-            version: 3,
+            version: 4,
             profile_id: getCurrentProfileId(),
             device: cfg().device_name,
             updated: Date.now(),
@@ -101,6 +126,20 @@
         return true;
     }
 
+    // Функция для синхронизации текущего просмотра с привязкой к TMDB ID
+    function syncCurrentMovie() {
+        try {
+            const activity = Lampa.Activity.active();
+            if (activity && activity.movie) {
+                const movie = activity.movie;
+                const tmdbId = movie.tmdb_id || movie.id;
+                if (tmdbId) {
+                    console.log(`[Sync] Текущий фильм: TMDB ID ${tmdbId}`);
+                }
+            }
+        } catch(e) {}
+    }
+
     function syncToGist(showNotify = true) {
         const c = cfg();
         if (!c.gist_token || !c.gist_id) {
@@ -111,6 +150,8 @@
         const data = getProgressData();
         const count = Object.keys(data.file_view).length;
         if (count === 0) return;
+        
+        console.log(`[Sync] Отправка ${count} таймкодов (версия 4)`);
         
         $.ajax({
             url: `https://api.github.com/gists/${c.gist_id}`,
@@ -150,7 +191,9 @@
                 try {
                     const content = data.files['timeline.json']?.content;
                     if (content) {
-                        applyRemoteData(JSON.parse(content));
+                        const remote = JSON.parse(content);
+                        console.log(`[Sync] Загружено ${Object.keys(remote.file_view || {}).length} таймкодов (версия ${remote.version || '?'})`);
+                        applyRemoteData(remote);
                         if (showNotify) notify('📥 Таймкоды загружены');
                     }
                 } catch(e) { console.error(e); }
@@ -174,7 +217,10 @@
                 playerTime = e.time;
                 if (Math.floor(playerTime) % 30 === 0) throttledSync();
             }
-            if (e.type === 'stop' || e.type === 'pause') throttledSync();
+            if (e.type === 'stop' || e.type === 'pause') {
+                syncCurrentMovie();
+                throttledSync();
+            }
         });
     }
 
@@ -249,7 +295,7 @@
         const current = getFileView();
         const normalized = normalizeKeys(current);
         if (JSON.stringify(current) !== JSON.stringify(normalized)) {
-            console.log('[Sync] Нормализация ключей');
+            console.log('[Sync] Нормализация ключей в TMDB ID');
             setFileView(normalized);
         }
         
