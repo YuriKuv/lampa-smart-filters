@@ -51,23 +51,56 @@
         return data;
     }
 
-    function extractTmdbId(key, item) {
-        if (/^\d+$/.test(key)) return key;
-        if (key.startsWith('tmdb_')) return key.replace('tmdb_', '');
-        if (item && item.tmdb_id) return String(item.tmdb_id);
-        if (item && item.id) return String(item.id);
+    // Извлечение TMDB ID из разных источников
+    function extractTmdbIdFromItem(item) {
+        if (!item) return null;
+        
+        // Прямое поле tmdb_id
+        if (item.tmdb_id) return String(item.tmdb_id);
+        
+        // Поле id (может быть как TMDB ID, так и CUB ID)
+        if (item.id) {
+            // Если id — число и оно похоже на TMDB ID (обычно 6-8 цифр)
+            if (/^\d{6,8}$/.test(String(item.id))) {
+                return String(item.id);
+            }
+        }
+        
+        // Поле movie_id
+        if (item.movie_id && /^\d{6,8}$/.test(String(item.movie_id))) {
+            return String(item.movie_id);
+        }
+        
         return null;
     }
 
+    // Извлечение TMDB ID из ключа
+    function extractTmdbIdFromKey(key, item) {
+        // Если ключ — число, похожее на TMDB ID
+        if (/^\d{6,8}$/.test(key)) return key;
+        
+        // Если ключ вида tmdb_12345
+        if (key.startsWith('tmdb_')) return key.replace('tmdb_', '');
+        
+        // Если ключ вида cub_12345 — пытаемся найти TMDB ID в объекте
+        if (key.startsWith('cub_') && item) {
+            return extractTmdbIdFromItem(item);
+        }
+        
+        return extractTmdbIdFromItem(item);
+    }
+
+    // Нормализация: все ключи заменяем на TMDB ID
     function normalizeKeys(data) {
         const result = {};
         for (const key in data) {
-            const tmdbId = extractTmdbId(key, data[key]);
+            const tmdbId = extractTmdbIdFromKey(key, data[key]);
             if (tmdbId) {
                 if (!result[tmdbId] || (data[key].percent || 0) > (result[tmdbId].percent || 0)) {
                     result[tmdbId] = { ...data[key], tmdb_id: tmdbId };
                 }
             } else {
+                // Если не удалось извлечь TMDB ID, оставляем как есть
                 result[key] = data[key];
             }
         }
@@ -79,6 +112,7 @@
             version: 4,
             profile_id: getCurrentProfileId(),
             device: cfg().device_name,
+            source: Lampa.Storage.field('source') || 'tmdb',
             updated: Date.now(),
             file_view: normalizeKeys(getFileView())
         };
@@ -115,6 +149,20 @@
         return true;
     }
 
+    // Отслеживание текущего фильма для привязки к TMDB ID
+    function syncCurrentMovie() {
+        try {
+            const activity = Lampa.Activity.active();
+            if (activity && activity.movie) {
+                const movie = activity.movie;
+                const tmdbId = movie.tmdb_id || (movie.id && /^\d{6,8}$/.test(String(movie.id)) ? movie.id : null);
+                if (tmdbId) {
+                    console.log(`[Sync] Текущий фильм: TMDB ID ${tmdbId}, источник: ${Lampa.Storage.field('source') || 'tmdb'}`);
+                }
+            }
+        } catch(e) {}
+    }
+
     function syncToGist(showNotify = true) {
         const c = cfg();
         if (!c.gist_token || !c.gist_id) {
@@ -125,6 +173,8 @@
         const data = getProgressData();
         const count = Object.keys(data.file_view).length;
         if (count === 0) return;
+        
+        console.log(`[Sync] Отправка ${count} таймкодов, источник: ${data.source}`);
         
         $.ajax({
             url: `https://api.github.com/gists/${c.gist_id}`,
@@ -165,6 +215,7 @@
                     const content = data.files['timeline.json']?.content;
                     if (content) {
                         const remote = JSON.parse(content);
+                        console.log(`[Sync] Загружено ${Object.keys(remote.file_view || {}).length} таймкодов (источник: ${remote.source || 'unknown'})`);
                         applyRemoteData(remote);
                         if (showNotify) notify('📥 Таймкоды загружены');
                     }
@@ -189,7 +240,10 @@
                 playerTime = e.time;
                 if (Math.floor(playerTime) % 30 === 0) throttledSync();
             }
-            if (e.type === 'stop' || e.type === 'pause') throttledSync();
+            if (e.type === 'stop' || e.type === 'pause') {
+                syncCurrentMovie();
+                throttledSync();
+            }
         });
     }
 
@@ -232,10 +286,8 @@
                     setTimeout(() => syncFromGist(true), 1000);
                     setTimeout(() => showGistSetup(), 2000);
                 }
-                // action === 'cancel' — просто закрываем
             },
             onBack: () => {
-                // Закрываем диалог
                 Lampa.Controller.toggle('content');
             }
         });
@@ -263,7 +315,9 @@
 
     function init() {
         if (!cfg().enabled) return;
-        console.log(`[Sync] Профиль: ${getCurrentProfileId() || 'глобальный'}`);
+        
+        const currentSource = Lampa.Storage.field('source') || 'tmdb';
+        console.log(`[Sync] Профиль: ${getCurrentProfileId() || 'глобальный'}, источник: ${currentSource}`);
         
         const current = getFileView();
         const normalized = normalizeKeys(current);
