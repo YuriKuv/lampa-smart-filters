@@ -12,7 +12,6 @@
     let periodicSyncTimer = null;
     let isPlayerOpen = false;
     let lastCurrentTime = 0;
-    let originalBack = null;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -22,7 +21,8 @@
             device_name: Lampa.Platform.get() || 'Unknown',
             manual_profile_id: '',
             sync_on_stop: true,
-            sync_interval: 30
+            sync_interval: 30,
+            button_position: 'head' // 'head' - верхняя панель, 'menu' - левое меню
         }) || {};
     }
 
@@ -187,6 +187,7 @@
         return false;
     }
 
+    // Отправить таймкоды на Gist
     function syncToGist(showNotify = true, callback = null) {
         if (syncInProgress) {
             pendingSync = true;
@@ -245,6 +246,7 @@
         });
     }
 
+    // Загрузить таймкоды с Gist
     function syncFromGist(showNotify = true, callback = null) {
         if (syncInProgress) {
             if (callback) callback(false);
@@ -313,27 +315,58 @@
         });
     }
 
-    // Функция для отправки прогресса при закрытии плеера
-    function sendProgressOnClose() {
-        if (isPlayerOpen && lastCurrentTime > 0) {
-            console.log('[Sync] 🚪 Закрытие плеера, отправляем прогресс...');
-            saveCurrentProgress(lastCurrentTime, true);
-            syncToGist(false);
+    // Добавить кнопку синхронизации в интерфейс
+    function addSyncButton() {
+        const c = cfg();
+        
+        // Иконка для кнопки (облако с стрелками)
+        const svgIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" fill="currentColor"/></svg>';
+        
+        // Функция синхронизации (отправить и загрузить)
+        function doSync() {
+            notify('🔄 Синхронизация...');
+            syncToGist(true, () => {
+                setTimeout(() => {
+                    syncFromGist(true);
+                }, 500);
+            });
         }
-        isPlayerOpen = false;
+        
+        // Удаляем старую кнопку если есть
+        $('.tl-sync-button').remove();
+        
+        // Создаём кнопку
+        const syncButton = $(`<div class="tl-sync-button selector head__action" style="display: flex; align-items: center; justify-content: center;">${svgIcon}</div>`);
+        syncButton.on('hover:enter', doSync);
+        syncButton.on('click', doSync);
+        
+        // Добавляем в выбранное место
+        if (c.button_position === 'head') {
+            // В верхнюю панель (рядом с часами)
+            const headActions = $('.head__actions');
+            if (headActions.length) {
+                headActions.prepend(syncButton);
+            } else {
+                $('.head__body').append(syncButton);
+            }
+        } else {
+            // В левое меню
+            const menuList = $('.menu__list:eq(0)');
+            if (menuList.length) {
+                const menuItem = $(`<li class="menu__item selector tl-sync-button" style="order: -1;"><div class="menu__ico">${svgIcon}</div><div class="menu__text">Синхр.</div></li>`);
+                menuItem.on('hover:enter', doSync);
+                menuList.prepend(menuItem);
+                syncButton.remove(); // удаляем DOM элемент, используем menuItem
+            } else {
+                $('.head__actions').prepend(syncButton);
+            }
+        }
+        
+        console.log(`[Sync] Кнопка добавлена в позицию: ${c.button_position}`);
     }
 
     function initPlayerHandler() {
         let lastSavedProgressTime = 0;
-        
-        // Перехватываем закрытие плеера через Controller.back
-        if (Lampa.Controller && !originalBack) {
-            originalBack = Lampa.Controller.back;
-            Lampa.Controller.back = function() {
-                sendProgressOnClose();
-                return originalBack.apply(this, arguments);
-            };
-        }
         
         Lampa.Listener.follow('player', (e) => {
             if (e.type === 'open' && e.movie) {
@@ -343,7 +376,6 @@
                 lastSavedProgressTime = 0;
                 lastCurrentTime = 0;
                 
-                // Загружаем таймкод при открытии
                 setTimeout(() => {
                     syncFromGist(false, (success) => {
                         if (success) {
@@ -361,7 +393,6 @@
             if (e.type === 'timeupdate' && e.time) {
                 lastCurrentTime = e.time;
                 
-                // Автосохранение каждые 10 секунд
                 const now = Date.now();
                 if (now - lastSavedProgressTime >= 10000) {
                     lastSavedProgressTime = now;
@@ -372,20 +403,19 @@
             if (e.type === 'stop' || e.type === 'pause') {
                 console.log(`[Sync] ${e.type === 'stop' ? '⏹️ Остановка' : '⏸️ Пауза'} - сохраняем`);
                 if (lastCurrentTime > 0) {
-                    saveCurrentProgress(lastCurrentTime, false);
-                    // Не отправляем сразу, ждём закрытия
+                    saveCurrentProgress(lastCurrentTime, true);
                 }
             }
         });
         
-        // Периодическая отправка во время просмотра (каждые 30 секунд)
+        // Периодическая отправка каждые 60 секунд
         periodicSyncTimer = setInterval(() => {
             if (isPlayerOpen && lastCurrentTime > 0 && Lampa.Player.opened()) {
                 console.log('[Sync] ⏰ Периодическая отправка');
                 saveCurrentProgress(lastCurrentTime, false);
                 syncToGist(false);
             }
-        }, 30000);
+        }, 60000);
     }
 
     function startBackgroundSync() {
@@ -393,7 +423,7 @@
             if (!syncInProgress && cfg().enabled) {
                 syncFromGist(false);
             }
-        }, 60000);
+        }, 120000);
     }
 
     function showGistSetup() {
@@ -405,6 +435,8 @@
                 { title: `📄 Gist ID: ${c.gist_id ? c.gist_id.substring(0,8)+'…' : '❌'}`, action: 'id' },
                 { title: `📱 Устройство: ${c.device_name}`, action: 'device' },
                 { title: `👤 Профиль: ${c.manual_profile_id || 'авто'}`, action: 'profile' },
+                { title: '──────────', separator: true },
+                { title: `📍 Позиция кнопки: ${c.button_position === 'head' ? 'Верхняя панель' : 'Левое меню'}`, action: 'position' },
                 { title: '──────────', separator: true },
                 { title: '🔄 Отправить таймкоды', action: 'upload' },
                 { title: '📥 Загрузить таймкоды', action: 'download' },
@@ -433,6 +465,13 @@
                         if (val !== null) { c.manual_profile_id = val || ''; saveCfg(c); notify('Профиль сохранён'); }
                         showGistSetup();
                     });
+                } else if (item.action === 'position') {
+                    const newPos = c.button_position === 'head' ? 'menu' : 'head';
+                    c.button_position = newPos;
+                    saveCfg(c);
+                    addSyncButton(); // Обновляем позицию кнопки
+                    notify(`Кнопка перемещена в ${newPos === 'head' ? 'верхнюю панель' : 'левое меню'}`);
+                    showGistSetup();
                 } else if (item.action === 'upload') {
                     syncToGist(true);
                     setTimeout(() => showGistSetup(), 1000);
@@ -472,12 +511,6 @@
             field: { name: 'Включить синхронизацию' },
             onChange: v => { const c = cfg(); c.enabled = v; saveCfg(c); }
         });
-        Lampa.SettingsApi.addParam({
-            component: 'timeline_sync',
-            param: { name: 'sync_on_stop', type: 'toggle', default: true },
-            field: { name: 'Синхронизировать при остановке' },
-            onChange: v => { const c = cfg(); c.sync_on_stop = v; saveCfg(c); }
-        });
     }
 
     function init() {
@@ -495,6 +528,7 @@
         initPlayerHandler();
         addSettings();
         startBackgroundSync();
+        addSyncButton(); // Добавляем кнопку синхронизации
         
         setTimeout(() => {
             if (cfg().enabled) {
