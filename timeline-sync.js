@@ -21,7 +21,7 @@
             sync_on_stop: true,
             button_position: 'head',
             sync_strategy: 'newest',
-            auto_sync_interval: 0  // 0 = выкл, 30, 60, 120 секунд
+            auto_sync_interval: 30  // по умолчанию 30 секунд
         }) || {};
     }
 
@@ -123,7 +123,6 @@
         };
     }
 
-    // Логика слияния с учётом выбранной стратегии
     function mergeFileView(local, remote) {
         const result = { ...local };
         let changed = false;
@@ -195,6 +194,7 @@
         }
     }
 
+    // Сохранить текущий прогресс
     function saveCurrentProgress(timeInSeconds) {
         const tmdbId = getCurrentMovieTmdbId();
         if (!tmdbId) return false;
@@ -229,18 +229,34 @@
         return false;
     }
 
-    // Отправить на Gist
-    function syncToGist(showNotify = true, callback = null) {
+    // Единая функция для отправки (и для ручной, и для авто)
+    function sendCurrentProgress() {
         if (syncInProgress) {
-            if (callback) callback(false);
-            return;
+            console.log('[Sync] ⏳ Синхронизация уже выполняется');
+            return false;
         }
+        
+        const tmdbId = getCurrentMovieTmdbId();
+        if (!tmdbId) {
+            console.log('[Sync] ❌ Нет активного фильма');
+            return false;
+        }
+        
+        if (lastCurrentTime === 0) {
+            console.log('[Sync] ❌ Нет данных о времени');
+            return false;
+        }
+        
+        // Сначала сохраняем текущий прогресс
+        saveCurrentProgress(lastCurrentTime);
+        
+        // Затем отправляем на Gist
+        console.log(`[Sync] 📤 Отправка таймкода: ${formatTime(lastCurrentTime)}`);
         
         const c = cfg();
         if (!c.gist_token || !c.gist_id) {
-            if (showNotify) notify('⚠️ Gist не настроен');
-            if (callback) callback(false);
-            return;
+            notify('⚠️ Gist не настроен');
+            return false;
         }
         
         syncInProgress = true;
@@ -258,17 +274,18 @@
                 files: { 'timeline.json': { content: JSON.stringify(getProgressData(), null, 2) } }
             }),
             success: () => {
-                if (showNotify) notify('✅ Таймкоды отправлены');
-                console.log(`[Sync] ✅ Отправлено`);
+                notify(`✅ Отправлено: ${formatTimeShort(lastCurrentTime)}`);
+                console.log(`[Sync] ✅ Отправлено успешно`);
                 syncInProgress = false;
-                if (callback) callback(true);
             },
             error: (xhr) => {
-                if (showNotify) notify(`❌ Ошибка: ${xhr.status}`);
+                notify(`❌ Ошибка: ${xhr.status}`);
+                console.error('[Sync] ❌ Ошибка отправки');
                 syncInProgress = false;
-                if (callback) callback(false);
             }
         });
+        
+        return true;
     }
 
     // Загрузить с Gist
@@ -286,6 +303,7 @@
         }
         
         syncInProgress = true;
+        console.log('[Sync] 📥 Загрузка с Gist...');
         
         $.ajax({
             url: `https://api.github.com/gists/${c.gist_id}`,
@@ -331,17 +349,23 @@
         });
     }
 
-    // Полная синхронизация (отправить + загрузить)
+    // Полная синхронизация (отправить + загрузить) - для кнопки
     function fullSync() {
         notify('🔄 Синхронизация...');
-        syncToGist(true, () => {
-            setTimeout(() => {
-                syncFromGist(true);
-            }, 500);
-        });
+        sendCurrentProgress();
+        setTimeout(() => {
+            syncFromGist(true);
+        }, 1000);
     }
 
-    // Автосинхронизация
+    // Автосинхронизация - ТОЛЬКО отправка (как при ручной)
+    function autoSync() {
+        if (isPlayerActive && Lampa.Player.opened() && lastCurrentTime > 0) {
+            console.log(`[Sync] ⏰ Автосинхронизация (интервал ${cfg().auto_sync_interval} сек)`);
+            sendCurrentProgress();  // Та же функция, что и при ручной отправке
+        }
+    }
+
     function startAutoSync() {
         if (autoSyncTimer) {
             clearInterval(autoSyncTimer);
@@ -350,13 +374,7 @@
         
         const interval = cfg().auto_sync_interval;
         if (interval > 0 && isPlayerActive) {
-            autoSyncTimer = setInterval(() => {
-                if (isPlayerActive && Lampa.Player.opened() && lastCurrentTime > 0) {
-                    console.log(`[Sync] ⏰ Автосинхронизация (интервал ${interval} сек)`);
-                    saveCurrentProgress(lastCurrentTime);
-                    syncToGist(false);
-                }
-            }, interval * 1000);
+            autoSyncTimer = setInterval(autoSync, interval * 1000);
             console.log(`[Sync] Автосинхронизация запущена (${interval} сек)`);
         }
     }
@@ -409,8 +427,7 @@
             if (e.type === 'stop') {
                 console.log('[Sync] ⏹️ Плеер остановлен');
                 if (lastCurrentTime > 0) {
-                    saveCurrentProgress(lastCurrentTime);
-                    syncToGist(false);
+                    sendCurrentProgress(); // Отправляем при остановке
                 }
                 isPlayerActive = false;
                 if (autoSyncTimer) {
@@ -420,7 +437,7 @@
             }
         });
         
-        // Сохранение каждые 10 секунд
+        // Сохранение каждые 10 секунд (без отправки)
         setInterval(() => {
             if (isPlayerActive && lastCurrentTime > 0 && Lampa.Player.opened()) {
                 saveCurrentProgress(lastCurrentTime);
@@ -526,7 +543,7 @@
                         onBack: () => showGistSetup()
                     });
                 } else if (item.action === 'upload') {
-                    syncToGist(true);
+                    sendCurrentProgress();
                     setTimeout(() => showGistSetup(), 1000);
                 } else if (item.action === 'download') {
                     syncFromGist(true);
@@ -566,6 +583,7 @@
         if (!cfg().enabled) return;
         
         console.log(`[Sync] Инициализация. Стратегия: ${cfg().sync_strategy}`);
+        console.log(`[Sync] Автосинхронизация: ${cfg().auto_sync_interval > 0 ? cfg().auto_sync_interval + ' сек' : 'выключена'}`);
         
         const current = getFileView();
         const normalized = normalizeKeys(current);
