@@ -149,30 +149,7 @@
         }
     }
 
-    // Обновление через встроенный Timeline
-    function refreshTimelineData() {
-        try {
-            // Перечитываем данные Timeline из хранилища
-            Lampa.Timeline.read();
-            
-            // Триггерим событие обновления для всех компонентов
-            Lampa.Listener.send('state:changed', {
-                target: 'timeline',
-                reason: 'refresh'
-            });
-            
-            // Обновляем текущую активность если есть
-            const activity = Lampa.Activity.active();
-            if (activity && activity.activity && activity.activity.refresh) {
-                activity.activity.refresh();
-            }
-            
-            console.log('[Sync] Timeline данные обновлены');
-        } catch(e) {
-            console.error('[Sync] Ошибка обновления Timeline:', e);
-        }
-    }
-
+    // Сохраняем прогресс в Timeline API
     function saveCurrentProgress(timeInSeconds) {
         const tmdbId = getCurrentMovieTmdbId();
         if (!tmdbId) return false;
@@ -194,7 +171,7 @@
             setFileView(fileView);
             console.log(`[Sync] 💾 Сохранён прогресс: ${formatTime(currentTime)} (${percent}%) для ${tmdbId}`);
             
-            // Обновляем через Timeline API
+            // Обновляем через Timeline API Lampa
             if (Lampa.Timeline && Lampa.Timeline.update) {
                 Lampa.Timeline.update({
                     hash: tmdbId,
@@ -305,10 +282,10 @@
                             setFileView(merged);
                             console.log(`[Sync] Итог: ${Object.keys(merged).length} таймкодов`);
                             
-                            // Обновляем через встроенный механизм Lampa
-                            setTimeout(() => {
-                                refreshTimelineData();
-                            }, 500);
+                            // Обновляем данные в Timeline API
+                            if (Lampa.Timeline && Lampa.Timeline.read) {
+                                Lampa.Timeline.read(true);
+                            }
                             
                             if (showNotify) notify(`📥 Загружено ${count} таймкодов`);
                         } else if (showNotify) {
@@ -384,7 +361,7 @@
             }
         });
         
-        // Интервал для сохранения прогресса
+        // Интервал для сохранения прогресса каждые 10 секунд
         setInterval(() => {
             if (currentTime > 0 && Lampa.Player.opened()) {
                 saveCurrentProgress(currentTime);
@@ -448,9 +425,8 @@
                     syncToGist(true);
                     setTimeout(() => {
                         syncFromGist(true);
-                        setTimeout(() => refreshTimelineData(), 1000);
                     }, 1000);
-                    setTimeout(() => showGistSetup(), 2500);
+                    setTimeout(() => showGistSetup(), 2000);
                 }
             },
             onBack: () => {
@@ -501,21 +477,10 @@
         addSettings();
         startBackgroundSync();
         
-        // Обновляем при смене активности
-        Lampa.Listener.follow('activity', (e) => {
-            if (e.type === 'start') {
-                setTimeout(() => {
-                    refreshTimelineData();
-                }, 500);
-            }
-        });
-        
-        // Первая синхронизация
+        // Первая синхронизация через 3 секунды
         setTimeout(() => {
             if (cfg().enabled) {
-                syncFromGist(false, () => {
-                    refreshTimelineData();
-                });
+                syncFromGist(false);
             }
         }, 3000);
     }
