@@ -10,7 +10,9 @@
     let pendingSync = false;
     let currentMovieId = null;
     let periodicSyncTimer = null;
-    let isPlaying = false;
+    let isPlayerOpen = false;
+    let lastCurrentTime = 0;
+    let originalBack = null;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -150,7 +152,6 @@
         }
     }
 
-    // Сохраняем прогресс и возвращаем true если были изменения
     function saveCurrentProgress(timeInSeconds, forceSave = false) {
         const tmdbId = getCurrentMovieTmdbId();
         if (!tmdbId) return false;
@@ -159,7 +160,6 @@
         const currentTime = Math.floor(timeInSeconds);
         const savedTime = fileView[tmdbId]?.time || 0;
         
-        // Сохраняем если прошло 10 секунд или принудительно
         if (Math.abs(currentTime - savedTime) >= 10 || forceSave) {
             const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
@@ -173,7 +173,6 @@
             setFileView(fileView);
             console.log(`[Sync] 💾 Сохранён прогресс: ${formatTime(currentTime)} (${percent}%) для ${tmdbId}`);
             
-            // Обновляем через Timeline API Lampa
             if (Lampa.Timeline && Lampa.Timeline.update) {
                 Lampa.Timeline.update({
                     hash: tmdbId,
@@ -314,16 +313,35 @@
         });
     }
 
+    // Функция для отправки прогресса при закрытии плеера
+    function sendProgressOnClose() {
+        if (isPlayerOpen && lastCurrentTime > 0) {
+            console.log('[Sync] 🚪 Закрытие плеера, отправляем прогресс...');
+            saveCurrentProgress(lastCurrentTime, true);
+            syncToGist(false);
+        }
+        isPlayerOpen = false;
+    }
+
     function initPlayerHandler() {
         let lastSavedProgressTime = 0;
-        let lastCurrentTime = 0;
+        
+        // Перехватываем закрытие плеера через Controller.back
+        if (Lampa.Controller && !originalBack) {
+            originalBack = Lampa.Controller.back;
+            Lampa.Controller.back = function() {
+                sendProgressOnClose();
+                return originalBack.apply(this, arguments);
+            };
+        }
         
         Lampa.Listener.follow('player', (e) => {
             if (e.type === 'open' && e.movie) {
+                isPlayerOpen = true;
                 currentMovieId = extractTmdbIdFromItem(e.movie);
                 console.log(`[Sync] 🎬 Открыт фильм: ${currentMovieId}`);
                 lastSavedProgressTime = 0;
-                isPlaying = true;
+                lastCurrentTime = 0;
                 
                 // Загружаем таймкод при открытии
                 setTimeout(() => {
@@ -333,17 +351,6 @@
                             if (currentMovieId && fileView[currentMovieId] && fileView[currentMovieId].time) {
                                 const savedTime = fileView[currentMovieId].time;
                                 console.log(`[Sync] 🎯 Таймкод: ${formatTime(savedTime)}`);
-                                
-                                try {
-                                    const player = Lampa.Player.playdata();
-                                    if (player && player.timeline) {
-                                        player.timeline.time = savedTime;
-                                        player.timeline.percent = fileView[currentMovieId].percent;
-                                        player.timeline.continued = false;
-                                    }
-                                } catch(err) {
-                                    console.log('[Sync] Не удалось применить таймкод');
-                                }
                                 notify(`🎯 Таймкод: ${formatTime(savedTime)}`);
                             }
                         }
@@ -362,32 +369,23 @@
                 }
             }
             
-            if (e.type === 'pause') {
-                console.log('[Sync] ⏸️ Пауза - сохраняем и отправляем');
+            if (e.type === 'stop' || e.type === 'pause') {
+                console.log(`[Sync] ${e.type === 'stop' ? '⏹️ Остановка' : '⏸️ Пауза'} - сохраняем`);
                 if (lastCurrentTime > 0) {
                     saveCurrentProgress(lastCurrentTime, false);
-                    syncToGist(false); // Отправляем сразу
+                    // Не отправляем сразу, ждём закрытия
                 }
-            }
-            
-            if (e.type === 'stop') {
-                console.log('[Sync] ⏹️ Остановка - сохраняем и отправляем');
-                if (lastCurrentTime > 0) {
-                    saveCurrentProgress(lastCurrentTime, false);
-                    syncToGist(false); // Отправляем сразу
-                }
-                isPlaying = false;
             }
         });
         
         // Периодическая отправка во время просмотра (каждые 30 секунд)
         periodicSyncTimer = setInterval(() => {
-            if (isPlaying && lastCurrentTime > 0 && Lampa.Player.opened()) {
+            if (isPlayerOpen && lastCurrentTime > 0 && Lampa.Player.opened()) {
                 console.log('[Sync] ⏰ Периодическая отправка');
                 saveCurrentProgress(lastCurrentTime, false);
                 syncToGist(false);
             }
-        }, 30000); // Каждые 30 секунд
+        }, 30000);
     }
 
     function startBackgroundSync() {
