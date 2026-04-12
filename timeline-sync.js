@@ -22,7 +22,7 @@
             manual_profile_id: '',
             sync_on_stop: true,
             sync_interval: 30,
-            button_position: 'head' // 'head' - верхняя панель, 'menu' - левое меню
+            button_position: 'head'
         }) || {};
     }
 
@@ -34,6 +34,7 @@
         Lampa.Noty.show(text);
     }
 
+    // Конвертация секунд в читаемый формат (минуты:секунды)
     function formatTime(seconds) {
         if (!seconds || seconds < 0) return '0:00';
         const hours = Math.floor(seconds / 3600);
@@ -44,6 +45,14 @@
             return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
         }
         return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // Конвертация секунд в короткий формат (минуты)
+    function formatTimeShort(seconds) {
+        if (!seconds || seconds < 0) return '0 мин';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 1) return '< 1 мин';
+        return `${minutes} мин`;
     }
 
     function getCurrentProfileId() {
@@ -187,7 +196,6 @@
         return false;
     }
 
-    // Отправить таймкоды на Gist
     function syncToGist(showNotify = true, callback = null) {
         if (syncInProgress) {
             pendingSync = true;
@@ -246,7 +254,6 @@
         });
     }
 
-    // Загрузить таймкоды с Gist
     function syncFromGist(showNotify = true, callback = null) {
         if (syncInProgress) {
             if (callback) callback(false);
@@ -289,7 +296,11 @@
                                 Lampa.Timeline.read(true);
                             }
                             
-                            if (showNotify) notify(`📥 Загружено ${count} таймкодов`);
+                            if (showNotify) {
+                                // Показываем уведомление с количеством обновлённых таймкодов
+                                const changedCount = Object.keys(remote.file_view).length;
+                                notify(`📥 Загружено ${changedCount} таймкодов`);
+                            }
                         } else if (showNotify) {
                             notify('✅ Данные актуальны');
                         }
@@ -342,7 +353,6 @@
         
         // Добавляем в выбранное место
         if (c.button_position === 'head') {
-            // В верхнюю панель (рядом с часами)
             const headActions = $('.head__actions');
             if (headActions.length) {
                 headActions.prepend(syncButton);
@@ -350,13 +360,12 @@
                 $('.head__body').append(syncButton);
             }
         } else {
-            // В левое меню
             const menuList = $('.menu__list:eq(0)');
             if (menuList.length) {
                 const menuItem = $(`<li class="menu__item selector tl-sync-button" style="order: -1;"><div class="menu__ico">${svgIcon}</div><div class="menu__text">Синхр.</div></li>`);
                 menuItem.on('hover:enter', doSync);
                 menuList.prepend(menuItem);
-                syncButton.remove(); // удаляем DOM элемент, используем menuItem
+                syncButton.remove();
             } else {
                 $('.head__actions').prepend(syncButton);
             }
@@ -383,7 +392,7 @@
                             if (currentMovieId && fileView[currentMovieId] && fileView[currentMovieId].time) {
                                 const savedTime = fileView[currentMovieId].time;
                                 console.log(`[Sync] 🎯 Таймкод: ${formatTime(savedTime)}`);
-                                notify(`🎯 Таймкод: ${formatTime(savedTime)}`);
+                                notify(`🎯 Таймкод: ${formatTimeShort(savedTime)}`);
                             }
                         }
                     });
@@ -408,7 +417,6 @@
             }
         });
         
-        // Периодическая отправка каждые 60 секунд
         periodicSyncTimer = setInterval(() => {
             if (isPlayerOpen && lastCurrentTime > 0 && Lampa.Player.opened()) {
                 console.log('[Sync] ⏰ Периодическая отправка');
@@ -469,7 +477,7 @@
                     const newPos = c.button_position === 'head' ? 'menu' : 'head';
                     c.button_position = newPos;
                     saveCfg(c);
-                    addSyncButton(); // Обновляем позицию кнопки
+                    addSyncButton();
                     notify(`Кнопка перемещена в ${newPos === 'head' ? 'верхнюю панель' : 'левое меню'}`);
                     showGistSetup();
                 } else if (item.action === 'upload') {
@@ -528,7 +536,7 @@
         initPlayerHandler();
         addSettings();
         startBackgroundSync();
-        addSyncButton(); // Добавляем кнопку синхронизации
+        addSyncButton();
         
         setTimeout(() => {
             if (cfg().enabled) {
