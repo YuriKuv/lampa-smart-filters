@@ -126,7 +126,7 @@
                 result[key] = remote[key];
                 changed = true;
                 console.log(`[Sync] ➕ Новый: ${key} (${formatTime(remoteTime)})`);
-            } else if (remoteTime > localTime + 5) { // +5 секунд чтобы не было конфликтов
+            } else if (remoteTime > localTime + 5) {
                 result[key] = remote[key];
                 changed = true;
                 console.log(`[Sync] 🔄 Обновлён: ${key} (${formatTime(localTime)} → ${formatTime(remoteTime)})`);
@@ -137,24 +137,131 @@
 
     function getCurrentMovieTmdbId() {
         try {
-            // Пытаемся получить из активности
             const activity = Lampa.Activity.active();
             if (activity && activity.movie) {
                 const movie = activity.movie;
                 const tmdbId = extractTmdbIdFromItem(movie);
                 if (tmdbId) return tmdbId;
             }
-            
-            // Альтернативный способ через Storage
-            const lastMovie = Lampa.Storage.get('last_movie', null);
-            if (lastMovie) {
-                return extractTmdbIdFromItem(lastMovie);
-            }
-            
             return currentMovieId;
         } catch(e) {
-            console.error('[Sync] Ошибка получения текущего фильма:', e);
             return null;
+        }
+    }
+
+    // Функция для обновления таймкодов на всех карточках
+    function updateAllCardsTimeline() {
+        try {
+            // Получаем все сохраненные таймкоды
+            const fileView = getFileView();
+            
+            // Находим все карточки на странице
+            const cards = document.querySelectorAll('.card');
+            let updatedCount = 0;
+            
+            cards.forEach((card) => {
+                // Ищем ID фильма в карточке
+                const cardData = card.card_data;
+                if (cardData && cardData.id) {
+                    const tmdbId = String(cardData.id);
+                    const saved = fileView[tmdbId];
+                    
+                    if (saved && saved.percent && saved.percent > 0) {
+                        // Ищем или создаем элемент таймкода в карточке
+                        let timelineElem = card.querySelector('.time-line');
+                        
+                        if (!timelineElem) {
+                            // Создаем элемент таймкода
+                            timelineElem = document.createElement('div');
+                            timelineElem.className = 'time-line';
+                            timelineElem.setAttribute('data-hash', tmdbId);
+                            
+                            const percentDiv = document.createElement('div');
+                            percentDiv.style.width = saved.percent + '%';
+                            timelineElem.appendChild(percentDiv);
+                            
+                            // Добавляем в карточку (обычно в .card__view или .card-watched__item)
+                            const viewElem = card.querySelector('.card__view, .card-watched__item');
+                            if (viewElem) {
+                                viewElem.appendChild(timelineElem);
+                                updatedCount++;
+                            }
+                        } else {
+                            // Обновляем существующий
+                            const percentDiv = timelineElem.querySelector('div');
+                            if (percentDiv) {
+                                percentDiv.style.width = saved.percent + '%';
+                                updatedCount++;
+                            }
+                        }
+                        
+                        // Показываем таймкод
+                        if (timelineElem) {
+                            timelineElem.style.display = '';
+                            timelineElem.classList.remove('hide');
+                        }
+                    }
+                }
+            });
+            
+            if (updatedCount > 0) {
+                console.log(`[Sync] Обновлено таймкодов на карточках: ${updatedCount}`);
+            }
+            
+            // Также обновляем через Lampa.Layer
+            if (Lampa.Layer && Lampa.Layer.update) {
+                Lampa.Layer.update();
+            }
+            
+            // Триггерим событие для обновления видимых элементов
+            const visibleElements = document.querySelectorAll('.layer--visible');
+            visibleElements.forEach(el => {
+                if (el.dispatchEvent) {
+                    el.dispatchEvent(new Event('visible'));
+                }
+            });
+            
+        } catch(e) {
+            console.error('[Sync] Ошибка обновления карточек:', e);
+        }
+    }
+
+    // Обновление таймкодов для конкретного фильма
+    function updateCardTimeline(movieId, percent) {
+        try {
+            const cards = document.querySelectorAll('.card');
+            const tmdbId = String(movieId);
+            
+            cards.forEach((card) => {
+                const cardData = card.card_data;
+                if (cardData && String(cardData.id) === tmdbId) {
+                    let timelineElem = card.querySelector('.time-line');
+                    
+                    if (!timelineElem) {
+                        timelineElem = document.createElement('div');
+                        timelineElem.className = 'time-line';
+                        timelineElem.setAttribute('data-hash', tmdbId);
+                        
+                        const percentDiv = document.createElement('div');
+                        percentDiv.style.width = percent + '%';
+                        timelineElem.appendChild(percentDiv);
+                        
+                        const viewElem = card.querySelector('.card__view, .card-watched__item');
+                        if (viewElem) {
+                            viewElem.appendChild(timelineElem);
+                        }
+                    } else {
+                        const percentDiv = timelineElem.querySelector('div');
+                        if (percentDiv) {
+                            percentDiv.style.width = percent + '%';
+                        }
+                        timelineElem.style.display = '';
+                        timelineElem.classList.remove('hide');
+                    }
+                }
+            });
+        } catch(e) {
+            console.error('[Sync] Ошибка обновления карточки:', e);
         }
     }
 
@@ -166,14 +273,22 @@
         const currentTime = Math.floor(timeInSeconds);
         const savedTime = fileView[tmdbId]?.time || 0;
         
-        // Сохраняем только если прошло больше 10 секунд или время значительно отличается
         if (Math.abs(currentTime - savedTime) >= 10) {
+            const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
+            const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
+            
             fileView[tmdbId] = {
                 time: currentTime,
+                percent: percent,
+                duration: duration,
                 updated: Date.now()
             };
             setFileView(fileView);
-            console.log(`[Sync] 💾 Сохранён прогресс: ${formatTime(currentTime)} для ${tmdbId}`);
+            console.log(`[Sync] 💾 Сохранён прогресс: ${formatTime(currentTime)} (${percent}%) для ${tmdbId}`);
+            
+            // Обновляем карточку на месте
+            updateCardTimeline(tmdbId, percent);
+            
             return true;
         }
         return false;
@@ -266,7 +381,7 @@
                     if (content) {
                         const remote = JSON.parse(content);
                         const count = Object.keys(remote.file_view || {}).length;
-                        console.log(`[Sync] 📥 Загружено ${count} таймкодов (источник: ${remote.source || 'unknown'})`);
+                        console.log(`[Sync] 📥 Загружено ${count} таймкодов`);
                         
                         const localFileView = getFileView();
                         const { merged, changed } = mergeFileView(localFileView, remote.file_view);
@@ -274,6 +389,12 @@
                         if (changed) {
                             setFileView(merged);
                             console.log(`[Sync] Итог: ${Object.keys(merged).length} таймкодов`);
+                            
+                            // Обновляем все карточки после загрузки
+                            setTimeout(() => {
+                                updateAllCardsTimeline();
+                            }, 500);
+                            
                             if (showNotify) notify(`📥 Загружено ${count} таймкодов`);
                         } else if (showNotify) {
                             notify('✅ Данные актуальны');
@@ -300,15 +421,48 @@
         });
     }
 
-    // Основной обработчик плеера
-    function initPlayerHandler() {
-        let timeUpdateInterval = null;
-        let currentTime = 0;
+    // Наблюдатель за появлением новых карточек
+    function observeNewCards() {
+        const observer = new MutationObserver((mutations) => {
+            let hasNewCards = false;
+            
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'childList' && mutation.addedNodes.length) {
+                    mutation.addedNodes.forEach((node) => {
+                        if (node.nodeType === 1) { // Element node
+                            if (node.classList && node.classList.contains('card')) {
+                                hasNewCards = true;
+                            } else if (node.querySelectorAll) {
+                                if (node.querySelectorAll('.card').length > 0) {
+                                    hasNewCards = true;
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+            
+            if (hasNewCards) {
+                setTimeout(() => {
+                    updateAllCardsTimeline();
+                }, 100);
+            }
+        });
         
-        // Следим за открытием плеера
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+        
+        return observer;
+    }
+
+    function initPlayerHandler() {
+        let currentTime = 0;
+        let saveInterval = null;
+        
         Lampa.Listener.follow('player', (e) => {
             if (e.type === 'open' && e.movie) {
-                // Сохраняем ID текущего фильма
                 currentMovieId = extractTmdbIdFromItem(e.movie);
                 console.log(`[Sync] 🎬 Открыт фильм: ${currentMovieId}`);
                 
@@ -316,20 +470,20 @@
                 setTimeout(() => {
                     syncFromGist(false, (success) => {
                         if (success) {
-                            // Применяем таймкод к плееру
                             const fileView = getFileView();
                             if (currentMovieId && fileView[currentMovieId] && fileView[currentMovieId].time) {
                                 const savedTime = fileView[currentMovieId].time;
-                                console.log(`[Sync] 🎯 Применяем таймкод: ${formatTime(savedTime)}`);
+                                console.log(`[Sync] 🎯 Таймкод: ${formatTime(savedTime)}`);
                                 
-                                // Пробуем применить к плееру
                                 try {
-                                    const player = Lampa.Player.current();
-                                    if (player && player.seek) {
-                                        player.seek(savedTime);
+                                    const player = Lampa.Player.playdata();
+                                    if (player && player.timeline) {
+                                        player.timeline.time = savedTime;
+                                        player.timeline.percent = fileView[currentMovieId].percent;
+                                        player.timeline.continued = false;
                                     }
                                 } catch(err) {
-                                    console.log('[Sync] Не удалось применить таймкод автоматически');
+                                    console.log('[Sync] Не удалось применить таймкод');
                                 }
                                 notify(`🎯 Таймкод: ${formatTime(savedTime)}`);
                             }
@@ -340,20 +494,13 @@
             
             if (e.type === 'timeupdate' && e.time) {
                 currentTime = e.time;
-                // Сохраняем прогресс каждые 10 секунд
-                if (Math.floor(currentTime) % 10 === 0 && Math.floor(currentTime) !== lastSavedTime) {
-                    lastSavedTime = Math.floor(currentTime);
-                    saveCurrentProgress(currentTime);
-                }
             }
             
             if (e.type === 'stop') {
                 console.log('[Sync] ⏹️ Просмотр остановлен');
-                // Сохраняем финальный прогресс
                 if (currentTime > 0) {
                     saveCurrentProgress(currentTime);
                 }
-                // Отправляем синхронизацию
                 if (cfg().sync_on_stop) {
                     syncToGist(false);
                 }
@@ -369,15 +516,21 @@
                 }
             }
         });
+        
+        // Интервал для сохранения прогресса
+        saveInterval = setInterval(() => {
+            if (currentTime > 0 && Lampa.Player.opened()) {
+                saveCurrentProgress(currentTime);
+            }
+        }, 10000);
     }
 
     function startBackgroundSync() {
-        // Фоновая проверка каждые 2 минуты
         setInterval(() => {
             if (!syncInProgress && cfg().enabled) {
                 syncFromGist(false);
             }
-        }, 120000);
+        }, 60000);
     }
 
     function showGistSetup() {
@@ -392,6 +545,7 @@
                 { title: '──────────', separator: true },
                 { title: '🔄 Отправить таймкоды', action: 'upload' },
                 { title: '📥 Загрузить таймкоды', action: 'download' },
+                { title: '🔄 Обновить карточки', action: 'refresh_cards' },
                 { title: '🔄 Полная синхронизация', action: 'force' },
                 { title: '──────────', separator: true },
                 { title: '❌ Отмена', action: 'cancel' }
@@ -423,13 +577,18 @@
                 } else if (item.action === 'download') {
                     syncFromGist(true);
                     setTimeout(() => showGistSetup(), 1000);
+                } else if (item.action === 'refresh_cards') {
+                    updateAllCardsTimeline();
+                    notify('🔄 Карточки обновлены');
+                    setTimeout(() => showGistSetup(), 1000);
                 } else if (item.action === 'force') {
-                    notify('🔄 Синхронизация...');
+                    notify('🔄 Полная синхронизация...');
                     syncToGist(true);
                     setTimeout(() => {
                         syncFromGist(true);
+                        setTimeout(() => updateAllCardsTimeline(), 1000);
                     }, 1000);
-                    setTimeout(() => showGistSetup(), 2000);
+                    setTimeout(() => showGistSetup(), 2500);
                 }
             },
             onBack: () => {
@@ -442,7 +601,7 @@
         Lampa.SettingsApi.addComponent({
             component: 'timeline_sync',
             name: 'Синхронизация таймкодов',
-            icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.4 0-8-3.6-8-8s3.6-8 8-8 8 3.6 8 8-3.6 8-8 8zm.5-13H11v6l5.2 3.1.8-1.2-4.5-2.7z"/></svg>'
+            icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/></svg>'
         });
         Lampa.SettingsApi.addParam({
             component: 'timeline_sync',
@@ -469,7 +628,6 @@
         
         console.log(`[Sync] Инициализация. Профиль: ${getCurrentProfileId() || 'глобальный'}`);
         
-        // Нормализация существующих ключей
         const current = getFileView();
         const normalized = normalizeKeys(current);
         if (JSON.stringify(current) !== JSON.stringify(normalized)) {
@@ -481,12 +639,34 @@
         addSettings();
         startBackgroundSync();
         
-        // Первая синхронизация
+        // Наблюдаем за появлением новых карточек
+        observeNewCards();
+        
+        // Обновляем карточки при смене активности
+        Lampa.Listener.follow('activity', (e) => {
+            if (e.type === 'start') {
+                setTimeout(() => {
+                    updateAllCardsTimeline();
+                }, 500);
+            }
+        });
+        
+        // Обновляем карточки при скролле (появляются новые)
+        window.addEventListener('scroll', () => {
+            clearTimeout(window.tl_scroll_timer);
+            window.tl_scroll_timer = setTimeout(() => {
+                updateAllCardsTimeline();
+            }, 300);
+        });
+        
+        // Первая синхронизация и обновление карточек
         setTimeout(() => {
             if (cfg().enabled) {
-                syncFromGist(false);
+                syncFromGist(false, () => {
+                    updateAllCardsTimeline();
+                });
             }
-        }, 5000);
+        }, 3000);
     }
 
     if (window.appready) init();
