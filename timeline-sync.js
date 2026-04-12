@@ -9,9 +9,9 @@
     let syncInProgress = false;
     let pendingSync = false;
     let currentMovieId = null;
-    let periodicSyncTimer = null;
-    let isPlayerOpen = false;
+    let autoSyncTimer = null;
     let lastCurrentTime = 0;
+    let isPlayerActive = false;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -20,8 +20,7 @@
             gist_id: '',
             device_name: Lampa.Platform.get() || 'Unknown',
             manual_profile_id: '',
-            sync_on_stop: true,
-            sync_interval: 30,
+            auto_sync_interval: 60, // интервал автосинхронизации в секундах (0 = выкл)
             button_position: 'head'
         }) || {};
     }
@@ -34,7 +33,6 @@
         Lampa.Noty.show(text);
     }
 
-    // Конвертация секунд в читаемый формат (минуты:секунды)
     function formatTime(seconds) {
         if (!seconds || seconds < 0) return '0:00';
         const hours = Math.floor(seconds / 3600);
@@ -47,7 +45,6 @@
         return `${minutes}:${secs.toString().padStart(2, '0')}`;
     }
 
-    // Конвертация секунд в короткий формат (минуты)
     function formatTimeShort(seconds) {
         if (!seconds || seconds < 0) return '0 мин';
         const minutes = Math.floor(seconds / 60);
@@ -196,6 +193,7 @@
         return false;
     }
 
+    // Отправить таймкоды на Gist
     function syncToGist(showNotify = true, callback = null) {
         if (syncInProgress) {
             pendingSync = true;
@@ -254,6 +252,7 @@
         });
     }
 
+    // Загрузить таймкоды с Gist
     function syncFromGist(showNotify = true, callback = null) {
         if (syncInProgress) {
             if (callback) callback(false);
@@ -296,11 +295,7 @@
                                 Lampa.Timeline.read(true);
                             }
                             
-                            if (showNotify) {
-                                // Показываем уведомление с количеством обновлённых таймкодов
-                                const changedCount = Object.keys(remote.file_view).length;
-                                notify(`📥 Загружено ${changedCount} таймкодов`);
-                            }
+                            if (showNotify) notify(`📥 Загружено ${count} таймкодов`);
                         } else if (showNotify) {
                             notify('✅ Данные актуальны');
                         }
@@ -326,32 +321,50 @@
         });
     }
 
+    // Полная синхронизация (отправить + загрузить)
+    function fullSync() {
+        notify('🔄 Синхронизация...');
+        syncToGist(true, () => {
+            setTimeout(() => {
+                syncFromGist(true);
+            }, 500);
+        });
+    }
+
+    // Запуск автосинхронизации по таймеру
+    function startAutoSync() {
+        if (autoSyncTimer) {
+            clearInterval(autoSyncTimer);
+            autoSyncTimer = null;
+        }
+        
+        const interval = cfg().auto_sync_interval;
+        if (interval > 0) {
+            autoSyncTimer = setInterval(() => {
+                if (isPlayerActive && lastCurrentTime > 0 && Lampa.Player.opened()) {
+                    console.log(`[Sync] ⏰ Автосинхронизация (каждые ${interval} сек)`);
+                    saveCurrentProgress(lastCurrentTime, false);
+                    syncToGist(false);
+                }
+            }, interval * 1000);
+            console.log(`[Sync] Автосинхронизация запущена (интервал: ${interval} сек)`);
+        } else {
+            console.log('[Sync] Автосинхронизация отключена');
+        }
+    }
+
     // Добавить кнопку синхронизации в интерфейс
     function addSyncButton() {
         const c = cfg();
         
-        // Иконка для кнопки (облако с стрелками)
         const svgIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" fill="currentColor"/></svg>';
         
-        // Функция синхронизации (отправить и загрузить)
-        function doSync() {
-            notify('🔄 Синхронизация...');
-            syncToGist(true, () => {
-                setTimeout(() => {
-                    syncFromGist(true);
-                }, 500);
-            });
-        }
-        
-        // Удаляем старую кнопку если есть
         $('.tl-sync-button').remove();
         
-        // Создаём кнопку
         const syncButton = $(`<div class="tl-sync-button selector head__action" style="display: flex; align-items: center; justify-content: center;">${svgIcon}</div>`);
-        syncButton.on('hover:enter', doSync);
-        syncButton.on('click', doSync);
+        syncButton.on('hover:enter', fullSync);
+        syncButton.on('click', fullSync);
         
-        // Добавляем в выбранное место
         if (c.button_position === 'head') {
             const headActions = $('.head__actions');
             if (headActions.length) {
@@ -363,7 +376,7 @@
             const menuList = $('.menu__list:eq(0)');
             if (menuList.length) {
                 const menuItem = $(`<li class="menu__item selector tl-sync-button" style="order: -1;"><div class="menu__ico">${svgIcon}</div><div class="menu__text">Синхр.</div></li>`);
-                menuItem.on('hover:enter', doSync);
+                menuItem.on('hover:enter', fullSync);
                 menuList.prepend(menuItem);
                 syncButton.remove();
             } else {
@@ -377,13 +390,17 @@
     function initPlayerHandler() {
         let lastSavedProgressTime = 0;
         
+        // Следим за активностью плеера
         Lampa.Listener.follow('player', (e) => {
             if (e.type === 'open' && e.movie) {
-                isPlayerOpen = true;
+                isPlayerActive = true;
                 currentMovieId = extractTmdbIdFromItem(e.movie);
                 console.log(`[Sync] 🎬 Открыт фильм: ${currentMovieId}`);
                 lastSavedProgressTime = 0;
                 lastCurrentTime = 0;
+                
+                // Запускаем автосинхронизацию при открытии плеера
+                startAutoSync();
                 
                 setTimeout(() => {
                     syncFromGist(false, (success) => {
@@ -409,21 +426,19 @@
                 }
             }
             
-            if (e.type === 'stop' || e.type === 'pause') {
-                console.log(`[Sync] ${e.type === 'stop' ? '⏹️ Остановка' : '⏸️ Пауза'} - сохраняем`);
+            if (e.type === 'stop') {
+                console.log('[Sync] ⏹️ Плеер остановлен');
                 if (lastCurrentTime > 0) {
                     saveCurrentProgress(lastCurrentTime, true);
+                    syncToGist(false);
+                }
+                isPlayerActive = false;
+                if (autoSyncTimer) {
+                    clearInterval(autoSyncTimer);
+                    autoSyncTimer = null;
                 }
             }
         });
-        
-        periodicSyncTimer = setInterval(() => {
-            if (isPlayerOpen && lastCurrentTime > 0 && Lampa.Player.opened()) {
-                console.log('[Sync] ⏰ Периодическая отправка');
-                saveCurrentProgress(lastCurrentTime, false);
-                syncToGist(false);
-            }
-        }, 60000);
     }
 
     function startBackgroundSync() {
@@ -436,6 +451,20 @@
 
     function showGistSetup() {
         const c = cfg();
+        const intervalOptions = [
+            { title: 'Выключено', value: 0 },
+            { title: '15 секунд', value: 15 },
+            { title: '30 секунд', value: 30 },
+            { title: '1 минута', value: 60 },
+            { title: '2 минуты', value: 120 },
+            { title: '5 минут', value: 300 },
+            { title: '10 минут', value: 600 }
+        ];
+        
+        const intervalText = c.auto_sync_interval === 0 ? 'Выключено' : 
+            c.auto_sync_interval < 60 ? `${c.auto_sync_interval} сек` : 
+            `${c.auto_sync_interval / 60} мин`;
+        
         Lampa.Select.show({
             title: 'Синхронизация таймкодов',
             items: [
@@ -445,6 +474,7 @@
                 { title: `👤 Профиль: ${c.manual_profile_id || 'авто'}`, action: 'profile' },
                 { title: '──────────', separator: true },
                 { title: `📍 Позиция кнопки: ${c.button_position === 'head' ? 'Верхняя панель' : 'Левое меню'}`, action: 'position' },
+                { title: `⏱ Автосинхронизация: ${intervalText}`, action: 'interval' },
                 { title: '──────────', separator: true },
                 { title: '🔄 Отправить таймкоды', action: 'upload' },
                 { title: '📥 Загрузить таймкоды', action: 'download' },
@@ -480,6 +510,25 @@
                     addSyncButton();
                     notify(`Кнопка перемещена в ${newPos === 'head' ? 'верхнюю панель' : 'левое меню'}`);
                     showGistSetup();
+                } else if (item.action === 'interval') {
+                    Lampa.Select.show({
+                        title: 'Интервал автосинхронизации',
+                        items: intervalOptions.map(opt => ({
+                            title: opt.title,
+                            value: opt.value,
+                            selected: c.auto_sync_interval === opt.value
+                        })),
+                        onSelect: (opt) => {
+                            c.auto_sync_interval = opt.value;
+                            saveCfg(c);
+                            notify(`Интервал автосинхронизации: ${opt.title}`);
+                            if (isPlayerActive && Lampa.Player.opened()) {
+                                startAutoSync();
+                            }
+                            showGistSetup();
+                        },
+                        onBack: () => showGistSetup()
+                    });
                 } else if (item.action === 'upload') {
                     syncToGist(true);
                     setTimeout(() => showGistSetup(), 1000);
@@ -487,11 +536,7 @@
                     syncFromGist(true);
                     setTimeout(() => showGistSetup(), 1000);
                 } else if (item.action === 'force') {
-                    notify('🔄 Полная синхронизация...');
-                    syncToGist(true);
-                    setTimeout(() => {
-                        syncFromGist(true);
-                    }, 1000);
+                    fullSync();
                     setTimeout(() => showGistSetup(), 2000);
                 }
             },
