@@ -5,13 +5,9 @@
     window.tl_sync_init = true;
 
     const CFG_KEY = 'timeline_sync_cfg';
-    let lastSyncTime = 0;
     let syncInProgress = false;
     let pendingSync = false;
-    let currentMovieId = null;
-    let lastCurrentTime = 0;
     let autoSyncTimer = null;
-    let isPlayerActive = false;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -21,7 +17,6 @@
             device_name: Lampa.Platform.get() || 'Unknown',
             manual_profile_id: '',
             sync_on_stop: true,
-            sync_interval: 30,
             button_position: 'head',
             sync_strategy: 'newest',
             auto_sync_interval: 30
@@ -164,10 +159,10 @@
                     case 'newest':
                         if (remoteUpdated > localUpdated + 10000) {
                             shouldUseRemote = true;
-                            reason = `дата ${new Date(localUpdated).toLocaleTimeString()} → ${new Date(remoteUpdated).toLocaleTimeString()}`;
+                            reason = `дата`;
                         } else if (remoteTime > localTime + 5 && Math.abs(remoteUpdated - localUpdated) < 60000) {
                             shouldUseRemote = true;
-                            reason = `даты близки, время ${formatTime(localTime)} → ${formatTime(remoteTime)}`;
+                            reason = `даты близки, время больше`;
                         }
                         break;
                 }
@@ -190,21 +185,33 @@
                 const tmdbId = extractTmdbIdFromItem(movie);
                 if (tmdbId) return tmdbId;
             }
-            return currentMovieId;
+            return null;
         } catch(e) {
             return null;
         }
     }
 
-    function saveCurrentProgress(timeInSeconds, forceSync = false) {
-        const tmdbId = getCurrentMovieTmdbId();
+    // Получить текущее время просмотра
+    function getCurrentPlayTime() {
+        try {
+            const player = Lampa.Player.playdata();
+            if (player && player.timeline && player.timeline.time) {
+                return player.timeline.time;
+            }
+        } catch(e) {}
+        return 0;
+    }
+
+    // Сохранить текущий прогресс
+    function saveCurrentProgress(timeInSeconds, tmdbId) {
+        if (!tmdbId) tmdbId = getCurrentMovieTmdbId();
         if (!tmdbId) return false;
         
         const fileView = getFileView();
         const currentTime = Math.floor(timeInSeconds);
         const savedTime = fileView[tmdbId]?.time || 0;
         
-        if (Math.abs(currentTime - savedTime) >= 10 || forceSync) {
+        if (Math.abs(currentTime - savedTime) >= 10) {
             const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
             
@@ -225,15 +232,12 @@
                     duration: duration
                 });
             }
-            
-            if (forceSync && cfg().sync_on_stop) {
-                syncToGist(false);
-            }
             return true;
         }
         return false;
     }
 
+    // Отправить на Gist
     function syncToGist(showNotify = true, callback = null) {
         if (syncInProgress) {
             pendingSync = true;
@@ -272,7 +276,6 @@
             }),
             success: () => {
                 if (showNotify) notify('✅ Таймкоды отправлены');
-                lastSyncTime = Date.now();
                 console.log(`[Sync] ✅ Отправлено успешно`);
                 syncInProgress = false;
                 
@@ -292,6 +295,7 @@
         });
     }
 
+    // Загрузить с Gist
     function syncFromGist(showNotify = true, callback = null) {
         if (syncInProgress) {
             if (callback) callback(false);
@@ -360,6 +364,7 @@
         });
     }
 
+    // Полная синхронизация для кнопки
     function fullSync() {
         notify('🔄 Синхронизация...');
         syncToGist(true, () => {
@@ -369,13 +374,35 @@
         });
     }
 
-    // Автосинхронизация - вызывает ту же функцию, что и кнопка
-    function autoSync() {
-        if (isPlayerActive && Lampa.Player.opened() && lastCurrentTime > 0) {
-            console.log(`[Sync] ⏰ Автосинхронизация (интервал ${cfg().auto_sync_interval} сек)`);
-            saveCurrentProgress(lastCurrentTime, true);
-            syncToGist(false);
+    // Автосинхронизация - вызывается по таймеру
+    function autoSyncTask() {
+        if (!cfg().enabled) return;
+        
+        // Проверяем, открыт ли плеер
+        if (!Lampa.Player.opened()) {
+            console.log('[Sync] ⏰ Автосинхронизация: плеер не открыт');
+            return;
         }
+        
+        const currentTime = getCurrentPlayTime();
+        if (currentTime === 0) {
+            console.log('[Sync] ⏰ Автосинхронизация: нет данных о времени');
+            return;
+        }
+        
+        const tmdbId = getCurrentMovieTmdbId();
+        if (!tmdbId) {
+            console.log('[Sync] ⏰ Автосинхронизация: нет ID фильма');
+            return;
+        }
+        
+        console.log(`[Sync] ⏰ Автосинхронизация: время ${formatTime(currentTime)}`);
+        
+        // Сохраняем прогресс
+        saveCurrentProgress(currentTime, tmdbId);
+        
+        // Отправляем на Gist
+        syncToGist(false);
     }
 
     function startAutoSync() {
@@ -385,9 +412,11 @@
         }
         
         const interval = cfg().auto_sync_interval;
-        if (interval > 0 && isPlayerActive) {
-            autoSyncTimer = setInterval(autoSync, interval * 1000);
-            console.log(`[Sync] Автосинхронизация запущена (${interval} сек)`);
+        if (interval > 0) {
+            autoSyncTimer = setInterval(autoSyncTask, interval * 1000);
+            console.log(`[Sync] Автосинхронизация запущена (интервал: ${interval} сек)`);
+        } else {
+            console.log('[Sync] Автосинхронизация выключена');
         }
     }
 
@@ -409,21 +438,19 @@
     }
 
     function initPlayerHandler() {
+        // Сохранение прогресса при паузе/остановке
         Lampa.Listener.follow('player', (e) => {
             if (e.type === 'open' && e.movie) {
-                isPlayerActive = true;
-                currentMovieId = extractTmdbIdFromItem(e.movie);
-                console.log(`[Sync] 🎬 Открыт фильм: ${currentMovieId}`);
-                lastCurrentTime = 0;
+                const tmdbId = extractTmdbIdFromItem(e.movie);
+                console.log(`[Sync] 🎬 Открыт фильм: ${tmdbId}`);
                 
-                startAutoSync();
-                
+                // Загружаем таймкод
                 setTimeout(() => {
                     syncFromGist(false, (success) => {
                         if (success) {
                             const fileView = getFileView();
-                            if (currentMovieId && fileView[currentMovieId]?.time) {
-                                const savedTime = fileView[currentMovieId].time;
+                            if (tmdbId && fileView[tmdbId]?.time) {
+                                const savedTime = fileView[tmdbId].time;
                                 console.log(`[Sync] 🎯 Таймкод: ${formatTime(savedTime)}`);
                                 notify(`🎯 Таймкод: ${formatTimeShort(savedTime)}`);
                             }
@@ -432,43 +459,25 @@
                 }, 2000);
             }
             
-            if (e.type === 'timeupdate' && e.time) {
-                lastCurrentTime = e.time;
-            }
-            
-            if (e.type === 'stop') {
-                console.log('[Sync] ⏹️ Плеер остановлен');
-                if (lastCurrentTime > 0) {
-                    saveCurrentProgress(lastCurrentTime, true);
-                }
-                isPlayerActive = false;
-                if (autoSyncTimer) {
-                    clearInterval(autoSyncTimer);
-                    autoSyncTimer = null;
-                }
-            }
-            
-            if (e.type === 'pause') {
-                console.log('[Sync] ⏸️ Пауза');
-                if (lastCurrentTime > 0) {
-                    saveCurrentProgress(lastCurrentTime, true);
+            if (e.type === 'stop' || e.type === 'pause') {
+                const currentTime = getCurrentPlayTime();
+                if (currentTime > 0) {
+                    console.log(`[Sync] ${e.type === 'stop' ? '⏹️ Остановка' : '⏸️ Пауза'} - сохраняем`);
+                    saveCurrentProgress(currentTime, null);
+                    syncToGist(false);
                 }
             }
         });
         
+        // Сохранение каждые 10 секунд (без отправки)
         setInterval(() => {
-            if (isPlayerActive && lastCurrentTime > 0 && Lampa.Player.opened()) {
-                saveCurrentProgress(lastCurrentTime, false);
+            if (Lampa.Player.opened()) {
+                const currentTime = getCurrentPlayTime();
+                if (currentTime > 0) {
+                    saveCurrentProgress(currentTime, null);
+                }
             }
         }, 10000);
-    }
-
-    function startBackgroundSync() {
-        setInterval(() => {
-            if (!syncInProgress && cfg().enabled) {
-                syncFromGist(false);
-            }
-        }, 120000);
     }
 
     function showGistSetup() {
@@ -561,9 +570,7 @@
                             c.auto_sync_interval = opt.value;
                             saveCfg(c);
                             notify(`Автосинхронизация: ${opt.title}`);
-                            if (isPlayerActive && Lampa.Player.opened()) {
-                                startAutoSync();
-                            }
+                            startAutoSync();
                             showGistSetup();
                         },
                         onBack: () => showGistSetup()
@@ -620,8 +627,8 @@
         
         initPlayerHandler();
         addSettings();
-        startBackgroundSync();
         addHeadButton();
+        startAutoSync(); // Запускаем автосинхронизацию сразу
         
         setTimeout(() => {
             if (cfg().enabled) {
