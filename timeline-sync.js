@@ -102,16 +102,28 @@
         return result;
     }
 
+    // ВАЖНО: стратегия синхронизации - берём ТОЛЬКО если удалённые данные НОВЕЕ локальных
     function mergeData(local, remote) {
         var result = {};
-        for (var key in local) { result[key] = local[key]; }
-        for (var key in remote) { result[key] = remote[key]; }
+        
+        // Сначала копируем всё локальное
+        for (var key in local) {
+            result[key] = local[key];
+        }
+        
+        // Обновляем только если удалённые данные свежее
         for (var key in remote) {
-            if (local[key] && remote[key] && remote[key].updated > local[key].updated) {
+            if (!result[key]) {
+                // Новый таймкод
                 result[key] = remote[key];
-                console.log('[Sync] Обновлён (дата):', key);
+                console.log('[Sync] ➕ Новый таймкод:', key);
+            } else if (remote[key].updated > result[key].updated) {
+                // Удалённые данные свежее - обновляем
+                result[key] = remote[key];
+                console.log('[Sync] 🔄 Обновлён (дата):', key);
             }
         }
+        
         return cleanOldTimecodes(result);
     }
 
@@ -146,20 +158,26 @@
         var hash = getCorrectHash(movie);
         
         var fileView = getFileView();
-        fileView[hash] = {
-            time: Math.floor(currentTime),
-            percent: percent,
-            duration: duration,
-            updated: Date.now(),
-            title: movie.title || movie.name,
-            id: movie.id
-        };
+        var existing = fileView[hash];
+        var now = Date.now();
         
-        setFileView(fileView);
-        console.log('[Sync] 💾 Сохранён:', formatTimeShort(currentTime), 'для', movie.title);
+        // Сохраняем только если прошло больше 10 секунд или это первый раз
+        if (!existing || Math.abs(currentTime - existing.time) >= 10) {
+            fileView[hash] = {
+                time: Math.floor(currentTime),
+                percent: percent,
+                duration: duration,
+                updated: now,
+                title: movie.title || movie.name,
+                id: movie.id
+            };
+            setFileView(fileView);
+            console.log('[Sync] 💾 Сохранён:', formatTimeShort(currentTime), 'для', movie.title);
+        }
         return true;
     }
 
+    // Загрузить с Gist и ОБЪЕДИНИТЬ (не заменять!)
     function loadFromGist(callback) {
         var c = cfg();
         if (!c.gist_token || !c.gist_id) {
@@ -200,6 +218,7 @@
         });
     }
 
+    // Отправить на Gist (отправляем ТОЛЬКО то, что есть локально, без затирания)
     function sendToGist(showNotify, callback) {
         var c = cfg();
         if (!c.gist_token || !c.gist_id) {
@@ -208,6 +227,7 @@
             return;
         }
         
+        // Перед отправкой чистим старые записи
         var cleanedData = cleanOldTimecodes(getFileView());
         setFileView(cleanedData);
         
@@ -249,6 +269,7 @@
         });
     }
 
+    // Полная синхронизация: ЗАГРУЗИТЬ -> ОБЪЕДИНИТЬ -> ОТПРАВИТЬ -> СНОВА ЗАГРУЗИТЬ
     function fullSync() {
         if (syncInProgress) {
             notify('⏳ Синхронизация уже выполняется');
@@ -257,10 +278,16 @@
         
         notify('🔄 Синхронизация...');
         
+        // 1. Сначала загружаем с Gist
         loadFromGist(function() {
-            saveCurrentProgress();
+            // 2. Сохраняем текущий прогресс (если плеер открыт)
+            if (Lampa.Player.opened()) {
+                saveCurrentProgress();
+            }
+            // 3. Отправляем объединённые данные на Gist
             setTimeout(function() {
                 sendToGist(true, function() {
+                    // 4. Ещё раз загружаем для обновления UI
                     setTimeout(function() {
                         loadFromGist(function() {
                             notify('✅ Синхронизация завершена');
@@ -275,6 +302,7 @@
         if (!cfg().enabled) return;
         if (!Lampa.Player.opened()) return;
         if (getCurrentPlayTime() === 0) return;
+        
         console.log('[Sync] ⏰ Автоотправка');
         saveCurrentProgress();
         sendToGist(false);
