@@ -20,7 +20,7 @@
             auto_sync: true,
             auto_save: true,
             sync_on_stop: true,
-            sync_strategy: 'max_time',
+            sync_strategy: 'cloud_priority',
             gist_token: '',
             gist_id: '',
             device_name: Lampa.Platform.get() || 'Unknown',
@@ -118,50 +118,6 @@
             updated: Date.now(),
             file_view: normalizeKeys(getFileView())
         };
-    }
-
-    function mergeFileView(local, remote) {
-        const result = { ...local };
-        let changed = false;
-        const strategy = cfg().sync_strategy;
-        
-        for (const key in remote) {
-            const localRecord = local[key];
-            const remoteRecord = remote[key];
-            
-            if (!localRecord) {
-                result[key] = remoteRecord;
-                changed = true;
-                console.log(`[Sync] ➕ Новый: ${key} (${formatTime(remoteRecord.time)})`);
-                continue;
-            }
-            
-            let shouldUseRemote = false;
-            let reason = '';
-            
-            if (strategy === 'max_time') {
-                // Стратегия: по большему времени просмотра
-                if (remoteRecord.time > localRecord.time + 5) {
-                    shouldUseRemote = true;
-                    reason = `время ${formatTime(localRecord.time)} → ${formatTime(remoteRecord.time)}`;
-                }
-            } else if (strategy === 'last_watch') {
-                // Стратегия: по последнему просмотру
-                const remoteUpdated = remoteRecord.updated || 0;
-                const localUpdated = localRecord.updated || 0;
-                if (remoteUpdated > localUpdated) {
-                    shouldUseRemote = true;
-                    reason = `дата ${new Date(localUpdated).toLocaleString()} → ${new Date(remoteUpdated).toLocaleString()}`;
-                }
-            }
-            
-            if (shouldUseRemote) {
-                result[key] = remoteRecord;
-                changed = true;
-                console.log(`[Sync] 🔄 Обновлён (${strategy === 'max_time' ? 'по времени' : 'по дате'}): ${key} (${reason})`);
-            }
-        }
-        return { merged: result, changed };
     }
 
     function getCurrentMovieTmdbId() {
@@ -314,11 +270,55 @@
                     const content = data.files['timeline.json']?.content;
                     if (content) {
                         const remote = JSON.parse(content);
-                        const count = Object.keys(remote.file_view || {}).length;
+                        const remoteFileView = remote.file_view || {};
+                        const count = Object.keys(remoteFileView).length;
                         console.log(`[Sync] 📥 Загружено ${count} таймкодов`);
                         
                         const localFileView = getFileView();
-                        const { merged, changed } = mergeFileView(localFileView, remote.file_view);
+                        const strategy = c.sync_strategy;
+                        
+                        let merged = {};
+                        let changed = false;
+                        
+                        if (strategy === 'cloud_priority') {
+                            // Облако важнее - полностью заменяем локальные данные облачными
+                            merged = { ...remoteFileView };
+                            changed = Object.keys(merged).length !== Object.keys(localFileView).length;
+                            if (!changed && Object.keys(merged).length > 0) {
+                                // Проверяем, изменились ли значения
+                                for (const key in merged) {
+                                    if (JSON.stringify(merged[key]) !== JSON.stringify(localFileView[key])) {
+                                        changed = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            console.log(`[Sync] 🌩️ Стратегия: приоритет облака (изменений: ${changed})`);
+                        } else if (strategy === 'last_watch') {
+                            // По последнему просмотру
+                            merged = { ...localFileView };
+                            for (const key in remoteFileView) {
+                                const remoteUpdated = remoteFileView[key]?.updated || 0;
+                                const localUpdated = localFileView[key]?.updated || 0;
+                                if (!localFileView[key] || remoteUpdated > localUpdated) {
+                                    merged[key] = remoteFileView[key];
+                                    changed = true;
+                                    console.log(`[Sync] 🔄 Обновлён ${key} по дате`);
+                                }
+                            }
+                        } else {
+                            // По большему времени (max_time)
+                            merged = { ...localFileView };
+                            for (const key in remoteFileView) {
+                                const remoteTime = remoteFileView[key]?.time || 0;
+                                const localTime = localFileView[key]?.time || 0;
+                                if (!localFileView[key] || remoteTime > localTime + 5) {
+                                    merged[key] = remoteFileView[key];
+                                    changed = true;
+                                    console.log(`[Sync] 🔄 Обновлён ${key} по времени`);
+                                }
+                            }
+                        }
                         
                         if (changed) {
                             setFileView(merged);
@@ -328,7 +328,10 @@
                                 Lampa.Timeline.read(true);
                             }
                             
-                            if (showNotify) notify(`📥 Загружено ${count} таймкодов`);
+                            if (showNotify) {
+                                const strategyName = strategy === 'cloud_priority' ? 'приоритет облака' : (strategy === 'last_watch' ? 'по дате' : 'по времени');
+                                notify(`📥 Загружено ${count} таймкодов (${strategyName})`);
+                            }
                         } else if (showNotify) {
                             notify('✅ Данные актуальны');
                         }
@@ -453,6 +456,9 @@
 
     function showMainMenu() {
         const c = cfg();
+        const strategyIcon = c.sync_strategy === 'cloud_priority' ? '☁️' : (c.sync_strategy === 'last_watch' ? '📅' : '⏱️');
+        const strategyName = c.sync_strategy === 'cloud_priority' ? 'приоритет облака' : (c.sync_strategy === 'last_watch' ? 'по дате просмотра' : 'по времени');
+        
         Lampa.Select.show({
             title: 'Синхронизация таймкодов',
             items: [
@@ -461,7 +467,7 @@
                 { title: `${c.auto_save ? '✅' : '❌'} Автосохранение: ${c.auto_save ? 'Вкл' : 'Выкл'}`, action: 'toggle_auto_save' },
                 { title: `${c.sync_on_stop ? '✅' : '❌'} Синхр. при остановке: ${c.sync_on_stop ? 'Вкл' : 'Выкл'}`, action: 'toggle_sync_stop' },
                 { title: '──────────', separator: true },
-                { title: `${c.sync_strategy === 'max_time' ? '⏱️' : '📅'} Стратегия: ${c.sync_strategy === 'max_time' ? 'по времени' : 'по дате просмотра'}`, action: 'toggle_strategy' },
+                { title: `${strategyIcon} Стратегия: ${strategyName}`, action: 'toggle_strategy' },
                 { title: `⏱️ Интервал синхр.: ${c.sync_interval || 30} сек`, action: 'set_interval' },
                 { title: `📱 Устройство: ${c.device_name}`, action: 'set_device' },
                 { title: `👤 Профиль: ${c.manual_profile_id || 'авто'}`, action: 'set_profile' },
@@ -510,9 +516,12 @@
                     showMainMenu();
                 }
                 else if (item.action === 'toggle_strategy') {
-                    c.sync_strategy = c.sync_strategy === 'max_time' ? 'last_watch' : 'max_time';
+                    const strategies = ['cloud_priority', 'last_watch', 'max_time'];
+                    const currentIndex = strategies.indexOf(c.sync_strategy);
+                    const nextIndex = (currentIndex + 1) % strategies.length;
+                    c.sync_strategy = strategies[nextIndex];
                     saveCfg(c);
-                    const strategyName = c.sync_strategy === 'max_time' ? 'по большему времени' : 'по последнему просмотру';
+                    const strategyName = c.sync_strategy === 'cloud_priority' ? 'приоритет облака' : (c.sync_strategy === 'last_watch' ? 'по последнему просмотру' : 'по большему времени');
                     notify(`Стратегия синхронизации: ${strategyName}`);
                     showMainMenu();
                 }
@@ -615,7 +624,7 @@
         console.log(`[Sync] Плагин: ${c.enabled ? 'Вкл' : 'Выкл'}`);
         console.log(`[Sync] Автосинхронизация: ${c.auto_sync ? 'Вкл' : 'Выкл'}`);
         console.log(`[Sync] Автосохранение: ${c.auto_save ? 'Вкл' : 'Выкл'}`);
-        console.log(`[Sync] Стратегия: ${c.sync_strategy === 'max_time' ? 'по времени' : 'по дате просмотра'}`);
+        console.log(`[Sync] Стратегия: ${c.sync_strategy === 'cloud_priority' ? 'приоритет облака' : (c.sync_strategy === 'last_watch' ? 'по дате' : 'по времени')}`);
         
         if (!c.enabled) {
             console.log('[Sync] Плагин выключен в настройках');
