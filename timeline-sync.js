@@ -5,10 +5,12 @@
     window.tl_sync_init = true;
 
     const CFG_KEY = 'timeline_sync_cfg';
+    let lastSyncTime = 0;
     let syncInProgress = false;
     let pendingSync = false;
+    let currentMovieId = null;
+    let lastCurrentTime = 0;
     let autoSyncTimer = null;
-    let backgroundSyncTimer = null;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -123,17 +125,15 @@
         };
     }
 
-    // Исправленная функция слияния - принудительно обновляет по дате
+    // Правильная функция слияния
     function mergeFileView(local, remote) {
         const result = { ...local };
         let changed = false;
         const strategy = cfg().sync_strategy;
-        const now = Date.now();
         
         for (const key in remote) {
             const remoteItem = remote[key];
             const localItem = local[key];
-            
             const remoteTime = remoteItem?.time || 0;
             const localTime = localItem?.time || 0;
             const remotePercent = remoteItem?.percent || 0;
@@ -142,77 +142,39 @@
             const localUpdated = localItem?.updated || 0;
             
             let shouldUseRemote = false;
-            let reason = '';
             
             if (!localItem) {
                 shouldUseRemote = true;
-                reason = 'новый таймкод';
+                console.log(`[Sync] ➕ Новый: ${key} (${formatTime(remoteTime)})`);
             } else {
                 switch (strategy) {
                     case 'max_time':
                         if (remoteTime > localTime + 5) {
                             shouldUseRemote = true;
-                            reason = `время (${formatTime(localTime)} → ${formatTime(remoteTime)})`;
+                            console.log(`[Sync] 🔄 По времени: ${key} (${formatTime(localTime)} → ${formatTime(remoteTime)})`);
                         }
                         break;
                     case 'max_percent':
                         if (remotePercent > localPercent + 3) {
                             shouldUseRemote = true;
-                            reason = `процент (${localPercent}% → ${remotePercent}%)`;
+                            console.log(`[Sync] 🔄 По проценту: ${key} (${localPercent}% → ${remotePercent}%)`);
                         }
                         break;
                     case 'newest':
-                        // Для стратегии по дате - всегда берём тот, у которого updated больше
                         if (remoteUpdated > localUpdated) {
                             shouldUseRemote = true;
-                            reason = `дата (${new Date(localUpdated).toLocaleString()} → ${new Date(remoteUpdated).toLocaleString()})`;
+                            console.log(`[Sync] 🔄 По дате: ${key} (${new Date(localUpdated).toLocaleTimeString()} → ${new Date(remoteUpdated).toLocaleTimeString()})`);
                         }
                         break;
                 }
             }
             
             if (shouldUseRemote) {
-                result[key] = { 
-                    ...remoteItem, 
-                    updated: remoteUpdated || now
-                };
+                result[key] = { ...remoteItem };
                 changed = true;
-                console.log(`[Sync] 🔄 ОБНОВЛЁН (${reason}) для ${key}`);
-                console.log(`   Локальный:  время=${formatTime(localTime)} (${localPercent}%), обновлён=${new Date(localUpdated).toLocaleString()}`);
-                console.log(`   Удалённый:  время=${formatTime(remoteTime)} (${remotePercent}%), обновлён=${new Date(remoteUpdated).toLocaleString()}`);
             }
         }
-        
-        // Также проверяем, нет ли в локальных данных таймкодов без updated
-        for (const key in result) {
-            if (!result[key].updated) {
-                result[key].updated = now;
-                changed = true;
-                console.log(`[Sync] 🔧 Добавлена дата для ${key}`);
-            }
-        }
-        
         return { merged: result, changed };
-    }
-
-    // Принудительное обновление карточек
-    function refreshUI() {
-        try {
-            if (Lampa.Timeline && Lampa.Timeline.read) {
-                Lampa.Timeline.read(true);
-            }
-            const activity = Lampa.Activity.active();
-            if (activity && activity.activity && activity.activity.refresh) {
-                activity.activity.refresh();
-            }
-            Lampa.Listener.send('state:changed', {
-                target: 'timeline',
-                reason: 'refresh'
-            });
-            console.log('[Sync] UI обновлён');
-        } catch(e) {
-            console.error('[Sync] Ошибка обновления UI:', e);
-        }
     }
 
     function getCurrentMovieTmdbId() {
@@ -223,7 +185,7 @@
                 const tmdbId = extractTmdbIdFromItem(movie);
                 if (tmdbId) return tmdbId;
             }
-            return null;
+            return currentMovieId;
         } catch(e) {
             return null;
         }
@@ -239,16 +201,15 @@
         return 0;
     }
 
-    function saveCurrentProgress(timeInSeconds, tmdbId) {
-        if (!tmdbId) tmdbId = getCurrentMovieTmdbId();
+    function saveCurrentProgress(timeInSeconds, forceSync = false) {
+        const tmdbId = getCurrentMovieTmdbId();
         if (!tmdbId) return false;
         
         const fileView = getFileView();
         const currentTime = Math.floor(timeInSeconds);
         const savedTime = fileView[tmdbId]?.time || 0;
-        const now = Date.now();
         
-        if (Math.abs(currentTime - savedTime) >= 10) {
+        if (Math.abs(currentTime - savedTime) >= 10 || forceSync) {
             const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
             
@@ -256,10 +217,10 @@
                 time: currentTime,
                 percent: percent,
                 duration: duration,
-                updated: now
+                updated: Date.now()
             };
             setFileView(fileView);
-            console.log(`[Sync] 💾 СОХРАНЕНО: ${formatTime(currentTime)} (${percent}%) для ${tmdbId}`);
+            console.log(`[Sync] 💾 Сохранён: ${formatTime(currentTime)} (${percent}%)`);
             
             if (Lampa.Timeline && Lampa.Timeline.update) {
                 Lampa.Timeline.update({
@@ -268,6 +229,10 @@
                     time: currentTime,
                     duration: duration
                 });
+            }
+            
+            if (forceSync && cfg().sync_on_stop) {
+                syncToGist(false);
             }
             return true;
         }
@@ -312,6 +277,7 @@
             }),
             success: () => {
                 if (showNotify) notify('✅ Таймкоды отправлены');
+                lastSyncTime = Date.now();
                 console.log(`[Sync] ✅ Отправлено успешно`);
                 syncInProgress = false;
                 
@@ -369,8 +335,9 @@
                             setFileView(merged);
                             console.log(`[Sync] Итог: ${Object.keys(merged).length} таймкодов`);
                             
-                            // Обновляем UI после загрузки
-                            refreshUI();
+                            if (Lampa.Timeline && Lampa.Timeline.read) {
+                                Lampa.Timeline.read(true);
+                            }
                             
                             if (showNotify) notify(`📥 Загружено ${count} таймкодов`);
                         } else if (showNotify) {
@@ -407,6 +374,7 @@
         });
     }
 
+    // Автоотправка во время просмотра
     function autoSyncTask() {
         if (!cfg().enabled) return;
         if (!Lampa.Player.opened()) return;
@@ -418,10 +386,11 @@
         if (!tmdbId) return;
         
         console.log(`[Sync] ⏰ Автоотправка: ${formatTime(currentTime)}`);
-        saveCurrentProgress(currentTime, tmdbId);
+        saveCurrentProgress(currentTime, false);
         syncToGist(false);
     }
 
+    // Фоновая загрузка
     function backgroundSyncTask() {
         if (!cfg().enabled) return;
         console.log('[Sync] 🔄 Фоновая загрузка');
@@ -437,20 +406,15 @@
         const interval = cfg().auto_sync_interval;
         if (interval > 0) {
             autoSyncTimer = setInterval(autoSyncTask, interval * 1000);
-            console.log(`[Sync] Автоотправка запущена (интервал: ${interval} сек)`);
+            console.log(`[Sync] Автоотправка запущена (${interval} сек)`);
         }
     }
 
     function startBackgroundSync() {
-        if (backgroundSyncTimer) {
-            clearInterval(backgroundSyncTimer);
-            backgroundSyncTimer = null;
-        }
-        
         const interval = cfg().background_sync_interval;
         if (interval > 0) {
-            backgroundSyncTimer = setInterval(backgroundSyncTask, interval * 1000);
-            console.log(`[Sync] Фоновая загрузка запущена (интервал: ${interval} сек)`);
+            setInterval(backgroundSyncTask, interval * 1000);
+            console.log(`[Sync] Фоновая загрузка запущена (${interval} сек)`);
         }
     }
 
@@ -474,40 +438,46 @@
     function initPlayerHandler() {
         Lampa.Listener.follow('player', (e) => {
             if (e.type === 'open' && e.movie) {
-                const tmdbId = extractTmdbIdFromItem(e.movie);
-                console.log(`[Sync] 🎬 Открыт фильм: ${tmdbId}`);
+                currentMovieId = extractTmdbIdFromItem(e.movie);
+                console.log(`[Sync] 🎬 Открыт фильм: ${currentMovieId}`);
+                lastCurrentTime = 0;
                 
                 setTimeout(() => {
                     syncFromGist(false, (success) => {
                         if (success) {
                             const fileView = getFileView();
-                            if (tmdbId && fileView[tmdbId]?.time) {
-                                const savedTime = fileView[tmdbId].time;
-                                console.log(`[Sync] 🎯 Загружен таймкод: ${formatTime(savedTime)}`);
+                            if (currentMovieId && fileView[currentMovieId]?.time) {
+                                const savedTime = fileView[currentMovieId].time;
+                                console.log(`[Sync] 🎯 Таймкод: ${formatTime(savedTime)}`);
                                 notify(`🎯 Таймкод: ${formatTimeShort(savedTime)}`);
-                                refreshUI();
                             }
                         }
                     });
                 }, 2000);
             }
             
-            if (e.type === 'stop' || e.type === 'pause') {
-                const currentTime = getCurrentPlayTime();
-                if (currentTime > 0) {
-                    console.log(`[Sync] ${e.type === 'stop' ? '⏹️ Остановка' : '⏸️ Пауза'} - сохраняем`);
-                    saveCurrentProgress(currentTime, null);
-                    syncToGist(false);
+            if (e.type === 'timeupdate' && e.time) {
+                lastCurrentTime = e.time;
+            }
+            
+            if (e.type === 'stop') {
+                console.log('[Sync] ⏹️ Плеер остановлен');
+                if (lastCurrentTime > 0) {
+                    saveCurrentProgress(lastCurrentTime, true);
+                }
+            }
+            
+            if (e.type === 'pause') {
+                console.log('[Sync] ⏸️ Пауза');
+                if (lastCurrentTime > 0) {
+                    saveCurrentProgress(lastCurrentTime, true);
                 }
             }
         });
         
         setInterval(() => {
-            if (Lampa.Player.opened()) {
-                const currentTime = getCurrentPlayTime();
-                if (currentTime > 0) {
-                    saveCurrentProgress(currentTime, null);
-                }
+            if (lastCurrentTime > 0 && Lampa.Player.opened()) {
+                saveCurrentProgress(lastCurrentTime, false);
             }
         }, 10000);
     }
@@ -515,12 +485,12 @@
     function showGistSetup() {
         const c = cfg();
         const strategyNames = {
-            'max_time': '⏱ По времени просмотра',
-            'max_percent': '📊 По проценту просмотра',
-            'newest': '🕐 По дате обновления'
+            'max_time': '⏱ По времени',
+            'max_percent': '📊 По проценту',
+            'newest': '🕐 По дате'
         };
         
-        const autoSyncOptions = [
+        const intervalOptions = [
             { title: 'Выключено', value: 0 },
             { title: '15 секунд', value: 15 },
             { title: '30 секунд', value: 30 },
@@ -529,18 +499,8 @@
             { title: '5 минут', value: 300 }
         ];
         
-        const backgroundSyncOptions = [
-            { title: 'Выключено', value: 0 },
-            { title: '15 секунд', value: 15 },
-            { title: '30 секунд', value: 30 },
-            { title: '1 минута', value: 60 },
-            { title: '2 минуты', value: 120 },
-            { title: '5 минут', value: 300 },
-            { title: '10 минут', value: 600 }
-        ];
-        
-        const currentAutoSync = autoSyncOptions.find(o => o.value === c.auto_sync_interval) || autoSyncOptions[0];
-        const currentBackgroundSync = backgroundSyncOptions.find(o => o.value === c.background_sync_interval) || backgroundSyncOptions[0];
+        const currentAutoSync = intervalOptions.find(o => o.value === c.auto_sync_interval) || intervalOptions[0];
+        const currentBgSync = intervalOptions.find(o => o.value === c.background_sync_interval) || intervalOptions[0];
         
         Lampa.Select.show({
             title: 'Синхронизация таймкодов',
@@ -552,12 +512,11 @@
                 { title: '──────────', separator: true },
                 { title: `🔄 Стратегия: ${strategyNames[c.sync_strategy]}`, action: 'strategy' },
                 { title: `📤 Отправка: ${currentAutoSync.title}`, action: 'auto_sync' },
-                { title: `📥 Загрузка: ${currentBackgroundSync.title}`, action: 'background_sync' },
+                { title: `📥 Загрузка: ${currentBgSync.title}`, action: 'background_sync' },
                 { title: '──────────', separator: true },
-                { title: '📤 Отправить сейчас', action: 'upload' },
-                { title: '📥 Загрузить сейчас', action: 'download' },
+                { title: '📤 Отправить', action: 'upload' },
+                { title: '📥 Загрузить', action: 'download' },
                 { title: '🔄 Полная синхр.', action: 'force' },
-                { title: '🔄 Обновить UI', action: 'refresh' },
                 { title: '──────────', separator: true },
                 { title: '❌ Отмена', action: 'cancel' }
             ],
@@ -586,12 +545,11 @@
                     Lampa.Select.show({
                         title: 'Стратегия синхронизации',
                         items: [
-                            { title: '⏱ По максимальному времени', value: 'max_time', desc: 'Берётся наибольшее время просмотра' },
-                            { title: '📊 По максимальному проценту', value: 'max_percent', desc: 'Берётся наибольший процент' },
-                            { title: '🕐 По дате обновления', value: 'newest', desc: 'Берётся самый свежий таймкод (рекомендуется)' }
+                            { title: '⏱ По времени просмотра', value: 'max_time' },
+                            { title: '📊 По проценту просмотра', value: 'max_percent' },
+                            { title: '🕐 По дате обновления', value: 'newest' }
                         ].map(opt => ({
                             title: opt.title,
-                            subtitle: opt.desc,
                             value: opt.value,
                             selected: c.sync_strategy === opt.value
                         })),
@@ -606,7 +564,7 @@
                 } else if (item.action === 'auto_sync') {
                     Lampa.Select.show({
                         title: 'Отправка во время просмотра',
-                        items: autoSyncOptions.map(opt => ({
+                        items: intervalOptions.map(opt => ({
                             title: opt.title,
                             value: opt.value,
                             selected: c.auto_sync_interval === opt.value
@@ -622,8 +580,8 @@
                     });
                 } else if (item.action === 'background_sync') {
                     Lampa.Select.show({
-                        title: 'Фоновая загрузка с Gist',
-                        items: backgroundSyncOptions.map(opt => ({
+                        title: 'Фоновая загрузка',
+                        items: intervalOptions.map(opt => ({
                             title: opt.title,
                             value: opt.value,
                             selected: c.background_sync_interval === opt.value
@@ -631,8 +589,7 @@
                         onSelect: (opt) => {
                             c.background_sync_interval = opt.value;
                             saveCfg(c);
-                            notify(`Фоновая загрузка: ${opt.title}`);
-                            startBackgroundSync();
+                            notify(`Загрузка: ${opt.title}`);
                             showGistSetup();
                         },
                         onBack: () => showGistSetup()
@@ -646,10 +603,6 @@
                 } else if (item.action === 'force') {
                     fullSync();
                     setTimeout(() => showGistSetup(), 2000);
-                } else if (item.action === 'refresh') {
-                    refreshUI();
-                    notify('🔄 UI обновлён');
-                    setTimeout(() => showGistSetup(), 1000);
                 }
             },
             onBack: () => {
@@ -681,9 +634,9 @@
     function init() {
         if (!cfg().enabled) return;
         
-        console.log(`[Sync] Инициализация. Стратегия: ${cfg().sync_strategy === 'newest' ? 'по дате' : cfg().sync_strategy === 'max_time' ? 'по времени' : 'по проценту'}`);
-        console.log(`[Sync] Отправка: ${cfg().auto_sync_interval > 0 ? cfg().auto_sync_interval + ' сек' : 'выключена'}`);
-        console.log(`[Sync] Загрузка: ${cfg().background_sync_interval > 0 ? cfg().background_sync_interval + ' сек' : 'выключена'}`);
+        console.log(`[Sync] Инициализация. Стратегия: ${cfg().sync_strategy}`);
+        console.log(`[Sync] Отправка: ${cfg().auto_sync_interval > 0 ? cfg().auto_sync_interval + ' сек' : 'выкл'}`);
+        console.log(`[Sync] Загрузка: ${cfg().background_sync_interval > 0 ? cfg().background_sync_interval + ' сек' : 'выкл'}`);
         
         const current = getFileView();
         const normalized = normalizeKeys(current);
