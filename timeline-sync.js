@@ -8,7 +8,6 @@
     let syncInProgress = false;
     let autoSyncTimer = null;
     let backgroundSyncTimer = null;
-    let isInit = false;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -128,8 +127,16 @@
             if (Lampa.Layer && Lampa.Layer.update) {
                 Lampa.Layer.update();
             }
+            // Принудительно перерисовываем карточки
+            $('.card').each(function() {
+                if (this.dispatchEvent) {
+                    this.dispatchEvent(new Event('visible'));
+                }
+            });
             console.log('[Sync] UI обновлён');
-        } catch(e) {}
+        } catch(e) {
+            console.error('[Sync] Ошибка UI:', e);
+        }
     }
 
     function mergeFileView(local, remote) {
@@ -359,56 +366,58 @@
         });
     }
 
-    // Фоновая загрузка
+    // === ОСНОВНЫЕ ФУНКЦИИ ТАЙМЕРОВ ===
+    
+    function backgroundSyncTask() {
+        if (!cfg().enabled) return;
+        if (syncInProgress) return;
+        console.log(`[Sync] 🔄 Фоновая загрузка (каждые ${cfg().background_sync_interval} сек)`);
+        syncFromGist(false);
+    }
+
+    function autoSyncTask() {
+        if (!cfg().enabled) return;
+        if (!Lampa.Player.opened()) return;
+        
+        const currentTime = getCurrentPlayTime();
+        if (currentTime === 0) return;
+        
+        const tmdbId = getCurrentMovieTmdbId();
+        if (!tmdbId) return;
+        
+        console.log(`[Sync] ⏰ Автоотправка: ${formatTime(currentTime)}`);
+        saveCurrentProgress(currentTime, tmdbId);
+        syncToGist(false);
+    }
+
     function startBackgroundSync() {
         if (backgroundSyncTimer) {
             clearInterval(backgroundSyncTimer);
             backgroundSyncTimer = null;
         }
-        
         const interval = cfg().background_sync_interval;
         if (interval > 0) {
-            backgroundSyncTimer = setInterval(() => {
-                if (!cfg().enabled) return;
-                if (syncInProgress) return;
-                syncFromGist(false);
-            }, interval * 1000);
+            backgroundSyncTimer = setInterval(backgroundSyncTask, interval * 1000);
             console.log(`[Sync] ✅ Фоновая загрузка запущена (${interval} сек)`);
-        } else {
-            console.log(`[Sync] ⚠️ Фоновая загрузка выключена`);
+            // Первый запуск сразу
+            setTimeout(backgroundSyncTask, 1000);
         }
     }
 
-    // Автоотправка
     function startAutoSync() {
         if (autoSyncTimer) {
             clearInterval(autoSyncTimer);
             autoSyncTimer = null;
         }
-        
         const interval = cfg().auto_sync_interval;
         if (interval > 0) {
-            autoSyncTimer = setInterval(() => {
-                if (!cfg().enabled) return;
-                if (!Lampa.Player.opened()) return;
-                
-                const currentTime = getCurrentPlayTime();
-                if (currentTime === 0) return;
-                
-                const tmdbId = getCurrentMovieTmdbId();
-                if (!tmdbId) return;
-                
-                console.log(`[Sync] ⏰ Автоотправка: ${formatTime(currentTime)}`);
-                saveCurrentProgress(currentTime, tmdbId);
-                syncToGist(false);
-            }, interval * 1000);
+            autoSyncTimer = setInterval(autoSyncTask, interval * 1000);
             console.log(`[Sync] ✅ Автоотправка запущена (${interval} сек)`);
         }
     }
 
-    // Запуск всех сервисов
-    function startAllServices() {
-        if (!cfg().enabled) return;
+    function startAllTimers() {
+        console.log('[Sync] Запуск всех таймеров...');
         startBackgroundSync();
         startAutoSync();
     }
@@ -430,11 +439,11 @@
     }
 
     function init() {
-        if (isInit) return;
         if (!cfg().enabled) return;
         
-        isInit = true;
-        console.log(`[Sync] Инициализация. Стратегия: ${cfg().sync_strategy}`);
+        console.log(`[Sync] === ИНИЦИАЛИЗАЦИЯ ===`);
+        console.log(`[Sync] Стратегия: ${cfg().sync_strategy}`);
+        console.log(`[Sync] Отправка: ${cfg().auto_sync_interval} сек, Загрузка: ${cfg().background_sync_interval} сек`);
         
         // Нормализация
         const current = getFileView();
@@ -444,8 +453,8 @@
             setFileView(normalized);
         }
         
-        // Запускаем все сервисы
-        startAllServices();
+        // Запускаем таймеры
+        startAllTimers();
         
         // Кнопка
         addHeadButton();
@@ -534,13 +543,13 @@
                         Lampa.Input.edit({ title: 'GitHub Token', value: c.gist_token, free: true }, (val) => {
                             if (val !== null) { c.gist_token = val || ''; saveCfg(c); notify('Токен сохранён'); }
                             Lampa.Controller.toggle('settings_component');
-                            startAllServices();
+                            startAllTimers();
                         });
                     } else if (item.action === 'id') {
                         Lampa.Input.edit({ title: 'Gist ID', value: c.gist_id, free: true }, (val) => {
                             if (val !== null) { c.gist_id = val || ''; saveCfg(c); notify('Gist ID сохранён'); }
                             Lampa.Controller.toggle('settings_component');
-                            startAllServices();
+                            startAllTimers();
                         });
                     } else if (item.action === 'device') {
                         Lampa.Input.edit({ title: 'Имя устройства', value: c.device_name, free: true }, (val) => {
@@ -600,7 +609,7 @@
         component: 'timeline_sync',
         param: { name: 'sync_enabled', type: 'toggle', default: true },
         field: { name: 'Включить синхронизацию' },
-        onChange: v => { const c = cfg(); c.enabled = v; saveCfg(c); if (v) startAllServices(); }
+        onChange: v => { const c = cfg(); c.enabled = v; saveCfg(c); if (v) startAllTimers(); }
     });
 
     if (window.appready) init();
