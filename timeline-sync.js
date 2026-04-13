@@ -53,19 +53,32 @@
         return String(Lampa.Utils.hash(movie.original_title || movie.title || movie.name));
     }
 
-    // Сохраняем текущий прогресс из плеера
+    // Объединение данных: берём максимальное время
+    function mergeData(local, remote) {
+        var result = {};
+        // Копируем локальные
+        for (var key in local) {
+            result[key] = local[key];
+        }
+        // Добавляем/обновляем из удалённых
+        for (var key in remote) {
+            var remoteTime = remote[key]?.time || 0;
+            var localTime = local[key]?.time || 0;
+            if (!local[key] || remoteTime > localTime) {
+                result[key] = remote[key];
+                console.log('[Sync] Обновлён:', key, remoteTime + ' сек');
+            }
+        }
+        return result;
+    }
+
+    // Сохраняем прогресс из плеера
     function saveCurrentProgressFromPlayer() {
         var activity = Lampa.Activity.active();
-        if (!activity || !activity.movie) {
-            console.log('[Sync] Нет активного фильма для сохранения');
-            return false;
-        }
+        if (!activity || !activity.movie) return false;
         
         var player = Lampa.Player.playdata();
-        if (!player || !player.timeline || !player.timeline.time) {
-            console.log('[Sync] Нет данных плеера для сохранения');
-            return false;
-        }
+        if (!player || !player.timeline || !player.timeline.time) return false;
         
         var movie = activity.movie;
         var currentTime = Math.floor(player.timeline.time);
@@ -83,18 +96,54 @@
             id: movie.id
         };
         setFileView(fileView);
-        
-        console.log('[Sync] Сохранён прогресс:', Math.floor(currentTime/60) + ' мин', 'для', movie.title);
+        console.log('[Sync] Сохранён прогресс:', Math.floor(currentTime/60) + ' мин');
         return true;
     }
 
-    // Просто отправляем текущее хранилище на Gist (без сохранения из плеера)
-    function syncToGist(showNotify, callback) {
-        if (syncInProgress) {
+    // Загрузить с Gist и объединить с локальными
+    function loadFromGist(callback) {
+        var c = cfg();
+        if (!c.gist_token || !c.gist_id) {
             if (callback) callback(false);
             return;
         }
         
+        $.ajax({
+            url: 'https://api.github.com/gists/' + c.gist_id,
+            headers: { 'Authorization': 'token ' + c.gist_token },
+            success: function(data) {
+                try {
+                    var content = data.files['timeline.json']?.content;
+                    if (content) {
+                        var remote = JSON.parse(content);
+                        var remoteData = remote.file_view || {};
+                        var localData = getFileView();
+                        var merged = mergeData(localData, remoteData);
+                        
+                        setFileView(merged);
+                        console.log('[Sync] Загружено с Gist:', Object.keys(remoteData).length, 'таймкодов');
+                        
+                        // Обновляем UI
+                        if (Lampa.Timeline && Lampa.Timeline.read) Lampa.Timeline.read(true);
+                        if (Lampa.Layer && Lampa.Layer.update) Lampa.Layer.update();
+                        
+                        if (callback) callback(true);
+                    } else {
+                        if (callback) callback(false);
+                    }
+                } catch(e) {
+                    console.error(e);
+                    if (callback) callback(false);
+                }
+            },
+            error: function() {
+                if (callback) callback(false);
+            }
+        });
+    }
+
+    // Отправить на Gist
+    function sendToGist(showNotify, callback) {
         var c = cfg();
         if (!c.gist_token || !c.gist_id) {
             if (showNotify) notify('⚠️ Gist не настроен');
@@ -111,14 +160,7 @@
         };
         
         var count = Object.keys(data.file_view).length;
-        if (count === 0 && showNotify) {
-            notify('⚠️ Нет таймкодов для отправки');
-            if (callback) callback(false);
-            return;
-        }
-        
         syncInProgress = true;
-        console.log('[Sync] 📤 Отправка', count, 'таймкодов...');
         
         $.ajax({
             url: 'https://api.github.com/gists/' + c.gist_id,
@@ -134,99 +176,50 @@
             }),
             success: function() {
                 if (showNotify) notify('✅ Отправлено ' + count + ' таймкодов');
-                console.log('[Sync] ✅ Отправлено успешно');
+                console.log('[Sync] Отправлено', count, 'таймкодов');
                 syncInProgress = false;
                 if (callback) callback(true);
             },
             error: function(xhr) {
-                console.error('[Sync] ❌ Ошибка отправки:', xhr.status);
                 if (showNotify) notify('❌ Ошибка: ' + xhr.status);
+                console.error('[Sync] Ошибка отправки:', xhr.status);
                 syncInProgress = false;
                 if (callback) callback(false);
             }
         });
     }
 
-    // Загружаем с Gist и обновляем UI
-    function syncFromGist(showNotify, callback) {
-        if (syncInProgress) {
-            if (callback) callback(false);
-            return;
-        }
-        
-        var c = cfg();
-        if (!c.gist_token || !c.gist_id) {
-            if (showNotify) notify('⚠️ Gist не настроен');
-            if (callback) callback(false);
-            return;
-        }
-        
-        syncInProgress = true;
-        console.log('[Sync] 📥 Загрузка с Gist...');
-        
-        $.ajax({
-            url: 'https://api.github.com/gists/' + c.gist_id,
-            method: 'GET',
-            headers: {
-                'Authorization': 'token ' + c.gist_token,
-                'Accept': 'application/vnd.github.v3+json'
-            },
-            success: function(data) {
-                try {
-                    var content = data.files['timeline.json']?.content;
-                    if (content) {
-                        var remote = JSON.parse(content);
-                        var count = Object.keys(remote.file_view || {}).length;
-                        console.log('[Sync] 📥 Загружено', count, 'таймкодов');
-                        
-                        setFileView(remote.file_view || {});
-                        
-                        // Обновляем Timeline
-                        if (Lampa.Timeline && Lampa.Timeline.read) {
-                            Lampa.Timeline.read(true);
-                        }
-                        
-                        // Обновляем Layer
-                        if (Lampa.Layer && Lampa.Layer.update) {
-                            Lampa.Layer.update();
-                        }
-                        
-                        if (showNotify) notify('📥 Загружено ' + count + ' таймкодов');
-                        if (callback) callback(true);
-                    } else {
-                        if (showNotify) notify('❌ Нет данных на Gist');
-                        if (callback) callback(false);
-                    }
-                } catch(e) { 
-                    console.error(e);
-                    if (callback) callback(false);
-                }
-            },
-            error: function(xhr) {
-                console.error('[Sync] ❌ Ошибка загрузки:', xhr.status);
-                if (showNotify) notify('❌ Ошибка: ' + xhr.status);
-                if (callback) callback(false);
-            },
-            complete: function() {
-                syncInProgress = false;
-            }
-        });
-    }
-
-    // Полная синхронизация - отправляем и загружаем
+    // Полная синхронизация: загрузить -> сохранить из плеера -> отправить
     function fullSync() {
+        if (syncInProgress) {
+            notify('⏳ Синхронизация уже выполняется');
+            return;
+        }
+        
         notify('🔄 Синхронизация...');
         
-        // Сначала сохраняем прогресс из плеера (если плеер активен)
-        if (Lampa.Player.opened()) {
-            saveCurrentProgressFromPlayer();
-        }
-        
-        // Отправляем на Gist
-        syncToGist(false, function() {
-            // Затем загружаем с Gist
+        // 1. Сначала загружаем с Gist
+        loadFromGist(function(success) {
+            if (success) console.log('[Sync] Шаг 1: Загрузка с Gist завершена');
+            else console.log('[Sync] Шаг 1: На Gist нет данных');
+            
+            // 2. Сохраняем прогресс из плеера (если открыт)
+            if (Lampa.Player.opened()) {
+                saveCurrentProgressFromPlayer();
+                console.log('[Sync] Шаг 2: Прогресс сохранён');
+            }
+            
+            // 3. Отправляем на Gist
             setTimeout(function() {
-                syncFromGist(true);
+                sendToGist(true, function() {
+                    console.log('[Sync] Шаг 3: Отправка завершена');
+                    // 4. Ещё раз загружаем для обновления UI
+                    setTimeout(function() {
+                        loadFromGist(function() {
+                            notify('✅ Синхронизация завершена');
+                        });
+                    }, 500);
+                });
             }, 500);
         });
     }
@@ -240,36 +233,27 @@
         syncButton.on('click', fullSync);
         
         var headActions = $('.head__actions');
-        if (headActions.length) {
-            headActions.prepend(syncButton);
-        } else {
-            $('.head__body').append(syncButton);
-        }
-    }
-
-    // Сохранение прогресса при паузе/остановке
-    function initPlayerHandler() {
-        Lampa.Listener.follow('player', function(e) {
-            if (e.type === 'pause' || e.type === 'stop') {
-                console.log('[Sync]', e.type === 'stop' ? 'Остановка' : 'Пауза');
-                if (Lampa.Player.opened()) {
-                    saveCurrentProgressFromPlayer();
-                    syncToGist(false);
-                }
-            }
-        });
+        if (headActions.length) headActions.prepend(syncButton);
+        else $('.head__body').append(syncButton);
     }
 
     function init() {
         if (!cfg().enabled) return;
         console.log('[Sync] Инициализация');
         addHeadButton();
-        initPlayerHandler();
         
-        // Загружаем таймкоды при старте
-        setTimeout(function() {
-            syncFromGist(false);
-        }, 3000);
+        // При паузе/остановке сохраняем
+        Lampa.Listener.follow('player', function(e) {
+            if (e.type === 'pause' || e.type === 'stop') {
+                if (Lampa.Player.opened()) {
+                    saveCurrentProgressFromPlayer();
+                    // Не отправляем сразу, чтобы не конфликтовать
+                }
+            }
+        });
+        
+        // Загружаем при старте
+        setTimeout(function() { loadFromGist(); }, 3000);
     }
 
     // Настройки
@@ -293,7 +277,7 @@
                     { title: '📱 Устройство: ' + c.device_name, action: 'device' },
                     { title: '👤 Профиль: ' + (c.manual_profile_id || 'авто'), action: 'profile' },
                     { title: '──────────', separator: true },
-                    { title: '🔄 Полная синхронизация', action: 'force' },
+                    { title: '🔄 Синхронизировать', action: 'force' },
                     { title: '❌ Отмена', action: 'cancel' }
                 ],
                 onSelect: function(item) {
