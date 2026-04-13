@@ -11,16 +11,19 @@
     let currentMovieId = null;
     let lastSavedTime = 0;
     let currentMovieTime = 0;
-    let playerOpenTime = 0;
+    let autoSyncInterval = null;
+    let autoSaveInterval = null;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
             enabled: true,
+            auto_sync: true,
+            auto_save: true,
+            sync_on_stop: true,
             gist_token: '',
             gist_id: '',
             device_name: Lampa.Platform.get() || 'Unknown',
             manual_profile_id: '',
-            sync_on_stop: true,
             sync_interval: 30
         }) || {};
     }
@@ -151,8 +154,10 @@
         }
     }
 
-    // Сохраняем прогресс в Timeline API
     function saveCurrentProgress(timeInSeconds, force = false) {
+        const c = cfg();
+        if (!c.auto_save && !force) return false;
+        
         const tmdbId = getCurrentMovieTmdbId();
         if (!tmdbId) return false;
         
@@ -160,7 +165,6 @@
         const currentTime = Math.floor(timeInSeconds);
         const savedTime = fileView[tmdbId]?.time || 0;
         
-        // Сохраняем если разница больше 10 секунд или принудительно
         if (force || Math.abs(currentTime - savedTime) >= 10) {
             const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
@@ -175,7 +179,6 @@
             console.log(`[Sync] 💾 Сохранён прогресс: ${formatTime(currentTime)} (${percent}%) для ${tmdbId}`);
             lastSavedTime = currentTime;
             
-            // Обновляем через Timeline API Lampa
             if (Lampa.Timeline && Lampa.Timeline.update) {
                 Lampa.Timeline.update({
                     hash: tmdbId,
@@ -191,13 +194,19 @@
     }
 
     function syncToGist(showNotify = true, callback = null) {
+        const c = cfg();
+        if (!c.auto_sync) {
+            if (showNotify) notify('⚠️ Автосинхронизация выключена');
+            if (callback) callback(false);
+            return;
+        }
+        
         if (syncInProgress) {
             pendingSync = true;
             if (callback) callback(false);
             return;
         }
         
-        const c = cfg();
         if (!c.gist_token || !c.gist_id) {
             if (showNotify) notify('⚠️ Gist не настроен');
             if (callback) callback(false);
@@ -249,12 +258,18 @@
     }
 
     function syncFromGist(showNotify = true, callback = null) {
+        const c = cfg();
+        if (!c.auto_sync) {
+            if (showNotify) notify('⚠️ Автосинхронизация выключена');
+            if (callback) callback(false);
+            return;
+        }
+        
         if (syncInProgress) {
             if (callback) callback(false);
             return;
         }
         
-        const c = cfg();
         if (!c.gist_token || !c.gist_id) {
             if (showNotify) notify('⚠️ Gist не настроен');
             if (callback) callback(false);
@@ -286,7 +301,6 @@
                             setFileView(merged);
                             console.log(`[Sync] Итог: ${Object.keys(merged).length} таймкодов`);
                             
-                            // Обновляем данные в Timeline API
                             if (Lampa.Timeline && Lampa.Timeline.read) {
                                 Lampa.Timeline.read(true);
                             }
@@ -317,7 +331,6 @@
         });
     }
 
-    // Функция для применения сохранённого таймкода
     function applySavedTimecode(tmdbId, savedTime, percent) {
         try {
             const player = Lampa.Player.core();
@@ -335,7 +348,6 @@
                     console.log(`[Sync] 🎯 Применён таймкод через playdata: ${formatTime(savedTime)}`);
                     notify(`🎯 Таймкод: ${formatTime(savedTime)}`);
                     
-                    // Дополнительная попытка через seek
                     if (Lampa.Player.core() && Lampa.Player.core().seek) {
                         Lampa.Player.core().seek(savedTime);
                     }
@@ -348,7 +360,6 @@
         return false;
     }
 
-    // Функция ожидания готовности плеера
     function waitForPlayer(tmdbId, savedTime, percent, maxAttempts = 10) {
         let attempts = 0;
         
@@ -369,18 +380,14 @@
 
     function initPlayerHandler() {
         let lastSavedProgress = 0;
-        let saveInterval = null;
         
-        // Слушаем события плеера
         Lampa.Listener.follow('player', (e) => {
-            // Открытие фильма
             if (e.type === 'open' && e.movie) {
                 currentMovieId = extractTmdbIdFromItem(e.movie);
                 currentMovieTime = 0;
-                playerOpenTime = Date.now();
+                lastSavedProgress = 0;
                 console.log(`[Sync] 🎬 Открыт фильм: ${currentMovieId}`);
                 
-                // Загружаем таймкод
                 setTimeout(() => {
                     syncFromGist(false, (success) => {
                         if (success && currentMovieId) {
@@ -399,41 +406,35 @@
                 }, 1500);
             }
             
-            // Обновление времени
             if (e.type === 'timeupdate' && e.time) {
                 currentMovieTime = e.time;
                 
-                // Автоматическое сохранение каждые 10 секунд
-                if (Math.floor(currentMovieTime) - lastSavedProgress >= 10) {
+                if (cfg().auto_save && Math.floor(currentMovieTime) - lastSavedProgress >= 10) {
                     if (saveCurrentProgress(currentMovieTime)) {
                         lastSavedProgress = Math.floor(currentMovieTime);
                         
-                        // Автоматическая отправка на сервер каждые 30 секунд
-                        const now = Date.now();
-                        if (cfg().enabled && now - lastSyncTime > 30000) {
+                        if (cfg().auto_sync && Date.now() - lastSyncTime > (cfg().sync_interval * 1000)) {
                             syncToGist(false);
                         }
                     }
                 }
             }
             
-            // Пауза - сохраняем прогресс
             if (e.type === 'pause') {
                 console.log(`[Sync] ⏸️ Пауза на ${formatTime(currentMovieTime)}`);
                 if (currentMovieTime > 0) {
                     saveCurrentProgress(currentMovieTime, true);
-                    if (cfg().sync_on_stop) {
+                    if (cfg().sync_on_stop && cfg().auto_sync) {
                         syncToGist(false);
                     }
                 }
             }
             
-            // Стоп - финальное сохранение
             if (e.type === 'stop') {
                 console.log(`[Sync] ⏹️ Остановлен на ${formatTime(currentMovieTime)}`);
                 if (currentMovieTime > 0) {
                     saveCurrentProgress(currentMovieTime, true);
-                    if (cfg().sync_on_stop) {
+                    if (cfg().sync_on_stop && cfg().auto_sync) {
                         syncToGist(false);
                     }
                 }
@@ -442,32 +443,14 @@
                 lastSavedProgress = 0;
             }
         });
-        
-        // Дополнительный интервал для автоматического сохранения и синхронизации
-        setInterval(() => {
-            if (Lampa.Player.opened() && currentMovieTime > 0) {
-                // Сохраняем прогресс каждые 10 секунд
-                if (Math.floor(currentMovieTime) - lastSavedProgress >= 10) {
-                    if (saveCurrentProgress(currentMovieTime)) {
-                        lastSavedProgress = Math.floor(currentMovieTime);
-                    }
-                }
-                
-                // Автосинхронизация с сервером
-                if (cfg().enabled && Date.now() - lastSyncTime > (cfg().sync_interval * 1000 || 30000)) {
-                    if (!syncInProgress && currentMovieId) {
-                        console.log(`[Sync] 🔄 Автосинхронизация (интервал)`);
-                        syncToGist(false);
-                    }
-                }
-            }
-        }, 5000);
     }
 
     function startBackgroundSync() {
-        // Фоновая синхронизация каждые 60 секунд
-        setInterval(() => {
-            if (!syncInProgress && cfg().enabled && !Lampa.Player.opened()) {
+        if (autoSyncInterval) clearInterval(autoSyncInterval);
+        
+        autoSyncInterval = setInterval(() => {
+            const c = cfg();
+            if (!syncInProgress && c.auto_sync && !Lampa.Player.opened()) {
                 console.log(`[Sync] 🔄 Фоновая синхронизация`);
                 syncFromGist(false);
                 syncToGist(false);
@@ -475,66 +458,126 @@
         }, 60000);
     }
 
-    function showGistSetup() {
+    function showMainMenu() {
         const c = cfg();
         Lampa.Select.show({
             title: 'Синхронизация таймкодов',
             items: [
-                { title: `🔑 Токен: ${c.gist_token ? '✓' : '❌'}`, action: 'token' },
-                { title: `📄 Gist ID: ${c.gist_id ? c.gist_id.substring(0,8)+'…' : '❌'}`, action: 'id' },
-                { title: `📱 Устройство: ${c.device_name}`, action: 'device' },
-                { title: `👤 Профиль: ${c.manual_profile_id || 'авто'}`, action: 'profile' },
-                { title: `⏱️ Интервал: ${c.sync_interval || 30} сек`, action: 'interval' },
+                { title: `${c.enabled ? '✅' : '❌'} Плагин: ${c.enabled ? 'Включён' : 'Выключен'}`, action: 'toggle_enabled' },
+                { title: `${c.auto_sync ? '✅' : '❌'} Автосинхронизация: ${c.auto_sync ? 'Вкл' : 'Выкл'}`, action: 'toggle_auto_sync' },
+                { title: `${c.auto_save ? '✅' : '❌'} Автосохранение: ${c.auto_save ? 'Вкл' : 'Выкл'}`, action: 'toggle_auto_save' },
+                { title: `${c.sync_on_stop ? '✅' : '❌'} Синхр. при остановке: ${c.sync_on_stop ? 'Вкл' : 'Выкл'}`, action: 'toggle_sync_stop' },
+                { title: '──────────', separator: true },
+                { title: `⏱️ Интервал синхр.: ${c.sync_interval || 30} сек`, action: 'set_interval' },
+                { title: `📱 Устройство: ${c.device_name}`, action: 'set_device' },
+                { title: `👤 Профиль: ${c.manual_profile_id || 'авто'}`, action: 'set_profile' },
+                { title: '──────────', separator: true },
+                { title: `🔑 Gist токен: ${c.gist_token ? '✓ установлен' : '❌ не установлен'}`, action: 'set_token' },
+                { title: `📄 Gist ID: ${c.gist_id ? c.gist_id.substring(0,8)+'…' : '❌ не установлен'}`, action: 'set_gist_id' },
                 { title: '──────────', separator: true },
                 { title: '🔄 Отправить таймкоды', action: 'upload' },
                 { title: '📥 Загрузить таймкоды', action: 'download' },
                 { title: '🔄 Полная синхронизация', action: 'force' },
                 { title: '──────────', separator: true },
-                { title: '❌ Отмена', action: 'cancel' }
+                { title: '❌ Закрыть', action: 'cancel' }
             ],
-            onSelect: async (item) => {
-                if (item.action === 'token') {
-                    Lampa.Input.edit({ title: 'GitHub Token', value: c.gist_token, free: true }, (val) => {
-                        if (val !== null) { c.gist_token = val || ''; saveCfg(c); notify('Токен сохранён'); }
-                        showGistSetup();
-                    });
-                } else if (item.action === 'id') {
-                    Lampa.Input.edit({ title: 'Gist ID', value: c.gist_id, free: true }, (val) => {
-                        if (val !== null) { c.gist_id = val || ''; saveCfg(c); notify('Gist ID сохранён'); }
-                        showGistSetup();
-                    });
-                } else if (item.action === 'device') {
-                    Lampa.Input.edit({ title: 'Имя устройства', value: c.device_name, free: true }, (val) => {
-                        if (val !== null && val.trim()) { c.device_name = val.trim(); saveCfg(c); notify('Имя сохранено'); }
-                        showGistSetup();
-                    });
-                } else if (item.action === 'profile') {
-                    Lampa.Input.edit({ title: 'ID профиля (пусто = авто)', value: c.manual_profile_id, free: true }, (val) => {
-                        if (val !== null) { c.manual_profile_id = val || ''; saveCfg(c); notify('Профиль сохранён'); }
-                        showGistSetup();
-                    });
-                } else if (item.action === 'interval') {
+            onSelect: (item) => {
+                const c = cfg();
+                
+                if (item.action === 'toggle_enabled') {
+                    c.enabled = !c.enabled;
+                    saveCfg(c);
+                    notify(`Плагин ${c.enabled ? 'включён' : 'выключен'}`);
+                    if (!c.enabled) {
+                        if (autoSyncInterval) clearInterval(autoSyncInterval);
+                    } else {
+                        startBackgroundSync();
+                    }
+                    showMainMenu();
+                }
+                else if (item.action === 'toggle_auto_sync') {
+                    c.auto_sync = !c.auto_sync;
+                    saveCfg(c);
+                    notify(`Автосинхронизация ${c.auto_sync ? 'включена' : 'выключена'}`);
+                    showMainMenu();
+                }
+                else if (item.action === 'toggle_auto_save') {
+                    c.auto_save = !c.auto_save;
+                    saveCfg(c);
+                    notify(`Автосохранение ${c.auto_save ? 'включено' : 'выключено'}`);
+                    showMainMenu();
+                }
+                else if (item.action === 'toggle_sync_stop') {
+                    c.sync_on_stop = !c.sync_on_stop;
+                    saveCfg(c);
+                    notify(`Синхронизация при остановке ${c.sync_on_stop ? 'включена' : 'выключена'}`);
+                    showMainMenu();
+                }
+                else if (item.action === 'set_interval') {
                     Lampa.Input.edit({ title: 'Интервал синхронизации (сек)', value: String(c.sync_interval || 30), free: true, number: true }, (val) => {
-                        if (val !== null && !isNaN(val) && val > 0) { 
-                            c.sync_interval = parseInt(val); 
-                            saveCfg(c); 
-                            notify(`Интервал: ${c.sync_interval} сек`); 
+                        if (val !== null && !isNaN(val) && val > 0) {
+                            c.sync_interval = parseInt(val);
+                            saveCfg(c);
+                            notify(`Интервал: ${c.sync_interval} сек`);
                         }
-                        showGistSetup();
+                        showMainMenu();
                     });
-                } else if (item.action === 'upload') {
+                }
+                else if (item.action === 'set_device') {
+                    Lampa.Input.edit({ title: 'Имя устройства', value: c.device_name, free: true }, (val) => {
+                        if (val !== null && val.trim()) {
+                            c.device_name = val.trim();
+                            saveCfg(c);
+                            notify('Имя сохранено');
+                        }
+                        showMainMenu();
+                    });
+                }
+                else if (item.action === 'set_profile') {
+                    Lampa.Input.edit({ title: 'ID профиля (пусто = авто)', value: c.manual_profile_id, free: true }, (val) => {
+                        if (val !== null) {
+                            c.manual_profile_id = val || '';
+                            saveCfg(c);
+                            notify('Профиль сохранён');
+                        }
+                        showMainMenu();
+                    });
+                }
+                else if (item.action === 'set_token') {
+                    Lampa.Input.edit({ title: 'GitHub Token', value: c.gist_token, free: true }, (val) => {
+                        if (val !== null) {
+                            c.gist_token = val || '';
+                            saveCfg(c);
+                            notify('Токен сохранён');
+                        }
+                        showMainMenu();
+                    });
+                }
+                else if (item.action === 'set_gist_id') {
+                    Lampa.Input.edit({ title: 'Gist ID', value: c.gist_id, free: true }, (val) => {
+                        if (val !== null) {
+                            c.gist_id = val || '';
+                            saveCfg(c);
+                            notify('Gist ID сохранён');
+                        }
+                        showMainMenu();
+                    });
+                }
+                else if (item.action === 'upload') {
                     syncToGist(true);
-                    setTimeout(() => showGistSetup(), 1000);
-                } else if (item.action === 'download') {
+                    setTimeout(() => showMainMenu(), 1000);
+                }
+                else if (item.action === 'download') {
                     syncFromGist(true);
-                    setTimeout(() => showGistSetup(), 1000);
-                } else if (item.action === 'force') {
+                    setTimeout(() => showMainMenu(), 1000);
+                }
+                else if (item.action === 'force') {
                     notify('🔄 Полная синхронизация...');
                     syncToGist(true);
                     setTimeout(() => {
                         syncFromGist(true);
                     }, 1000);
-                    setTimeout(() => showGistSetup(), 2000);
+                    setTimeout(() => showMainMenu(), 2000);
                 }
             },
             onBack: () => {
@@ -543,36 +586,30 @@
         });
     }
 
-    function addSettings() {
-        Lampa.SettingsApi.addComponent({
-            component: 'timeline_sync',
-            name: 'Синхронизация таймкодов',
-            icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/></svg>'
+    function addSettingsButton() {
+        // Добавляем кнопку в главное меню Lampa
+        Lampa.Menu.add({
+            title: 'Синхр. таймкодов',
+            icon: '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z M12 4c4.4 0 8 3.6 8 8s-3.6 8-8 8-8-3.6-8-8 3.6-8 8-8z M11 7v5l4 2.5 1-1.5-3-2V7z"/></svg>',
+            onSelect: () => showMainMenu()
         });
+        
+        // Также добавляем в раздел настроек
         Lampa.SettingsApi.addParam({
-            component: 'timeline_sync',
-            param: { name: 'gist_setup', type: 'button' },
-            field: { name: '⚙️ Настройки Gist' },
-            onChange: () => showGistSetup()
-        });
-        Lampa.SettingsApi.addParam({
-            component: 'timeline_sync',
-            param: { name: 'sync_enabled', type: 'toggle', default: true },
-            field: { name: 'Включить синхронизацию' },
-            onChange: v => { const c = cfg(); c.enabled = v; saveCfg(c); }
-        });
-        Lampa.SettingsApi.addParam({
-            component: 'timeline_sync',
-            param: { name: 'sync_on_stop', type: 'toggle', default: true },
-            field: { name: 'Синхронизировать при остановке' },
-            onChange: v => { const c = cfg(); c.sync_on_stop = v; saveCfg(c); }
+            component: 'user',
+            param: { name: 'timeline_sync_menu', type: 'button' },
+            field: { name: '🎬 Синхронизация таймкодов' },
+            onChange: () => showMainMenu()
         });
     }
 
     function init() {
-        if (!cfg().enabled) return;
+        const c = cfg();
+        if (!c.enabled) return;
         
         console.log(`[Sync] Инициализация. Профиль: ${getCurrentProfileId() || 'глобальный'}`);
+        console.log(`[Sync] Автосинхронизация: ${c.auto_sync ? 'Вкл' : 'Выкл'}`);
+        console.log(`[Sync] Автосохранение: ${c.auto_save ? 'Вкл' : 'Выкл'}`);
         
         const current = getFileView();
         const normalized = normalizeKeys(current);
@@ -582,12 +619,11 @@
         }
         
         initPlayerHandler();
-        addSettings();
+        addSettingsButton();
         startBackgroundSync();
         
-        // Первая синхронизация через 3 секунды
         setTimeout(() => {
-            if (cfg().enabled) {
+            if (cfg().enabled && cfg().auto_sync) {
                 syncFromGist(false);
             }
         }, 3000);
