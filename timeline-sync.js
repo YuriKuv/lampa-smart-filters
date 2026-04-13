@@ -5,6 +5,7 @@
     window.tl_sync_init = true;
 
     const CFG_KEY = 'timeline_sync_cfg';
+    let syncInProgress = false;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -22,13 +23,6 @@
 
     function notify(text) {
         Lampa.Noty.show(text);
-    }
-
-    function formatTimeShort(seconds) {
-        if (!seconds || seconds < 0) return '0 мин';
-        var minutes = Math.floor(seconds / 60);
-        if (minutes < 1) return '< 1 мин';
-        return minutes + ' мин';
     }
 
     function getCurrentProfileId() {
@@ -56,33 +50,24 @@
     }
 
     function getCorrectHash(movie) {
-        // Используем тот же метод, что и Lampa для генерации хеша
         return String(Lampa.Utils.hash(movie.original_title || movie.title || movie.name));
     }
 
-    function getCurrentMovie() {
-        try {
-            var activity = Lampa.Activity.active();
-            if (activity && activity.movie) {
-                return activity.movie;
-            }
-        } catch(e) {}
-        return null;
-    }
-
-    function saveCurrentProgress() {
-        var movie = getCurrentMovie();
-        if (!movie) {
-            notify('❌ Нет активного фильма');
+    // Сохраняем текущий прогресс из плеера
+    function saveCurrentProgressFromPlayer() {
+        var activity = Lampa.Activity.active();
+        if (!activity || !activity.movie) {
+            console.log('[Sync] Нет активного фильма для сохранения');
             return false;
         }
         
         var player = Lampa.Player.playdata();
         if (!player || !player.timeline || !player.timeline.time) {
-            notify('❌ Нет данных о времени просмотра');
+            console.log('[Sync] Нет данных плеера для сохранения');
             return false;
         }
         
+        var movie = activity.movie;
         var currentTime = Math.floor(player.timeline.time);
         var duration = player.timeline.duration || 0;
         var percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
@@ -99,12 +84,13 @@
         };
         setFileView(fileView);
         
-        console.log('💾 Сохранён прогресс:', formatTimeShort(currentTime), '(', percent, '%) для', movie.title);
+        console.log('[Sync] Сохранён прогресс:', Math.floor(currentTime/60) + ' мин', 'для', movie.title);
         return true;
     }
 
+    // Просто отправляем текущее хранилище на Gist (без сохранения из плеера)
     function syncToGist(showNotify, callback) {
-        if (window.syncInProgress) {
+        if (syncInProgress) {
             if (callback) callback(false);
             return;
         }
@@ -124,8 +110,15 @@
             file_view: getFileView()
         };
         
-        window.syncInProgress = true;
-        console.log('📤 Отправка таймкодов...');
+        var count = Object.keys(data.file_view).length;
+        if (count === 0 && showNotify) {
+            notify('⚠️ Нет таймкодов для отправки');
+            if (callback) callback(false);
+            return;
+        }
+        
+        syncInProgress = true;
+        console.log('[Sync] 📤 Отправка', count, 'таймкодов...');
         
         $.ajax({
             url: 'https://api.github.com/gists/' + c.gist_id,
@@ -140,22 +133,23 @@
                 files: { 'timeline.json': { content: JSON.stringify(data, null, 2) } }
             }),
             success: function() {
-                if (showNotify) notify('✅ Таймкоды отправлены');
-                console.log('✅ Отправлено успешно');
-                window.syncInProgress = false;
+                if (showNotify) notify('✅ Отправлено ' + count + ' таймкодов');
+                console.log('[Sync] ✅ Отправлено успешно');
+                syncInProgress = false;
                 if (callback) callback(true);
             },
             error: function(xhr) {
-                console.error('❌ Ошибка отправки:', xhr.status);
+                console.error('[Sync] ❌ Ошибка отправки:', xhr.status);
                 if (showNotify) notify('❌ Ошибка: ' + xhr.status);
-                window.syncInProgress = false;
+                syncInProgress = false;
                 if (callback) callback(false);
             }
         });
     }
 
+    // Загружаем с Gist и обновляем UI
     function syncFromGist(showNotify, callback) {
-        if (window.syncInProgress) {
+        if (syncInProgress) {
             if (callback) callback(false);
             return;
         }
@@ -167,8 +161,8 @@
             return;
         }
         
-        window.syncInProgress = true;
-        console.log('📥 Загрузка с Gist...');
+        syncInProgress = true;
+        console.log('[Sync] 📥 Загрузка с Gist...');
         
         $.ajax({
             url: 'https://api.github.com/gists/' + c.gist_id,
@@ -183,40 +177,54 @@
                     if (content) {
                         var remote = JSON.parse(content);
                         var count = Object.keys(remote.file_view || {}).length;
-                        console.log('📥 Загружено', count, 'таймкодов');
+                        console.log('[Sync] 📥 Загружено', count, 'таймкодов');
                         
                         setFileView(remote.file_view || {});
                         
+                        // Обновляем Timeline
                         if (Lampa.Timeline && Lampa.Timeline.read) {
                             Lampa.Timeline.read(true);
+                        }
+                        
+                        // Обновляем Layer
+                        if (Lampa.Layer && Lampa.Layer.update) {
+                            Lampa.Layer.update();
                         }
                         
                         if (showNotify) notify('📥 Загружено ' + count + ' таймкодов');
                         if (callback) callback(true);
                     } else {
-                        if (showNotify) notify('❌ Нет данных');
+                        if (showNotify) notify('❌ Нет данных на Gist');
                         if (callback) callback(false);
                     }
-                } catch(e) {
+                } catch(e) { 
                     console.error(e);
                     if (callback) callback(false);
                 }
             },
             error: function(xhr) {
-                console.error('❌ Ошибка загрузки:', xhr.status);
+                console.error('[Sync] ❌ Ошибка загрузки:', xhr.status);
                 if (showNotify) notify('❌ Ошибка: ' + xhr.status);
                 if (callback) callback(false);
             },
             complete: function() {
-                window.syncInProgress = false;
+                syncInProgress = false;
             }
         });
     }
 
+    // Полная синхронизация - отправляем и загружаем
     function fullSync() {
         notify('🔄 Синхронизация...');
-        saveCurrentProgress();
-        syncToGist(true, function() {
+        
+        // Сначала сохраняем прогресс из плеера (если плеер активен)
+        if (Lampa.Player.opened()) {
+            saveCurrentProgressFromPlayer();
+        }
+        
+        // Отправляем на Gist
+        syncToGist(false, function() {
+            // Затем загружаем с Gist
             setTimeout(function() {
                 syncFromGist(true);
             }, 500);
@@ -239,19 +247,24 @@
         }
     }
 
+    // Сохранение прогресса при паузе/остановке
+    function initPlayerHandler() {
+        Lampa.Listener.follow('player', function(e) {
+            if (e.type === 'pause' || e.type === 'stop') {
+                console.log('[Sync]', e.type === 'stop' ? 'Остановка' : 'Пауза');
+                if (Lampa.Player.opened()) {
+                    saveCurrentProgressFromPlayer();
+                    syncToGist(false);
+                }
+            }
+        });
+    }
+
     function init() {
         if (!cfg().enabled) return;
         console.log('[Sync] Инициализация');
         addHeadButton();
-        
-        // Сохранение прогресса при паузе/остановке
-        Lampa.Listener.follow('player', function(e) {
-            if (e.type === 'pause' || e.type === 'stop') {
-                console.log('[Sync]', e.type === 'stop' ? 'Остановка' : 'Пауза', '- сохраняем');
-                saveCurrentProgress();
-                syncToGist(false);
-            }
-        });
+        initPlayerHandler();
         
         // Загружаем таймкоды при старте
         setTimeout(function() {
