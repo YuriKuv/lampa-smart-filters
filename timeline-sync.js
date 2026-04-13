@@ -12,7 +12,6 @@
     let lastSavedTime = 0;
     let currentMovieTime = 0;
     let autoSyncInterval = null;
-    let autoSaveInterval = null;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -195,8 +194,7 @@
 
     function syncToGist(showNotify = true, callback = null) {
         const c = cfg();
-        if (!c.auto_sync) {
-            if (showNotify) notify('⚠️ Автосинхронизация выключена');
+        if (!c.auto_sync && !showNotify) {
             if (callback) callback(false);
             return;
         }
@@ -259,8 +257,7 @@
 
     function syncFromGist(showNotify = true, callback = null) {
         const c = cfg();
-        if (!c.auto_sync) {
-            if (showNotify) notify('⚠️ Автосинхронизация выключена');
+        if (!c.auto_sync && !showNotify) {
             if (callback) callback(false);
             return;
         }
@@ -409,11 +406,12 @@
             if (e.type === 'timeupdate' && e.time) {
                 currentMovieTime = e.time;
                 
-                if (cfg().auto_save && Math.floor(currentMovieTime) - lastSavedProgress >= 10) {
+                const c = cfg();
+                if (c.auto_save && Math.floor(currentMovieTime) - lastSavedProgress >= 10) {
                     if (saveCurrentProgress(currentMovieTime)) {
                         lastSavedProgress = Math.floor(currentMovieTime);
                         
-                        if (cfg().auto_sync && Date.now() - lastSyncTime > (cfg().sync_interval * 1000)) {
+                        if (c.auto_sync && Date.now() - lastSyncTime > (c.sync_interval * 1000)) {
                             syncToGist(false);
                         }
                     }
@@ -424,7 +422,7 @@
                 console.log(`[Sync] ⏸️ Пауза на ${formatTime(currentMovieTime)}`);
                 if (currentMovieTime > 0) {
                     saveCurrentProgress(currentMovieTime, true);
-                    if (cfg().sync_on_stop && cfg().auto_sync) {
+                    if (cfg().sync_on_stop) {
                         syncToGist(false);
                     }
                 }
@@ -434,7 +432,7 @@
                 console.log(`[Sync] ⏹️ Остановлен на ${formatTime(currentMovieTime)}`);
                 if (currentMovieTime > 0) {
                     saveCurrentProgress(currentMovieTime, true);
-                    if (cfg().sync_on_stop && cfg().auto_sync) {
+                    if (cfg().sync_on_stop) {
                         syncToGist(false);
                     }
                 }
@@ -450,7 +448,7 @@
         
         autoSyncInterval = setInterval(() => {
             const c = cfg();
-            if (!syncInProgress && c.auto_sync && !Lampa.Player.opened()) {
+            if (!syncInProgress && c.auto_sync && c.enabled && !Lampa.Player.opened()) {
                 console.log(`[Sync] 🔄 Фоновая синхронизация`);
                 syncFromGist(false);
                 syncToGist(false);
@@ -573,9 +571,13 @@
                 }
                 else if (item.action === 'force') {
                     notify('🔄 Полная синхронизация...');
+                    const oldAutoSync = c.auto_sync;
+                    c.auto_sync = true;
                     syncToGist(true);
                     setTimeout(() => {
                         syncFromGist(true);
+                        c.auto_sync = oldAutoSync;
+                        saveCfg(c);
                     }, 1000);
                     setTimeout(() => showMainMenu(), 2000);
                 }
@@ -587,29 +589,42 @@
     }
 
     function addSettingsButton() {
-        // Добавляем кнопку в главное меню Lampa
-        Lampa.Menu.add({
-            title: 'Синхр. таймкодов',
-            icon: '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z M12 4c4.4 0 8 3.6 8 8s-3.6 8-8 8-8-3.6-8-8 3.6-8 8-8z M11 7v5l4 2.5 1-1.5-3-2V7z"/></svg>',
-            onSelect: () => showMainMenu()
-        });
+        // Добавляем пункт в меню настроек Lampa
+        if (Lampa.Settings && Lampa.SettingsApi) {
+            Lampa.SettingsApi.addParam({
+                component: 'user',
+                param: { name: 'timeline_sync_menu', type: 'button' },
+                field: { name: '🎬 Синхронизация таймкодов' },
+                onChange: () => showMainMenu()
+            });
+        }
         
-        // Также добавляем в раздел настроек
-        Lampa.SettingsApi.addParam({
-            component: 'user',
-            param: { name: 'timeline_sync_menu', type: 'button' },
-            field: { name: '🎬 Синхронизация таймкодов' },
-            onChange: () => showMainMenu()
-        });
+        // Добавляем кнопку в главное меню (если есть такая возможность)
+        if (Lampa.Menu && Lampa.Menu.add) {
+            try {
+                Lampa.Menu.add({
+                    title: 'Синхр. таймкодов',
+                    icon: '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z M12 4c4.4 0 8 3.6 8 8s-3.6 8-8 8-8-3.6-8-8 3.6-8 8-8z M11 7v5l4 2.5 1-1.5-3-2V7z"/></svg>',
+                    onSelect: () => showMainMenu()
+                });
+            } catch(e) {
+                console.log('[Sync] Не удалось добавить кнопку в меню');
+            }
+        }
     }
 
     function init() {
         const c = cfg();
-        if (!c.enabled) return;
         
         console.log(`[Sync] Инициализация. Профиль: ${getCurrentProfileId() || 'глобальный'}`);
+        console.log(`[Sync] Плагин: ${c.enabled ? 'Вкл' : 'Выкл'}`);
         console.log(`[Sync] Автосинхронизация: ${c.auto_sync ? 'Вкл' : 'Выкл'}`);
         console.log(`[Sync] Автосохранение: ${c.auto_save ? 'Вкл' : 'Выкл'}`);
+        
+        if (!c.enabled) {
+            console.log('[Sync] Плагин выключен в настройках');
+            return;
+        }
         
         const current = getFileView();
         const normalized = normalizeKeys(current);
@@ -623,12 +638,42 @@
         startBackgroundSync();
         
         setTimeout(() => {
-            if (cfg().enabled && cfg().auto_sync) {
+            const c2 = cfg();
+            if (c2.enabled && c2.auto_sync) {
                 syncFromGist(false);
             }
         }, 3000);
+        
+        notify('✅ Синхронизация таймкодов загружена');
     }
 
-    if (window.appready) init();
-    else Lampa.Listener.follow('app', e => e.type === 'ready' && init());
+    // Запускаем после полной загрузки Lampa
+    if (window.Lampa && Lampa.Listener) {
+        if (window.appready) {
+            init();
+        } else {
+            Lampa.Listener.follow('app', function(e) {
+                if (e.type === 'ready') {
+                    init();
+                }
+            });
+        }
+    } else {
+        // Ждём загрузки Lampa
+        setTimeout(function waitLampa() {
+            if (window.Lampa && Lampa.Listener) {
+                if (window.appready) {
+                    init();
+                } else {
+                    Lampa.Listener.follow('app', function(e) {
+                        if (e.type === 'ready') {
+                            init();
+                        }
+                    });
+                }
+            } else {
+                setTimeout(waitLampa, 100);
+            }
+        }, 100);
+    }
 })();
