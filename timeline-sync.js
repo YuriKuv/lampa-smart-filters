@@ -5,9 +5,6 @@
     window.tl_sync_init = true;
 
     const CFG_KEY = 'timeline_sync_cfg';
-    let syncInProgress = false;
-    let autoSyncTimer = null;
-    let backgroundSyncTimer = null;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -15,10 +12,7 @@
             gist_token: '',
             gist_id: '',
             device_name: Lampa.Platform.get() || 'Unknown',
-            manual_profile_id: '',
-            sync_strategy: 'newest',
-            auto_sync_interval: 30,
-            background_sync_interval: 30
+            manual_profile_id: ''
         }) || {};
     }
 
@@ -30,37 +24,26 @@
         Lampa.Noty.show(text);
     }
 
-    function formatTime(seconds) {
-        if (!seconds || seconds < 0) return '0:00';
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const secs = Math.floor(seconds % 60);
-        if (hours > 0) {
-            return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-        }
-        return `${minutes}:${secs.toString().padStart(2, '0')}`;
-    }
-
     function formatTimeShort(seconds) {
         if (!seconds || seconds < 0) return '0 мин';
-        const minutes = Math.floor(seconds / 60);
+        var minutes = Math.floor(seconds / 60);
         if (minutes < 1) return '< 1 мин';
-        return `${minutes} мин`;
+        return minutes + ' мин';
     }
 
     function getCurrentProfileId() {
-        const c = cfg();
+        var c = cfg();
         if (c.manual_profile_id) return c.manual_profile_id;
-        let profileId = Lampa.Storage.get('profile_id', '');
+        var profileId = Lampa.Storage.get('profile_id', '');
         if (profileId) return profileId;
-        const accountUser = Lampa.Storage.get('account_user', {});
+        var accountUser = Lampa.Storage.get('account_user', {});
         if (accountUser.profile) return String(accountUser.profile);
         return '';
     }
 
     function getFileViewKey() {
-        const profileId = getCurrentProfileId();
-        return profileId ? `file_view_${profileId}` : 'file_view';
+        var profileId = getCurrentProfileId();
+        return profileId ? 'file_view_' + profileId : 'file_view';
     }
 
     function getFileView() {
@@ -72,206 +55,83 @@
         return data;
     }
 
-    function extractTmdbIdFromItem(item) {
-        if (!item) return null;
-        if (item.tmdb_id) return String(item.tmdb_id);
-        if (item.id && /^\d{6,8}$/.test(String(item.id))) {
-            return String(item.id);
-        }
-        if (item.movie_id && /^\d{6,8}$/.test(String(item.movie_id))) {
-            return String(item.movie_id);
-        }
-        return null;
+    function getCorrectHash(movie) {
+        // Используем тот же метод, что и Lampa для генерации хеша
+        return String(Lampa.Utils.hash(movie.original_title || movie.title || movie.name));
     }
 
-    function extractTmdbIdFromKey(key, item) {
-        if (/^\d{6,8}$/.test(key)) return key;
-        if (key.startsWith('tmdb_')) return key.replace('tmdb_', '');
-        if (key.startsWith('cub_') && item) {
-            return extractTmdbIdFromItem(item);
-        }
-        return extractTmdbIdFromItem(item);
-    }
-
-    function normalizeKeys(data) {
-        const result = {};
-        for (const key in data) {
-            const tmdbId = extractTmdbIdFromKey(key, data[key]);
-            if (tmdbId) {
-                if (!result[tmdbId] || (data[key].time || 0) > (result[tmdbId].time || 0)) {
-                    result[tmdbId] = { ...data[key], tmdb_id: tmdbId };
-                }
-            } else {
-                result[key] = data[key];
-            }
-        }
-        return result;
-    }
-
-    function getProgressData() {
-        return {
-            version: 5,
-            profile_id: getCurrentProfileId(),
-            device: cfg().device_name,
-            source: Lampa.Storage.field('source') || 'tmdb',
-            updated: Date.now(),
-            file_view: normalizeKeys(getFileView())
-        };
-    }
-
-    function refreshUI() {
+    function getCurrentMovie() {
         try {
-            if (Lampa.Timeline && Lampa.Timeline.read) {
-                Lampa.Timeline.read(true);
-            }
-            if (Lampa.Layer && Lampa.Layer.update) {
-                Lampa.Layer.update();
-            }
-            // Принудительно перерисовываем карточки
-            $('.card').each(function() {
-                if (this.dispatchEvent) {
-                    this.dispatchEvent(new Event('visible'));
-                }
-            });
-            console.log('[Sync] UI обновлён');
-        } catch(e) {
-            console.error('[Sync] Ошибка UI:', e);
-        }
-    }
-
-    function mergeFileView(local, remote) {
-        const result = { ...local };
-        let changed = false;
-        const strategy = cfg().sync_strategy;
-        
-        for (const key in remote) {
-            const remoteItem = remote[key];
-            const localItem = local[key];
-            const remoteTime = remoteItem?.time || 0;
-            const localTime = localItem?.time || 0;
-            const remoteUpdated = remoteItem?.updated || 0;
-            const localUpdated = localItem?.updated || 0;
-            
-            let shouldUseRemote = false;
-            let reason = '';
-            
-            if (!localItem) {
-                shouldUseRemote = true;
-                reason = 'новый';
-            } else {
-                switch (strategy) {
-                    case 'max_time':
-                        if (remoteTime > localTime + 5) {
-                            shouldUseRemote = true;
-                            reason = `время`;
-                        }
-                        break;
-                    case 'max_percent':
-                        if ((remoteItem?.percent || 0) > (localItem?.percent || 0) + 3) {
-                            shouldUseRemote = true;
-                            reason = `процент`;
-                        }
-                        break;
-                    case 'newest':
-                        if (remoteUpdated > localUpdated) {
-                            shouldUseRemote = true;
-                            reason = `дата`;
-                        }
-                        break;
-                }
-            }
-            
-            if (shouldUseRemote) {
-                result[key] = { ...remoteItem, updated: remoteUpdated || Date.now() };
-                changed = true;
-                console.log(`[Sync] 🔄 ${reason}: ${key}`);
-            }
-        }
-        return { merged: result, changed };
-    }
-
-    function getCurrentMovieTmdbId() {
-        try {
-            const activity = Lampa.Activity.active();
+            var activity = Lampa.Activity.active();
             if (activity && activity.movie) {
-                return extractTmdbIdFromItem(activity.movie);
+                return activity.movie;
             }
         } catch(e) {}
         return null;
     }
 
-    function getCurrentPlayTime() {
-        try {
-            const player = Lampa.Player.playdata();
-            if (player && player.timeline && player.timeline.time) {
-                return player.timeline.time;
-            }
-        } catch(e) {}
-        return 0;
-    }
-
-    function saveCurrentProgress(timeInSeconds, tmdbId) {
-        if (!tmdbId) tmdbId = getCurrentMovieTmdbId();
-        if (!tmdbId) return false;
-        
-        const fileView = getFileView();
-        const currentTime = Math.floor(timeInSeconds);
-        const savedTime = fileView[tmdbId]?.time || 0;
-        
-        if (Math.abs(currentTime - savedTime) >= 10) {
-            const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
-            const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
-            
-            fileView[tmdbId] = {
-                time: currentTime,
-                percent: percent,
-                duration: duration,
-                updated: Date.now()
-            };
-            setFileView(fileView);
-            console.log(`[Sync] 💾 Сохранён: ${formatTime(currentTime)} (${percent}%)`);
-            
-            if (Lampa.Timeline && Lampa.Timeline.update) {
-                Lampa.Timeline.update({
-                    hash: tmdbId,
-                    percent: percent,
-                    time: currentTime,
-                    duration: duration
-                });
-            }
-            return true;
+    function saveCurrentProgress() {
+        var movie = getCurrentMovie();
+        if (!movie) {
+            notify('❌ Нет активного фильма');
+            return false;
         }
-        return false;
+        
+        var player = Lampa.Player.playdata();
+        if (!player || !player.timeline || !player.timeline.time) {
+            notify('❌ Нет данных о времени просмотра');
+            return false;
+        }
+        
+        var currentTime = Math.floor(player.timeline.time);
+        var duration = player.timeline.duration || 0;
+        var percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
+        var hash = getCorrectHash(movie);
+        
+        var fileView = getFileView();
+        fileView[hash] = {
+            time: currentTime,
+            percent: percent,
+            duration: duration,
+            updated: Date.now(),
+            title: movie.title || movie.name,
+            id: movie.id
+        };
+        setFileView(fileView);
+        
+        console.log('💾 Сохранён прогресс:', formatTimeShort(currentTime), '(', percent, '%) для', movie.title);
+        return true;
     }
 
-    function syncToGist(showNotify = true, callback = null) {
-        if (syncInProgress) {
+    function syncToGist(showNotify, callback) {
+        if (window.syncInProgress) {
             if (callback) callback(false);
             return;
         }
         
-        const c = cfg();
+        var c = cfg();
         if (!c.gist_token || !c.gist_id) {
             if (showNotify) notify('⚠️ Gist не настроен');
             if (callback) callback(false);
             return;
         }
         
-        const data = getProgressData();
-        const count = Object.keys(data.file_view).length;
-        if (count === 0) {
-            if (callback) callback(false);
-            return;
-        }
+        var data = {
+            version: 5,
+            profile_id: getCurrentProfileId(),
+            device: c.device_name,
+            updated: Date.now(),
+            file_view: getFileView()
+        };
         
-        syncInProgress = true;
-        console.log(`[Sync] 📤 Отправка ${count} таймкодов...`);
+        window.syncInProgress = true;
+        console.log('📤 Отправка таймкодов...');
         
         $.ajax({
-            url: `https://api.github.com/gists/${c.gist_id}`,
+            url: 'https://api.github.com/gists/' + c.gist_id,
             method: 'PATCH',
             headers: {
-                'Authorization': `token ${c.gist_token}`,
+                'Authorization': 'token ' + c.gist_token,
                 'Accept': 'application/vnd.github.v3+json'
             },
             data: JSON.stringify({
@@ -279,158 +139,99 @@
                 public: false,
                 files: { 'timeline.json': { content: JSON.stringify(data, null, 2) } }
             }),
-            success: () => {
+            success: function() {
                 if (showNotify) notify('✅ Таймкоды отправлены');
-                console.log(`[Sync] ✅ Отправлено успешно`);
-                syncInProgress = false;
+                console.log('✅ Отправлено успешно');
+                window.syncInProgress = false;
                 if (callback) callback(true);
             },
-            error: (xhr) => {
-                console.error('[Sync] ❌ Ошибка отправки:', xhr.status);
-                if (showNotify) notify(`❌ Ошибка: ${xhr.status}`);
-                syncInProgress = false;
+            error: function(xhr) {
+                console.error('❌ Ошибка отправки:', xhr.status);
+                if (showNotify) notify('❌ Ошибка: ' + xhr.status);
+                window.syncInProgress = false;
                 if (callback) callback(false);
             }
         });
     }
 
-    function syncFromGist(showNotify = true, callback = null) {
-        if (syncInProgress) {
+    function syncFromGist(showNotify, callback) {
+        if (window.syncInProgress) {
             if (callback) callback(false);
             return;
         }
         
-        const c = cfg();
+        var c = cfg();
         if (!c.gist_token || !c.gist_id) {
             if (showNotify) notify('⚠️ Gist не настроен');
             if (callback) callback(false);
             return;
         }
         
-        syncInProgress = true;
-        console.log(`[Sync] 📥 Загрузка с Gist...`);
+        window.syncInProgress = true;
+        console.log('📥 Загрузка с Gist...');
         
         $.ajax({
-            url: `https://api.github.com/gists/${c.gist_id}`,
+            url: 'https://api.github.com/gists/' + c.gist_id,
             method: 'GET',
             headers: {
-                'Authorization': `token ${c.gist_token}`,
+                'Authorization': 'token ' + c.gist_token,
                 'Accept': 'application/vnd.github.v3+json'
             },
-            success: (data) => {
+            success: function(data) {
                 try {
-                    const content = data.files['timeline.json']?.content;
+                    var content = data.files['timeline.json']?.content;
                     if (content) {
-                        const remote = JSON.parse(content);
-                        const count = Object.keys(remote.file_view || {}).length;
-                        console.log(`[Sync] 📥 Загружено ${count} таймкодов`);
+                        var remote = JSON.parse(content);
+                        var count = Object.keys(remote.file_view || {}).length;
+                        console.log('📥 Загружено', count, 'таймкодов');
                         
-                        const localFileView = getFileView();
-                        const { merged, changed } = mergeFileView(localFileView, remote.file_view);
+                        setFileView(remote.file_view || {});
                         
-                        if (changed) {
-                            setFileView(merged);
-                            console.log(`[Sync] Итог: ${Object.keys(merged).length} таймкодов`);
-                            refreshUI();
-                            if (showNotify) notify(`📥 Загружено ${count} таймкодов`);
-                        } else if (showNotify) {
-                            notify('✅ Данные актуальны');
+                        if (Lampa.Timeline && Lampa.Timeline.read) {
+                            Lampa.Timeline.read(true);
                         }
+                        
+                        if (showNotify) notify('📥 Загружено ' + count + ' таймкодов');
                         if (callback) callback(true);
                     } else {
                         if (showNotify) notify('❌ Нет данных');
                         if (callback) callback(false);
                     }
-                } catch(e) { 
+                } catch(e) {
                     console.error(e);
                     if (callback) callback(false);
                 }
             },
-            error: (xhr) => {
-                console.error('[Sync] ❌ Ошибка загрузки:', xhr.status);
-                if (showNotify) notify(`❌ Ошибка: ${xhr.status}`);
+            error: function(xhr) {
+                console.error('❌ Ошибка загрузки:', xhr.status);
+                if (showNotify) notify('❌ Ошибка: ' + xhr.status);
                 if (callback) callback(false);
             },
-            complete: () => {
-                syncInProgress = false;
+            complete: function() {
+                window.syncInProgress = false;
             }
         });
     }
 
     function fullSync() {
         notify('🔄 Синхронизация...');
-        syncToGist(true, () => {
-            setTimeout(() => {
+        saveCurrentProgress();
+        syncToGist(true, function() {
+            setTimeout(function() {
                 syncFromGist(true);
             }, 500);
         });
     }
 
-    // === ОСНОВНЫЕ ФУНКЦИИ ТАЙМЕРОВ ===
-    
-    function backgroundSyncTask() {
-        if (!cfg().enabled) return;
-        if (syncInProgress) return;
-        console.log(`[Sync] 🔄 Фоновая загрузка (каждые ${cfg().background_sync_interval} сек)`);
-        syncFromGist(false);
-    }
-
-    function autoSyncTask() {
-        if (!cfg().enabled) return;
-        if (!Lampa.Player.opened()) return;
-        
-        const currentTime = getCurrentPlayTime();
-        if (currentTime === 0) return;
-        
-        const tmdbId = getCurrentMovieTmdbId();
-        if (!tmdbId) return;
-        
-        console.log(`[Sync] ⏰ Автоотправка: ${formatTime(currentTime)}`);
-        saveCurrentProgress(currentTime, tmdbId);
-        syncToGist(false);
-    }
-
-    function startBackgroundSync() {
-        if (backgroundSyncTimer) {
-            clearInterval(backgroundSyncTimer);
-            backgroundSyncTimer = null;
-        }
-        const interval = cfg().background_sync_interval;
-        if (interval > 0) {
-            backgroundSyncTimer = setInterval(backgroundSyncTask, interval * 1000);
-            console.log(`[Sync] ✅ Фоновая загрузка запущена (${interval} сек)`);
-            // Первый запуск сразу
-            setTimeout(backgroundSyncTask, 1000);
-        }
-    }
-
-    function startAutoSync() {
-        if (autoSyncTimer) {
-            clearInterval(autoSyncTimer);
-            autoSyncTimer = null;
-        }
-        const interval = cfg().auto_sync_interval;
-        if (interval > 0) {
-            autoSyncTimer = setInterval(autoSyncTask, interval * 1000);
-            console.log(`[Sync] ✅ Автоотправка запущена (${interval} сек)`);
-        }
-    }
-
-    function startAllTimers() {
-        console.log('[Sync] Запуск всех таймеров...');
-        startBackgroundSync();
-        startAutoSync();
-    }
-
     function addHeadButton() {
-        const svgIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" fill="currentColor"/></svg>';
+        var svgIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" fill="currentColor"/></svg>';
         
         $('.tl-sync-button').remove();
-        const syncButton = $(`<div class="tl-sync-button selector head__action" style="display: flex; align-items: center; justify-content: center;">${svgIcon}</div>`);
+        var syncButton = $('<div class="tl-sync-button selector head__action" style="display: flex; align-items: center; justify-content: center;">' + svgIcon + '</div>');
         syncButton.on('hover:enter', fullSync);
         syncButton.on('click', fullSync);
         
-        const headActions = $('.head__actions');
+        var headActions = $('.head__actions');
         if (headActions.length) {
             headActions.prepend(syncButton);
         } else {
@@ -440,64 +241,22 @@
 
     function init() {
         if (!cfg().enabled) return;
-        
-        console.log(`[Sync] === ИНИЦИАЛИЗАЦИЯ ===`);
-        console.log(`[Sync] Стратегия: ${cfg().sync_strategy}`);
-        console.log(`[Sync] Отправка: ${cfg().auto_sync_interval} сек, Загрузка: ${cfg().background_sync_interval} сек`);
-        
-        // Нормализация
-        const current = getFileView();
-        const normalized = normalizeKeys(current);
-        if (JSON.stringify(current) !== JSON.stringify(normalized)) {
-            console.log('[Sync] Нормализация ключей');
-            setFileView(normalized);
-        }
-        
-        // Запускаем таймеры
-        startAllTimers();
-        
-        // Кнопка
+        console.log('[Sync] Инициализация');
         addHeadButton();
         
-        // События плеера
-        Lampa.Listener.follow('player', (e) => {
-            if (e.type === 'open') {
-                console.log('[Sync] 🎬 Плеер открыт');
-                const tmdbId = getCurrentMovieTmdbId();
-                setTimeout(() => {
-                    syncFromGist(false, () => {
-                        const fileView = getFileView();
-                        if (tmdbId && fileView[tmdbId]?.time) {
-                            notify(`🎯 Таймкод: ${formatTimeShort(fileView[tmdbId].time)}`);
-                        }
-                    });
-                }, 2000);
-            }
-            
-            if (e.type === 'timeupdate' && e.time) {
-                const currentTime = Math.floor(e.time);
-                const tmdbId = getCurrentMovieTmdbId();
-                if (tmdbId) {
-                    const fileView = getFileView();
-                    const savedTime = fileView[tmdbId]?.time || 0;
-                    if (Math.abs(currentTime - savedTime) >= 10) {
-                        saveCurrentProgress(currentTime, tmdbId);
-                    }
-                }
-            }
-            
-            if (e.type === 'stop') {
-                console.log('[Sync] ⏹️ Плеер остановлен');
-                const currentTime = getCurrentPlayTime();
-                if (currentTime > 0) {
-                    saveCurrentProgress(currentTime, null);
-                    syncToGist(false);
-                }
+        // Сохранение прогресса при паузе/остановке
+        Lampa.Listener.follow('player', function(e) {
+            if (e.type === 'pause' || e.type === 'stop') {
+                console.log('[Sync]', e.type === 'stop' ? 'Остановка' : 'Пауза', '- сохраняем');
+                saveCurrentProgress();
+                syncToGist(false);
             }
         });
         
-        // Первая загрузка
-        setTimeout(() => syncFromGist(false), 3000);
+        // Загружаем таймкоды при старте
+        setTimeout(function() {
+            syncFromGist(false);
+        }, 3000);
     }
 
     // Настройки
@@ -511,96 +270,48 @@
         component: 'timeline_sync',
         param: { name: 'gist_setup', type: 'button' },
         field: { name: '⚙️ Настройки Gist' },
-        onChange: () => {
-            const c = cfg();
-            const intervalOptions = [
-                { title: 'Выключено', value: 0 },
-                { title: '15 секунд', value: 15 },
-                { title: '30 секунд', value: 30 },
-                { title: '1 минута', value: 60 },
-                { title: '2 минуты', value: 120 },
-                { title: '5 минут', value: 300 }
-            ];
-            
+        onChange: function() {
+            var c = cfg();
             Lampa.Select.show({
                 title: 'Синхронизация таймкодов',
                 items: [
-                    { title: `🔑 Токен: ${c.gist_token ? '✓' : '❌'}`, action: 'token' },
-                    { title: `📄 Gist ID: ${c.gist_id ? c.gist_id.substring(0,8)+'…' : '❌'}`, action: 'id' },
-                    { title: `📱 Устройство: ${c.device_name}`, action: 'device' },
-                    { title: `👤 Профиль: ${c.manual_profile_id || 'авто'}`, action: 'profile' },
+                    { title: '🔑 Токен: ' + (c.gist_token ? '✓' : '❌'), action: 'token' },
+                    { title: '📄 Gist ID: ' + (c.gist_id ? c.gist_id.substring(0,8) + '…' : '❌'), action: 'id' },
+                    { title: '📱 Устройство: ' + c.device_name, action: 'device' },
+                    { title: '👤 Профиль: ' + (c.manual_profile_id || 'авто'), action: 'profile' },
                     { title: '──────────', separator: true },
-                    { title: `⏱ Отправка: ${intervalOptions.find(o => o.value === c.auto_sync_interval)?.title || '30 секунд'}`, action: 'auto_sync' },
-                    { title: `📥 Загрузка: ${intervalOptions.find(o => o.value === c.background_sync_interval)?.title || '30 секунд'}`, action: 'bg_sync' },
-                    { title: '──────────', separator: true },
-                    { title: '📤 Отправить сейчас', action: 'upload' },
-                    { title: '📥 Загрузить сейчас', action: 'download' },
                     { title: '🔄 Полная синхронизация', action: 'force' },
                     { title: '❌ Отмена', action: 'cancel' }
                 ],
-                onSelect: (item) => {
+                onSelect: function(item) {
                     if (item.action === 'token') {
-                        Lampa.Input.edit({ title: 'GitHub Token', value: c.gist_token, free: true }, (val) => {
+                        Lampa.Input.edit({ title: 'GitHub Token', value: c.gist_token, free: true }, function(val) {
                             if (val !== null) { c.gist_token = val || ''; saveCfg(c); notify('Токен сохранён'); }
                             Lampa.Controller.toggle('settings_component');
-                            startAllTimers();
                         });
                     } else if (item.action === 'id') {
-                        Lampa.Input.edit({ title: 'Gist ID', value: c.gist_id, free: true }, (val) => {
+                        Lampa.Input.edit({ title: 'Gist ID', value: c.gist_id, free: true }, function(val) {
                             if (val !== null) { c.gist_id = val || ''; saveCfg(c); notify('Gist ID сохранён'); }
                             Lampa.Controller.toggle('settings_component');
-                            startAllTimers();
                         });
                     } else if (item.action === 'device') {
-                        Lampa.Input.edit({ title: 'Имя устройства', value: c.device_name, free: true }, (val) => {
+                        Lampa.Input.edit({ title: 'Имя устройства', value: c.device_name, free: true }, function(val) {
                             if (val !== null && val.trim()) { c.device_name = val.trim(); saveCfg(c); notify('Имя сохранено'); }
                             Lampa.Controller.toggle('settings_component');
                         });
                     } else if (item.action === 'profile') {
-                        Lampa.Input.edit({ title: 'ID профиля', value: c.manual_profile_id, free: true }, (val) => {
+                        Lampa.Input.edit({ title: 'ID профиля', value: c.manual_profile_id, free: true }, function(val) {
                             if (val !== null) { c.manual_profile_id = val || ''; saveCfg(c); notify('Профиль сохранён'); }
                             Lampa.Controller.toggle('settings_component');
                         });
-                    } else if (item.action === 'auto_sync') {
-                        Lampa.Select.show({
-                            title: 'Интервал отправки',
-                            items: intervalOptions.map(opt => ({ title: opt.title, value: opt.value, selected: c.auto_sync_interval === opt.value })),
-                            onSelect: (opt) => {
-                                c.auto_sync_interval = opt.value;
-                                saveCfg(c);
-                                startAutoSync();
-                                notify(`Отправка: ${opt.title}`);
-                                Lampa.Controller.toggle('settings_component');
-                            },
-                            onBack: () => Lampa.Controller.toggle('settings_component')
-                        });
-                    } else if (item.action === 'bg_sync') {
-                        Lampa.Select.show({
-                            title: 'Интервал загрузки',
-                            items: intervalOptions.map(opt => ({ title: opt.title, value: opt.value, selected: c.background_sync_interval === opt.value })),
-                            onSelect: (opt) => {
-                                c.background_sync_interval = opt.value;
-                                saveCfg(c);
-                                startBackgroundSync();
-                                notify(`Загрузка: ${opt.title}`);
-                                Lampa.Controller.toggle('settings_component');
-                            },
-                            onBack: () => Lampa.Controller.toggle('settings_component')
-                        });
-                    } else if (item.action === 'upload') {
-                        syncToGist(true);
-                        setTimeout(() => Lampa.Controller.toggle('settings_component'), 1000);
-                    } else if (item.action === 'download') {
-                        syncFromGist(true);
-                        setTimeout(() => Lampa.Controller.toggle('settings_component'), 1000);
                     } else if (item.action === 'force') {
                         fullSync();
-                        setTimeout(() => Lampa.Controller.toggle('settings_component'), 2000);
+                        setTimeout(function() { Lampa.Controller.toggle('settings_component'); }, 2000);
                     } else {
                         Lampa.Controller.toggle('settings_component');
                     }
                 },
-                onBack: () => Lampa.Controller.toggle('settings_component')
+                onBack: function() { Lampa.Controller.toggle('settings_component'); }
             });
         }
     });
@@ -609,9 +320,9 @@
         component: 'timeline_sync',
         param: { name: 'sync_enabled', type: 'toggle', default: true },
         field: { name: 'Включить синхронизацию' },
-        onChange: v => { const c = cfg(); c.enabled = v; saveCfg(c); if (v) startAllTimers(); }
+        onChange: function(v) { var c = cfg(); c.enabled = v; saveCfg(c); if (v) init(); }
     });
 
     if (window.appready) init();
-    else Lampa.Listener.follow('app', e => e.type === 'ready' && init());
+    else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
 })();
