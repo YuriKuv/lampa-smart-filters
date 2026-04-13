@@ -8,7 +8,6 @@
     let syncInProgress = false;
     let autoSyncTimer = null;
     let backgroundSyncTimer = null;
-    let settingsActive = false;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -20,9 +19,9 @@
             auto_sync_interval: 60,
             background_sync_interval: 60,
             button_position: 'head',
-            cleanup_type: 'count',     // 'count' или 'days'
-            cleanup_count: 500,        // максимум записей
-            cleanup_days: 30           // удалять старше N дней
+            cleanup_type: 'count',
+            cleanup_count: 500,
+            cleanup_days: 30
         }) || {};
     }
 
@@ -69,7 +68,6 @@
         return String(Lampa.Utils.hash(movie.original_title || movie.title || movie.name));
     }
 
-    // Очистка старых таймкодов
     function cleanOldTimecodes(data) {
         var c = cfg();
         var items = [];
@@ -85,51 +83,35 @@
         
         if (items.length === 0) return data;
         
-        // Сортируем по дате обновления (новые сначала)
         items.sort(function(a, b) { return b.updated - a.updated; });
         
-        // 1. Очистка по времени (удаляем старше N дней)
         if (c.cleanup_type === 'days' && c.cleanup_days > 0) {
             var cutoffTime = now - (c.cleanup_days * 24 * 60 * 60 * 1000);
-            var beforeCount = items.length;
             items = items.filter(function(item) { return item.updated > cutoffTime; });
-            if (beforeCount !== items.length) {
-                console.log('[Sync] Удалено по времени:', beforeCount - items.length, 'записей старше', c.cleanup_days, 'дней');
-            }
         }
         
-        // 2. Очистка по количеству (оставляем максимум)
         var maxItems = c.cleanup_count;
         if (maxItems > 0 && items.length > maxItems) {
-            var beforeCount = items.length;
             items = items.slice(0, maxItems);
-            console.log('[Sync] Удалено по количеству:', beforeCount - items.length, 'записей (лимит', maxItems, ')');
         }
         
         var result = {};
         for (var i = 0; i < items.length; i++) {
             result[items[i].key] = items[i].data;
         }
-        
         return result;
     }
 
-    // Объединение данных: берём по дате последнего обновления
     function mergeData(local, remote) {
         var result = {};
-        
         for (var key in local) { result[key] = local[key]; }
         for (var key in remote) { result[key] = remote[key]; }
-        
         for (var key in remote) {
-            if (local[key] && remote[key]) {
-                if (remote[key].updated > local[key].updated) {
-                    result[key] = remote[key];
-                    console.log('[Sync] Обновлён (дата):', key);
-                }
+            if (local[key] && remote[key] && remote[key].updated > local[key].updated) {
+                result[key] = remote[key];
+                console.log('[Sync] Обновлён (дата):', key);
             }
         }
-        
         return cleanOldTimecodes(result);
     }
 
@@ -293,7 +275,6 @@
         if (!cfg().enabled) return;
         if (!Lampa.Player.opened()) return;
         if (getCurrentPlayTime() === 0) return;
-        
         console.log('[Sync] ⏰ Автоотправка');
         saveCurrentProgress();
         sendToGist(false);
@@ -346,11 +327,7 @@
         }
     }
 
-    // Функция для открытия настроек с сохранением контекста
-    function openSettings() {
-        if (settingsActive) return;
-        settingsActive = true;
-        
+    function showSettings() {
         var c = cfg();
         var intervalOptions = [
             { title: 'Выключено', value: 0 },
@@ -362,13 +339,6 @@
             { title: '10 минут', value: 600 }
         ];
         
-        var cleanupTypeOptions = [
-            { title: 'По количеству записей', value: 'count' },
-            { title: 'По времени (дни)', value: 'days' }
-        ];
-        
-        var currentCleanupType = cleanupTypeOptions.find(function(o) { return o.value === c.cleanup_type; }) || cleanupTypeOptions[0];
-        
         Lampa.Select.show({
             title: 'Синхронизация таймкодов',
             items: [
@@ -379,7 +349,7 @@
                 { title: '──────────', separator: true },
                 { title: '📍 Кнопка: ' + (c.button_position === 'head' ? 'Верхняя панель' : 'Левое меню'), action: 'position' },
                 { title: '──────────', separator: true },
-                { title: '🧹 Очистка: ' + currentCleanupType.title, action: 'cleanup_type' },
+                { title: '🧹 Очистка: ' + (c.cleanup_type === 'count' ? 'По количеству' : 'По времени'), action: 'cleanup_type' },
                 { title: '   📦 Лимит записей: ' + c.cleanup_count, action: 'cleanup_count' },
                 { title: '   📅 Старше дней: ' + c.cleanup_days, action: 'cleanup_days' },
                 { title: '──────────', separator: true },
@@ -387,48 +357,49 @@
                 { title: '📥 Загрузка: ' + (intervalOptions.find(function(o) { return o.value === c.background_sync_interval; })?.title || '1 минута'), action: 'bg_sync' },
                 { title: '──────────', separator: true },
                 { title: '🔄 Синхронизировать сейчас', action: 'force' },
-                { title: '❌ Закрыть', action: 'cancel' }
+                { title: '❌ Отмена', action: 'cancel' }
             ],
             onSelect: function(item) {
                 if (item.action === 'token') {
                     Lampa.Input.edit({ title: 'GitHub Token', value: c.gist_token, free: true }, function(val) {
                         if (val !== null) { c.gist_token = val || ''; saveCfg(c); notify('Токен сохранён'); }
-                        openSettings();
+                        showSettings();
                     });
                 } else if (item.action === 'id') {
                     Lampa.Input.edit({ title: 'Gist ID', value: c.gist_id, free: true }, function(val) {
                         if (val !== null) { c.gist_id = val || ''; saveCfg(c); notify('Gist ID сохранён'); }
-                        openSettings();
+                        showSettings();
                     });
                 } else if (item.action === 'device') {
                     Lampa.Input.edit({ title: 'Имя устройства', value: c.device_name, free: true }, function(val) {
                         if (val !== null && val.trim()) { c.device_name = val.trim(); saveCfg(c); notify('Имя сохранено'); }
-                        openSettings();
+                        showSettings();
                     });
                 } else if (item.action === 'profile') {
                     Lampa.Input.edit({ title: 'ID профиля (0 = авто)', value: c.manual_profile_id, free: true }, function(val) {
                         if (val !== null) { c.manual_profile_id = val || ''; saveCfg(c); notify('Профиль сохранён'); }
-                        openSettings();
+                        showSettings();
                     });
                 } else if (item.action === 'position') {
                     c.button_position = c.button_position === 'head' ? 'menu' : 'head';
                     saveCfg(c);
                     addButton();
                     notify('Кнопка перемещена');
-                    openSettings();
+                    showSettings();
                 } else if (item.action === 'cleanup_type') {
                     Lampa.Select.show({
                         title: 'Тип очистки',
-                        items: cleanupTypeOptions.map(function(opt) {
-                            return { title: opt.title, value: opt.value, selected: c.cleanup_type === opt.value };
-                        }),
+                        items: [
+                            { title: 'По количеству записей', value: 'count', selected: c.cleanup_type === 'count' },
+                            { title: 'По времени (дни)', value: 'days', selected: c.cleanup_type === 'days' }
+                        ],
                         onSelect: function(opt) {
                             c.cleanup_type = opt.value;
                             saveCfg(c);
-                            notify('Тип очистки: ' + opt.title);
-                            openSettings();
+                            notify('Тип очистки: ' + (opt.value === 'count' ? 'По количеству' : 'По времени'));
+                            showSettings();
                         },
-                        onBack: function() { openSettings(); }
+                        onBack: function() { showSettings(); }
                     });
                 } else if (item.action === 'cleanup_count') {
                     Lampa.Input.edit({ title: 'Максимум записей (1-2000)', value: String(c.cleanup_count), free: true, nomic: true }, function(val) {
@@ -440,7 +411,7 @@
                         } else {
                             notify('Введите число от 1 до 2000');
                         }
-                        openSettings();
+                        showSettings();
                     });
                 } else if (item.action === 'cleanup_days') {
                     Lampa.Input.edit({ title: 'Удалять старше N дней (1-365)', value: String(c.cleanup_days), free: true, nomic: true }, function(val) {
@@ -452,7 +423,7 @@
                         } else {
                             notify('Введите число от 1 до 365');
                         }
-                        openSettings();
+                        showSettings();
                     });
                 } else if (item.action === 'auto_sync') {
                     Lampa.Select.show({
@@ -465,9 +436,9 @@
                             saveCfg(c);
                             startAutoSync();
                             notify('Отправка: ' + opt.title);
-                            openSettings();
+                            showSettings();
                         },
-                        onBack: function() { openSettings(); }
+                        onBack: function() { showSettings(); }
                     });
                 } else if (item.action === 'bg_sync') {
                     Lampa.Select.show({
@@ -480,20 +451,18 @@
                             saveCfg(c);
                             startBackgroundSync();
                             notify('Загрузка: ' + opt.title);
-                            openSettings();
+                            showSettings();
                         },
-                        onBack: function() { openSettings(); }
+                        onBack: function() { showSettings(); }
                     });
                 } else if (item.action === 'force') {
                     fullSync();
-                    setTimeout(function() { openSettings(); }, 2000);
+                    setTimeout(function() { showSettings(); }, 2000);
                 } else {
-                    settingsActive = false;
                     Lampa.Controller.toggle('settings_component');
                 }
             },
             onBack: function() {
-                settingsActive = false;
                 Lampa.Controller.toggle('settings_component');
             }
         });
@@ -523,7 +492,6 @@
         setTimeout(function() { loadFromGist(); }, 3000);
     }
 
-    // Настройки
     Lampa.SettingsApi.addComponent({
         component: 'timeline_sync',
         name: 'Синхронизация таймкодов',
@@ -535,7 +503,7 @@
         param: { name: 'gist_setup', type: 'button' },
         field: { name: '⚙️ Настройки Gist' },
         onChange: function() {
-            openSettings();
+            showSettings();
         }
     });
     
