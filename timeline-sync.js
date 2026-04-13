@@ -66,7 +66,6 @@
     }
 
     function setFileView(data) {
-        // Очистка старых записей перед сохранением
         const items = [];
         for (const key in data) {
             items.push({ key: key, updated: data[key].updated || 0, data: data[key] });
@@ -88,16 +87,7 @@
         return String(Lampa.Utils.hash(movie.original_title || movie.title || movie.name));
     }
 
-    function extractTmdbIdFromItem(item) {
-        if (!item) return null;
-        if (item.tmdb_id) return String(item.tmdb_id);
-        if (item.id && /^\d{6,8}$/.test(String(item.id))) {
-            return String(item.id);
-        }
-        return null;
-    }
-
-    function getCurrentMovieTmdbId() {
+    function getCurrentMovieHash() {
         try {
             const activity = Lampa.Activity.active();
             if (activity && activity.movie) {
@@ -133,7 +123,7 @@
                 id: movie.id
             };
             setFileView(fileView);
-            console.log(`[Sync] 💾 Сохранён: ${formatTime(currentTime)} (${percent}%) для ${movie.title}`);
+            console.log(`[Sync] 💾 Сохранён: ${formatTime(currentTime)} для ${movie.title}`);
             
             if (Lampa.Timeline && Lampa.Timeline.update) {
                 Lampa.Timeline.update({ hash: hash, percent: percent, time: currentTime, duration: duration });
@@ -239,7 +229,6 @@
                         const remoteData = remote.file_view || {};
                         const localData = getFileView();
                         
-                        // Объединяем: берём более свежие данные по дате обновления
                         let changed = false;
                         for (const key in remoteData) {
                             if (!localData[key] || remoteData[key].updated > localData[key].updated) {
@@ -280,7 +269,10 @@
 
     function fullSync() {
         notify('🔄 Синхронизация...');
-        if (Lampa.Player.opened()) saveCurrentProgress(Lampa.Player.playdata()?.timeline?.time || 0);
+        if (Lampa.Player.opened()) {
+            const time = Lampa.Player.playdata()?.timeline?.time;
+            if (time > 0) saveCurrentProgress(time);
+        }
         syncToGist(true, () => {
             setTimeout(() => syncFromGist(true), 500);
         });
@@ -341,7 +333,7 @@
         Lampa.Listener.follow('player', (e) => {
             if (e.type === 'open' && e.movie) {
                 currentMovieId = getCorrectHash(e.movie);
-                console.log(`[Sync] 🎬 Открыт фильм: ${e.movie.title}`);
+                console.log(`[Sync] 🎬 Открыт: ${e.movie.title}`);
                 setTimeout(() => syncFromGist(false), 2000);
             }
             if (e.type === 'timeupdate' && e.time) currentTime = e.time;
@@ -380,7 +372,7 @@
                 { title: `⏱ Отправка: ${intervalOptions.find(o => o.value === c.auto_sync_interval)?.title || '1 минута'}`, action: 'auto_sync' },
                 { title: `📥 Загрузка: ${intervalOptions.find(o => o.value === c.background_sync_interval)?.title || '1 минута'}`, action: 'bg_sync' },
                 { title: '──────────', separator: true },
-                { title: '🔄 Полная синхронизация', action: 'force' },
+                { title: '🔄 Синхронизировать сейчас', action: 'force' },
                 { title: '❌ Отмена', action: 'cancel' }
             ],
             onSelect: (item) => {
@@ -391,7 +383,7 @@
                     });
                 } else if (item.action === 'id') {
                     Lampa.Input.edit({ title: 'Gist ID', value: c.gist_id, free: true }, (val) => {
-                        if (val !== null) { c.gist_id = val || ''; saveCfg(c); notify('Gist ID сохранен'); }
+                        if (val !== null) { c.gist_id = val || ''; saveCfg(c); notify('Gist ID сохранён'); }
                         showGistSetup();
                     });
                 } else if (item.action === 'device') {
@@ -468,17 +460,34 @@
             name: 'Синхронизация таймкодов',
             icon: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/></svg>'
         });
+        
         Lampa.SettingsApi.addParam({
             component: 'timeline_sync',
             param: { name: 'gist_setup', type: 'button' },
             field: { name: '⚙️ Настройки Gist' },
             onChange: () => showGistSetup()
         });
+        
         Lampa.SettingsApi.addParam({
             component: 'timeline_sync',
             param: { name: 'sync_enabled', type: 'toggle', default: true },
             field: { name: 'Включить синхронизацию' },
-            onChange: v => { const c = cfg(); c.enabled = v; saveCfg(c); if (v) { addButton(); startAutoSync(); startBackgroundSync(); } }
+            onChange: (v) => { 
+                const c = cfg(); 
+                c.enabled = v; 
+                saveCfg(c); 
+            }
+        });
+        
+        Lampa.SettingsApi.addParam({
+            component: 'timeline_sync',
+            param: { name: 'sync_on_stop', type: 'toggle', default: true },
+            field: { name: 'Синхронизировать при остановке' },
+            onChange: (v) => { 
+                const c = cfg(); 
+                c.sync_on_stop = v; 
+                saveCfg(c); 
+            }
         });
     }
 
@@ -493,9 +502,11 @@
         startAutoSync();
         startBackgroundSync();
         
-        setTimeout(() => syncFromGist(false), 3000);
+        setTimeout(() => {
+            syncFromGist(false);
+        }, 3000);
     }
 
     if (window.appready) init();
-    else Lampa.Listener.follow('app', e => e.type === 'ready' && init());
+    else Lampa.Listener.follow('app', (e) => { if (e.type === 'ready') init(); });
 })();
