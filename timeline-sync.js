@@ -35,7 +35,6 @@
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
         const secs = Math.floor(seconds % 60);
-        
         if (hours > 0) {
             return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
         }
@@ -129,9 +128,7 @@
                 Lampa.Layer.update();
             }
             console.log('[Sync] UI обновлён');
-        } catch(e) {
-            console.error('[Sync] Ошибка обновления UI:', e);
-        }
+        } catch(e) {}
     }
 
     function mergeFileView(local, remote) {
@@ -158,19 +155,19 @@
                     case 'max_time':
                         if (remoteTime > localTime + 5) {
                             shouldUseRemote = true;
-                            reason = `время ${formatTime(localTime)} → ${formatTime(remoteTime)}`;
+                            reason = `время`;
                         }
                         break;
                     case 'max_percent':
                         if ((remoteItem?.percent || 0) > (localItem?.percent || 0) + 3) {
                             shouldUseRemote = true;
-                            reason = `процент ${localItem?.percent}% → ${remoteItem?.percent}%`;
+                            reason = `процент`;
                         }
                         break;
                     case 'newest':
                         if (remoteUpdated > localUpdated) {
                             shouldUseRemote = true;
-                            reason = `дата (${new Date(localUpdated).toLocaleString()} → ${new Date(remoteUpdated).toLocaleString()})`;
+                            reason = `дата`;
                         }
                         break;
                 }
@@ -189,14 +186,10 @@
         try {
             const activity = Lampa.Activity.active();
             if (activity && activity.movie) {
-                const movie = activity.movie;
-                const tmdbId = extractTmdbIdFromItem(movie);
-                if (tmdbId) return tmdbId;
+                return extractTmdbIdFromItem(activity.movie);
             }
-            return null;
-        } catch(e) {
-            return null;
-        }
+        } catch(e) {}
+        return null;
     }
 
     function getCurrentPlayTime() {
@@ -335,7 +328,6 @@
                         } else if (showNotify) {
                             notify('✅ Данные актуальны');
                         }
-                        
                         if (callback) callback(true);
                     } else {
                         if (showNotify) notify('❌ Нет данных');
@@ -366,17 +358,28 @@
         });
     }
 
-    // Глобальные функции для доступа из консоли (для отладки)
-    window.tl_sync_debug = {
-        startAutoSync: function() { startAutoSync(); },
-        startBackgroundSync: function() { startBackgroundSync(); },
-        status: function() {
-            console.log('autoSyncTimer:', !!autoSyncTimer);
-            console.log('backgroundSyncTimer:', !!backgroundSyncTimer);
-            console.log('syncInProgress:', syncInProgress);
+    // Фоновая загрузка - запускается всегда и работает постоянно
+    function startBackgroundSync() {
+        if (backgroundSyncTimer) {
+            clearInterval(backgroundSyncTimer);
+            backgroundSyncTimer = null;
         }
-    };
+        
+        const interval = cfg().background_sync_interval;
+        if (interval > 0) {
+            backgroundSyncTimer = setInterval(() => {
+                if (!cfg().enabled) return;
+                if (syncInProgress) return;
+                console.log(`[Sync] 🔄 Фоновая загрузка (каждые ${interval} сек)`);
+                syncFromGist(false);
+            }, interval * 1000);
+            console.log(`[Sync] ✅ Фоновая загрузка запущена (${interval} сек)`);
+        } else {
+            console.log(`[Sync] ⚠️ Фоновая загрузка выключена`);
+        }
+    }
 
+    // Автоотправка - работает только когда плеер открыт
     function startAutoSync() {
         if (autoSyncTimer) {
             clearInterval(autoSyncTimer);
@@ -385,7 +388,7 @@
         
         const interval = cfg().auto_sync_interval;
         if (interval > 0) {
-            autoSyncTimer = setInterval(function() {
+            autoSyncTimer = setInterval(() => {
                 if (!cfg().enabled) return;
                 if (!Lampa.Player.opened()) return;
                 
@@ -403,29 +406,10 @@
         }
     }
 
-    function startBackgroundSync() {
-        if (backgroundSyncTimer) {
-            clearInterval(backgroundSyncTimer);
-            backgroundSyncTimer = null;
-        }
-        
-        const interval = cfg().background_sync_interval;
-        if (interval > 0) {
-            backgroundSyncTimer = setInterval(function() {
-                if (!cfg().enabled) return;
-                if (syncInProgress) return;
-                console.log(`[Sync] 🔄 Фоновая загрузка`);
-                syncFromGist(false);
-            }, interval * 1000);
-            console.log(`[Sync] ✅ Фоновая загрузка запущена (${interval} сек)`);
-        }
-    }
-
     function addHeadButton() {
         const svgIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" fill="currentColor"/></svg>';
         
         $('.tl-sync-button').remove();
-        
         const syncButton = $(`<div class="tl-sync-button selector head__action" style="display: flex; align-items: center; justify-content: center;">${svgIcon}</div>`);
         syncButton.on('hover:enter', fullSync);
         syncButton.on('click', fullSync);
@@ -443,6 +427,7 @@
         
         console.log(`[Sync] Инициализация. Стратегия: ${cfg().sync_strategy}`);
         
+        // Нормализация
         const current = getFileView();
         const normalized = normalizeKeys(current);
         if (JSON.stringify(current) !== JSON.stringify(normalized)) {
@@ -450,27 +435,26 @@
             setFileView(normalized);
         }
         
-        // Запускаем таймеры сразу
-        startAutoSync();
+        // Запускаем фоновую загрузку - ВСЕГДА, независимо от плеера
         startBackgroundSync();
         
+        // Запускаем автоотправку
+        startAutoSync();
+        
+        // Кнопка
         addHeadButton();
         
-        // Следим за открытием плеера (перезапускаем таймеры для надёжности)
+        // События плеера
         Lampa.Listener.follow('player', (e) => {
             if (e.type === 'open') {
-                console.log('[Sync] 🎬 Плеер открыт, перезапуск таймеров');
-                startAutoSync();
-                startBackgroundSync();
-                
+                console.log('[Sync] 🎬 Плеер открыт');
                 const tmdbId = getCurrentMovieTmdbId();
+                // Принудительная загрузка при открытии
                 setTimeout(() => {
-                    syncFromGist(false, (success) => {
-                        if (success) {
-                            const fileView = getFileView();
-                            if (tmdbId && fileView[tmdbId]?.time) {
-                                notify(`🎯 Таймкод: ${formatTimeShort(fileView[tmdbId].time)}`);
-                            }
+                    syncFromGist(false, () => {
+                        const fileView = getFileView();
+                        if (tmdbId && fileView[tmdbId]?.time) {
+                            notify(`🎯 Таймкод: ${formatTimeShort(fileView[tmdbId].time)}`);
                         }
                     });
                 }, 2000);
@@ -499,12 +483,10 @@
         });
         
         // Первая загрузка
-        setTimeout(() => {
-            syncFromGist(false);
-        }, 3000);
+        setTimeout(() => syncFromGist(false), 3000);
     }
 
-    // Добавляем настройки
+    // Настройки
     Lampa.SettingsApi.addComponent({
         component: 'timeline_sync',
         name: 'Синхронизация таймкодов',
@@ -517,12 +499,6 @@
         field: { name: '⚙️ Настройки Gist' },
         onChange: () => {
             const c = cfg();
-            const strategyNames = {
-                'max_time': '⏱ По времени просмотра',
-                'max_percent': '📊 По проценту просмотра',
-                'newest': '🕐 По дате последнего просмотра'
-            };
-            
             const intervalOptions = [
                 { title: 'Выключено', value: 0 },
                 { title: '15 секунд', value: 15 },
@@ -532,9 +508,6 @@
                 { title: '5 минут', value: 300 }
             ];
             
-            const currentAutoSync = intervalOptions.find(o => o.value === c.auto_sync_interval) || intervalOptions[1];
-            const currentBgSync = intervalOptions.find(o => o.value === c.background_sync_interval) || intervalOptions[1];
-            
             Lampa.Select.show({
                 title: 'Синхронизация таймкодов',
                 items: [
@@ -543,14 +516,12 @@
                     { title: `📱 Устройство: ${c.device_name}`, action: 'device' },
                     { title: `👤 Профиль: ${c.manual_profile_id || 'авто'}`, action: 'profile' },
                     { title: '──────────', separator: true },
-                    { title: `🔄 Стратегия: ${strategyNames[c.sync_strategy]}`, action: 'strategy' },
-                    { title: `⏱ Отправка: ${currentAutoSync.title}`, action: 'auto_sync' },
-                    { title: `📥 Загрузка: ${currentBgSync.title}`, action: 'bg_sync' },
+                    { title: `⏱ Отправка: ${intervalOptions.find(o => o.value === c.auto_sync_interval)?.title || '30 секунд'}`, action: 'auto_sync' },
+                    { title: `📥 Загрузка: ${intervalOptions.find(o => o.value === c.background_sync_interval)?.title || '30 секунд'}`, action: 'bg_sync' },
                     { title: '──────────', separator: true },
                     { title: '📤 Отправить сейчас', action: 'upload' },
                     { title: '📥 Загрузить сейчас', action: 'download' },
                     { title: '🔄 Полная синхронизация', action: 'force' },
-                    { title: '──────────', separator: true },
                     { title: '❌ Отмена', action: 'cancel' }
                 ],
                 onSelect: (item) => {
@@ -558,60 +529,31 @@
                         Lampa.Input.edit({ title: 'GitHub Token', value: c.gist_token, free: true }, (val) => {
                             if (val !== null) { c.gist_token = val || ''; saveCfg(c); notify('Токен сохранён'); }
                             Lampa.Controller.toggle('settings_component');
-                            init(); // Перезапускаем
                         });
                     } else if (item.action === 'id') {
                         Lampa.Input.edit({ title: 'Gist ID', value: c.gist_id, free: true }, (val) => {
                             if (val !== null) { c.gist_id = val || ''; saveCfg(c); notify('Gist ID сохранён'); }
                             Lampa.Controller.toggle('settings_component');
-                            init();
                         });
                     } else if (item.action === 'device') {
                         Lampa.Input.edit({ title: 'Имя устройства', value: c.device_name, free: true }, (val) => {
                             if (val !== null && val.trim()) { c.device_name = val.trim(); saveCfg(c); notify('Имя сохранено'); }
                             Lampa.Controller.toggle('settings_component');
-                            init();
                         });
                     } else if (item.action === 'profile') {
-                        Lampa.Input.edit({ title: 'ID профиля (пусто = авто)', value: c.manual_profile_id, free: true }, (val) => {
+                        Lampa.Input.edit({ title: 'ID профиля', value: c.manual_profile_id, free: true }, (val) => {
                             if (val !== null) { c.manual_profile_id = val || ''; saveCfg(c); notify('Профиль сохранён'); }
                             Lampa.Controller.toggle('settings_component');
-                            init();
-                        });
-                    } else if (item.action === 'strategy') {
-                        Lampa.Select.show({
-                            title: 'Стратегия синхронизации',
-                            items: [
-                                { title: '⏱ По максимальному времени', value: 'max_time' },
-                                { title: '📊 По максимальному проценту', value: 'max_percent' },
-                                { title: '🕐 По дате последнего просмотра', value: 'newest' }
-                            ].map(opt => ({
-                                title: opt.title,
-                                value: opt.value,
-                                selected: c.sync_strategy === opt.value
-                            })),
-                            onSelect: (opt) => {
-                                c.sync_strategy = opt.value;
-                                saveCfg(c);
-                                notify(`Стратегия: ${opt.title}`);
-                                Lampa.Controller.toggle('settings_component');
-                                init();
-                            },
-                            onBack: () => Lampa.Controller.toggle('settings_component')
                         });
                     } else if (item.action === 'auto_sync') {
                         Lampa.Select.show({
                             title: 'Интервал отправки',
-                            items: intervalOptions.map(opt => ({
-                                title: opt.title,
-                                value: opt.value,
-                                selected: c.auto_sync_interval === opt.value
-                            })),
+                            items: intervalOptions.map(opt => ({ title: opt.title, value: opt.value, selected: c.auto_sync_interval === opt.value })),
                             onSelect: (opt) => {
                                 c.auto_sync_interval = opt.value;
                                 saveCfg(c);
-                                notify(`Отправка: ${opt.title}`);
                                 startAutoSync();
+                                notify(`Отправка: ${opt.title}`);
                                 Lampa.Controller.toggle('settings_component');
                             },
                             onBack: () => Lampa.Controller.toggle('settings_component')
@@ -619,16 +561,12 @@
                     } else if (item.action === 'bg_sync') {
                         Lampa.Select.show({
                             title: 'Интервал загрузки',
-                            items: intervalOptions.map(opt => ({
-                                title: opt.title,
-                                value: opt.value,
-                                selected: c.background_sync_interval === opt.value
-                            })),
+                            items: intervalOptions.map(opt => ({ title: opt.title, value: opt.value, selected: c.background_sync_interval === opt.value })),
                             onSelect: (opt) => {
                                 c.background_sync_interval = opt.value;
                                 saveCfg(c);
-                                notify(`Загрузка: ${opt.title}`);
                                 startBackgroundSync();
+                                notify(`Загрузка: ${opt.title}`);
                                 Lampa.Controller.toggle('settings_component');
                             },
                             onBack: () => Lampa.Controller.toggle('settings_component')
@@ -646,9 +584,7 @@
                         Lampa.Controller.toggle('settings_component');
                     }
                 },
-                onBack: () => {
-                    Lampa.Controller.toggle('settings_component');
-                }
+                onBack: () => Lampa.Controller.toggle('settings_component')
             });
         }
     });
@@ -657,7 +593,7 @@
         component: 'timeline_sync',
         param: { name: 'sync_enabled', type: 'toggle', default: true },
         field: { name: 'Включить синхронизацию' },
-        onChange: v => { const c = cfg(); c.enabled = v; saveCfg(c); if (v) init(); }
+        onChange: v => { const c = cfg(); c.enabled = v; saveCfg(c); if (v) { startBackgroundSync(); startAutoSync(); } }
     });
 
     if (window.appready) init();
