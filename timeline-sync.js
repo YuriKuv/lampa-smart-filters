@@ -123,11 +123,12 @@
         };
     }
 
-    // Исправленная функция слияния
+    // Исправленная функция слияния - принудительно обновляет по дате
     function mergeFileView(local, remote) {
         const result = { ...local };
         let changed = false;
         const strategy = cfg().sync_strategy;
+        const now = Date.now();
         
         for (const key in remote) {
             const remoteItem = remote[key];
@@ -161,30 +162,57 @@
                         }
                         break;
                     case 'newest':
-                        // Стратегия по дате - выбираем тот, у которого updated больше
+                        // Для стратегии по дате - всегда берём тот, у которого updated больше
                         if (remoteUpdated > localUpdated) {
                             shouldUseRemote = true;
                             reason = `дата (${new Date(localUpdated).toLocaleString()} → ${new Date(remoteUpdated).toLocaleString()})`;
-                        } else if (localUpdated > remoteUpdated) {
-                            reason = `локальная дата новее`;
                         }
                         break;
                 }
             }
             
             if (shouldUseRemote) {
-                // Сохраняем удалённый таймкод
                 result[key] = { 
                     ...remoteItem, 
-                    updated: remoteUpdated || Date.now()
+                    updated: remoteUpdated || now
                 };
                 changed = true;
-                console.log(`[Sync] 🔄 ЗАМЕНА (${reason}) для ${key}`);
+                console.log(`[Sync] 🔄 ОБНОВЛЁН (${reason}) для ${key}`);
                 console.log(`   Локальный:  время=${formatTime(localTime)} (${localPercent}%), обновлён=${new Date(localUpdated).toLocaleString()}`);
                 console.log(`   Удалённый:  время=${formatTime(remoteTime)} (${remotePercent}%), обновлён=${new Date(remoteUpdated).toLocaleString()}`);
             }
         }
+        
+        // Также проверяем, нет ли в локальных данных таймкодов без updated
+        for (const key in result) {
+            if (!result[key].updated) {
+                result[key].updated = now;
+                changed = true;
+                console.log(`[Sync] 🔧 Добавлена дата для ${key}`);
+            }
+        }
+        
         return { merged: result, changed };
+    }
+
+    // Принудительное обновление карточек
+    function refreshUI() {
+        try {
+            if (Lampa.Timeline && Lampa.Timeline.read) {
+                Lampa.Timeline.read(true);
+            }
+            const activity = Lampa.Activity.active();
+            if (activity && activity.activity && activity.activity.refresh) {
+                activity.activity.refresh();
+            }
+            Lampa.Listener.send('state:changed', {
+                target: 'timeline',
+                reason: 'refresh'
+            });
+            console.log('[Sync] UI обновлён');
+        } catch(e) {
+            console.error('[Sync] Ошибка обновления UI:', e);
+        }
     }
 
     function getCurrentMovieTmdbId() {
@@ -220,7 +248,6 @@
         const savedTime = fileView[tmdbId]?.time || 0;
         const now = Date.now();
         
-        // Сохраняем если прошло 10 секунд или это принудительное сохранение
         if (Math.abs(currentTime - savedTime) >= 10) {
             const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
@@ -229,11 +256,10 @@
                 time: currentTime,
                 percent: percent,
                 duration: duration,
-                updated: now  // ВАЖНО: обновляем дату при каждом сохранении
+                updated: now
             };
             setFileView(fileView);
             console.log(`[Sync] 💾 СОХРАНЕНО: ${formatTime(currentTime)} (${percent}%) для ${tmdbId}`);
-            console.log(`   Время обновления: ${new Date(now).toLocaleString()}`);
             
             if (Lampa.Timeline && Lampa.Timeline.update) {
                 Lampa.Timeline.update({
@@ -319,7 +345,7 @@
         }
         
         syncInProgress = true;
-        console.log(`[Sync] 📥 Загрузка с Gist... Стратегия: ${c.sync_strategy === 'newest' ? 'по дате' : c.sync_strategy === 'max_time' ? 'по времени' : 'по проценту'}`);
+        console.log(`[Sync] 📥 Загрузка с Gist...`);
         
         $.ajax({
             url: `https://api.github.com/gists/${c.gist_id}`,
@@ -343,9 +369,8 @@
                             setFileView(merged);
                             console.log(`[Sync] Итог: ${Object.keys(merged).length} таймкодов`);
                             
-                            if (Lampa.Timeline && Lampa.Timeline.read) {
-                                Lampa.Timeline.read(true);
-                            }
+                            // Обновляем UI после загрузки
+                            refreshUI();
                             
                             if (showNotify) notify(`📥 Загружено ${count} таймкодов`);
                         } else if (showNotify) {
@@ -399,7 +424,7 @@
 
     function backgroundSyncTask() {
         if (!cfg().enabled) return;
-        console.log('[Sync] 🔄 Фоновая синхронизация');
+        console.log('[Sync] 🔄 Фоновая загрузка');
         syncFromGist(false);
     }
 
@@ -459,8 +484,8 @@
                             if (tmdbId && fileView[tmdbId]?.time) {
                                 const savedTime = fileView[tmdbId].time;
                                 console.log(`[Sync] 🎯 Загружен таймкод: ${formatTime(savedTime)}`);
-                                console.log(`   Обновлён: ${new Date(fileView[tmdbId].updated).toLocaleString()}`);
                                 notify(`🎯 Таймкод: ${formatTimeShort(savedTime)}`);
+                                refreshUI();
                             }
                         }
                     });
@@ -532,6 +557,7 @@
                 { title: '📤 Отправить сейчас', action: 'upload' },
                 { title: '📥 Загрузить сейчас', action: 'download' },
                 { title: '🔄 Полная синхр.', action: 'force' },
+                { title: '🔄 Обновить UI', action: 'refresh' },
                 { title: '──────────', separator: true },
                 { title: '❌ Отмена', action: 'cancel' }
             ],
@@ -543,7 +569,7 @@
                     });
                 } else if (item.action === 'id') {
                     Lampa.Input.edit({ title: 'Gist ID', value: c.gist_id, free: true }, (val) => {
-                        if (val !== null) { c.gist_id = val || ''; saveCfg(c); notify('Gist ID сохранен'); }
+                        if (val !== null) { c.gist_id = val || ''; saveCfg(c); notify('Gist ID сохранён'); }
                         showGistSetup();
                     });
                 } else if (item.action === 'device') {
@@ -620,6 +646,10 @@
                 } else if (item.action === 'force') {
                     fullSync();
                     setTimeout(() => showGistSetup(), 2000);
+                } else if (item.action === 'refresh') {
+                    refreshUI();
+                    notify('🔄 UI обновлён');
+                    setTimeout(() => showGistSetup(), 1000);
                 }
             },
             onBack: () => {
