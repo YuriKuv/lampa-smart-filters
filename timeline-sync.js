@@ -8,6 +8,7 @@
     let syncInProgress = false;
     let autoSyncTimer = null;
     let backgroundSyncTimer = null;
+    let isInit = false;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -358,7 +359,7 @@
         });
     }
 
-    // Фоновая загрузка - запускается всегда и работает постоянно
+    // Фоновая загрузка
     function startBackgroundSync() {
         if (backgroundSyncTimer) {
             clearInterval(backgroundSyncTimer);
@@ -370,7 +371,6 @@
             backgroundSyncTimer = setInterval(() => {
                 if (!cfg().enabled) return;
                 if (syncInProgress) return;
-                console.log(`[Sync] 🔄 Фоновая загрузка (каждые ${interval} сек)`);
                 syncFromGist(false);
             }, interval * 1000);
             console.log(`[Sync] ✅ Фоновая загрузка запущена (${interval} сек)`);
@@ -379,7 +379,7 @@
         }
     }
 
-    // Автоотправка - работает только когда плеер открыт
+    // Автоотправка
     function startAutoSync() {
         if (autoSyncTimer) {
             clearInterval(autoSyncTimer);
@@ -406,6 +406,13 @@
         }
     }
 
+    // Запуск всех сервисов
+    function startAllServices() {
+        if (!cfg().enabled) return;
+        startBackgroundSync();
+        startAutoSync();
+    }
+
     function addHeadButton() {
         const svgIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" fill="currentColor"/></svg>';
         
@@ -423,8 +430,10 @@
     }
 
     function init() {
+        if (isInit) return;
         if (!cfg().enabled) return;
         
+        isInit = true;
         console.log(`[Sync] Инициализация. Стратегия: ${cfg().sync_strategy}`);
         
         // Нормализация
@@ -435,11 +444,8 @@
             setFileView(normalized);
         }
         
-        // Запускаем фоновую загрузку - ВСЕГДА, независимо от плеера
-        startBackgroundSync();
-        
-        // Запускаем автоотправку
-        startAutoSync();
+        // Запускаем все сервисы
+        startAllServices();
         
         // Кнопка
         addHeadButton();
@@ -449,7 +455,6 @@
             if (e.type === 'open') {
                 console.log('[Sync] 🎬 Плеер открыт');
                 const tmdbId = getCurrentMovieTmdbId();
-                // Принудительная загрузка при открытии
                 setTimeout(() => {
                     syncFromGist(false, () => {
                         const fileView = getFileView();
@@ -529,11 +534,13 @@
                         Lampa.Input.edit({ title: 'GitHub Token', value: c.gist_token, free: true }, (val) => {
                             if (val !== null) { c.gist_token = val || ''; saveCfg(c); notify('Токен сохранён'); }
                             Lampa.Controller.toggle('settings_component');
+                            startAllServices();
                         });
                     } else if (item.action === 'id') {
                         Lampa.Input.edit({ title: 'Gist ID', value: c.gist_id, free: true }, (val) => {
                             if (val !== null) { c.gist_id = val || ''; saveCfg(c); notify('Gist ID сохранён'); }
                             Lampa.Controller.toggle('settings_component');
+                            startAllServices();
                         });
                     } else if (item.action === 'device') {
                         Lampa.Input.edit({ title: 'Имя устройства', value: c.device_name, free: true }, (val) => {
@@ -593,7 +600,7 @@
         component: 'timeline_sync',
         param: { name: 'sync_enabled', type: 'toggle', default: true },
         field: { name: 'Включить синхронизацию' },
-        onChange: v => { const c = cfg(); c.enabled = v; saveCfg(c); if (v) { startBackgroundSync(); startAutoSync(); } }
+        onChange: v => { const c = cfg(); c.enabled = v; saveCfg(c); if (v) startAllServices(); }
     });
 
     if (window.appready) init();
