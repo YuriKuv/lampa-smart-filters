@@ -9,7 +9,6 @@
     let syncInProgress = false;
     let pendingSync = false;
     let currentMovieId = null;
-    let currentSeriesKey = null;
     let lastSavedTime = 0;
     let currentMovieTime = 0;
     let autoSyncInterval = null;
@@ -109,19 +108,34 @@
         return null;
     }
 
+    function getCurrentMovieTmdbId() {
+        try {
+            const activity = Lampa.Activity.active();
+            if (activity && activity.movie) {
+                const movie = activity.movie;
+                if (movie.tmdb_id) return String(movie.tmdb_id);
+                if (movie.id && /^\d{6,8}$/.test(String(movie.id))) {
+                    return String(movie.id);
+                }
+            }
+            if (currentMovieId) return currentMovieId;
+            return null;
+        } catch(e) {
+            return currentMovieId || null;
+        }
+    }
+
     function getCurrentMovieKey() {
         const tmdbId = getCurrentMovieTmdbId();
         if (!tmdbId) return null;
         
         const seriesInfo = getSeriesInfoFromUrl();
         if (seriesInfo && seriesInfo.season && seriesInfo.episode) {
-            // Для сериалов: tmdbId_season_episode
             return `${tmdbId}_s${seriesInfo.season}_e${seriesInfo.episode}`;
         }
         return tmdbId;
     }
-    
-    // Добавляем функцию для принудительного обновления ID фильма при открытии
+
     function updateCurrentMovieInfo() {
         try {
             const activity = Lampa.Activity.active();
@@ -137,37 +151,6 @@
         return false;
     }
 
-    function getCurrentMovieTmdbId() {
-        try {
-            // 1. Сначала пробуем получить из Activity (самый надёжный способ)
-            const activity = Lampa.Activity.active();
-            if (activity && activity.movie) {
-                const movie = activity.movie;
-                // Проверяем, есть ли tmdb_id
-                if (movie.tmdb_id) return String(movie.tmdb_id);
-                // Если нет tmdb_id, но есть id - используем его
-                if (movie.id && /^\d{6,8}$/.test(String(movie.id))) {
-                    return String(movie.id);
-                }
-            }
-            
-            // 2. Если Activity не дал результат, используем сохранённый currentMovieId
-            // но только если он был установлен в этом сеансе
-            if (currentMovieId) return currentMovieId;
-            
-            // 3. Последняя попытка - из плеера
-            const playerData = Lampa.Player.playdata();
-            if (playerData && playerData.timeline && playerData.timeline.hash) {
-                const hash = playerData.timeline.hash;
-                if (/^\d+$/.test(hash)) return hash;
-            }
-            
-            return null;
-        } catch(e) {
-            return currentMovieId || null;
-        }
-    }
-
     function saveCurrentProgress(timeInSeconds, force = false) {
         const c = cfg();
         if (!c.auto_save && !force) return false;
@@ -180,19 +163,26 @@
         const savedTime = fileView[movieKey]?.time || 0;
         
         if (force || Math.abs(currentTime - savedTime) >= 10) {
-            const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
+            const playerData = Lampa.Player.playdata();
+            const duration = playerData?.timeline?.duration || 0;
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
             
             const seriesInfo = getSeriesInfoFromUrl();
             
-            fileView[movieKey] = {
+            const record = {
                 time: currentTime,
                 percent: percent,
                 duration: duration,
                 updated: Date.now(),
-                tmdb_id: getCurrentMovieTmdbId(),
-                ...(seriesInfo && { season: seriesInfo.season, episode: seriesInfo.episode })
+                tmdb_id: getCurrentMovieTmdbId()
             };
+            
+            if (seriesInfo && seriesInfo.season && seriesInfo.episode) {
+                record.season = seriesInfo.season;
+                record.episode = seriesInfo.episode;
+            }
+            
+            fileView[movieKey] = record;
             setFileView(fileView);
             console.log(`[Sync] 💾 Сохранён прогресс: ${formatTime(currentTime)} (${percent}%) для ${movieKey}`);
             lastSavedTime = currentTime;
@@ -213,6 +203,7 @@
 
     function syncToGist(showNotify = true, callback = null) {
         const c = cfg();
+        
         if (!c.auto_sync && !showNotify) {
             if (callback) callback(false);
             return;
@@ -230,7 +221,15 @@
             return;
         }
         
-        const data = getProgressData();
+        const data = {
+            version: 5,
+            profile_id: getCurrentProfileId(),
+            device: c.device_name,
+            source: Lampa.Storage.field('source') || 'tmdb',
+            updated: Date.now(),
+            file_view: getFileView()
+        };
+        
         const count = Object.keys(data.file_view).length;
         if (count === 0) {
             if (callback) callback(false);
@@ -276,6 +275,7 @@
 
     function syncFromGist(showNotify = true, callback = null) {
         const c = cfg();
+        
         if (!c.auto_sync && !showNotify) {
             if (callback) callback(false);
             return;
@@ -332,13 +332,11 @@
                             let reason = '';
                             
                             if (strategy === 'max_time') {
-                                // По длительности просмотра
                                 if (remoteRecord.time > localRecord.time + 5) {
                                     shouldUseRemote = true;
                                     reason = `время ${formatTime(localRecord.time)} → ${formatTime(remoteRecord.time)}`;
                                 }
                             } else if (strategy === 'last_watch') {
-                                // По дате просмотра
                                 const remoteUpdated = remoteRecord.updated || 0;
                                 const localUpdated = localRecord.updated || 0;
                                 if (remoteUpdated > localUpdated) {
@@ -391,17 +389,6 @@
         });
     }
 
-    function getProgressData() {
-        return {
-            version: 5,
-            profile_id: getCurrentProfileId(),
-            device: cfg().device_name,
-            source: Lampa.Storage.field('source') || 'tmdb',
-            updated: Date.now(),
-            file_view: getFileView()
-        };
-    }
-
     function saveCurrentProgressForce() {
         if (currentMovieTime > 0) {
             saveCurrentProgress(currentMovieTime, true);
@@ -445,7 +432,6 @@
             const isPlayerOpen = Lampa.Player.opened();
             const currentTime = getCurrentPlayerTime();
             
-            // При открытии плеера обновляем ID фильма
             if (isPlayerOpen && !wasPlayerOpen) {
                 updateCurrentMovieInfo();
             }
@@ -457,7 +443,6 @@
             wasPlayerOpen = isPlayerOpen;
             
             if (isPlayerOpen && currentTime !== null && currentTime > 0) {
-                // Принудительно обновляем ID каждый раз, когда идёт воспроизведение
                 updateCurrentMovieInfo();
                 currentMovieTime = currentTime;
                 
@@ -486,101 +471,6 @@
         
         console.log('[Sync] Обработчик плеера запущен');
     }
-    
-    // Добавляем функцию очистки дубликатов в Gist
-    function cleanDuplicateKeys() {
-        const fileView = getFileView();
-        let changed = false;
-        
-        // Ищем ключи, которые выглядят как дубликаты сериалов
-        const seriesKeys = {};
-        const keysToRemove = [];
-        
-        for (const key in fileView) {
-            // Если это ключ сериала (содержит _s*_e*)
-            if (key.match(/_s\d+_e\d+/)) {
-                const baseId = key.split('_s')[0];
-                if (!seriesKeys[baseId]) seriesKeys[baseId] = [];
-                seriesKeys[baseId].push(key);
-            }
-        }
-        
-        // Для каждого базового ID проверяем, есть ли дублирующий простой ключ
-        for (const baseId in seriesKeys) {
-            if (fileView[baseId]) {
-                console.log(`[Sync] 🗑️ Удаляем дубликат: ${baseId}`);
-                delete fileView[baseId];
-                changed = true;
-            }
-        }
-        
-        if (changed) {
-            setFileView(fileView);
-            notify('✅ Дубликаты очищены');
-            syncToGist(true);
-        } else {
-            notify('Дубликатов не найдено');
-        }
-    }
-        
-        function getCurrentMovieIdFromActivity() {
-            try {
-                const activity = Lampa.Activity.active();
-                if (activity && activity.movie) {
-                    return extractTmdbIdFromItem(activity.movie);
-                }
-            } catch(e) {}
-            return null;
-        }
-        
-        let wasPlayerOpen = false;
-        let lastMovieKey = null;
-        
-        playerCheckInterval = setInterval(() => {
-            const c = cfg();
-            if (!c.enabled) return;
-            
-            const isPlayerOpen = Lampa.Player.opened();
-            const currentTime = getCurrentPlayerTime();
-            
-            if (wasPlayerOpen && !isPlayerOpen && currentMovieTime > 0) {
-                console.log(`[Sync] 🛑 Плеер закрыт/остановлен, сохранение на ${formatTime(currentMovieTime)}`);
-                saveCurrentProgressForce();
-            }
-            wasPlayerOpen = isPlayerOpen;
-            
-            if (isPlayerOpen && currentTime !== null && currentTime > 0) {
-                const movieId = getCurrentMovieIdFromActivity();
-                if (movieId) {
-                    currentMovieId = movieId;
-                    currentMovieTime = currentTime;
-                    
-                    const movieKey = getCurrentMovieKey();
-                    if (movieKey && movieKey !== lastMovieKey) {
-                        console.log(`[Sync] 🎬 Новый ключ: ${movieKey}`);
-                        lastMovieKey = movieKey;
-                        lastSavedProgress = 0;
-                    }
-                    
-                    if (c.auto_save && Math.floor(currentTime) - lastSavedProgress >= 10) {
-                        if (saveCurrentProgress(currentTime)) {
-                            lastSavedProgress = Math.floor(currentTime);
-                            console.log(`[Sync] 💾 Автосохранение: ${formatTime(currentTime)}`);
-                            
-                            const now = Date.now();
-                            if (c.auto_sync && (now - lastSyncToGist) >= (c.sync_interval * 1000)) {
-                                console.log(`[Sync] 📤 Автоотправка по интервалу`);
-                                syncToGist(false);
-                                lastSyncToGist = now;
-                            }
-                        }
-                    }
-                }
-            }
-        }, 1000);
-        
-        console.log('[Sync] Обработчик плеера запущен');
-    }
 
     function startBackgroundSync() {
         if (autoSyncInterval) clearInterval(autoSyncInterval);
@@ -593,6 +483,30 @@
                 syncToGist(false);
             }
         }, 60000);
+    }
+
+    function cleanDuplicates() {
+        const fileView = getFileView();
+        let changed = false;
+        
+        for (const key in fileView) {
+            if (key.match(/_s\d+_e\d+/)) {
+                const baseId = key.split('_s')[0];
+                if (fileView[baseId]) {
+                    console.log(`[Sync] 🗑️ Удаляем дубликат: ${baseId}`);
+                    delete fileView[baseId];
+                    changed = true;
+                }
+            }
+        }
+        
+        if (changed) {
+            setFileView(fileView);
+            notify('✅ Дубликаты очищены');
+            syncToGist(true);
+        } else {
+            notify('Дубликатов не найдено');
+        }
     }
 
     function showMainMenu() {
@@ -619,7 +533,7 @@
                 { title: '🔄 Отправить таймкоды', action: 'upload' },
                 { title: '📥 Загрузить таймкоды', action: 'download' },
                 { title: '🔄 Полная синхронизация', action: 'force' },
-                { title: '🧹 Очистить дубликаты', action: 'clean_duplicates' },
+                { title: '🧹 Очистить дубликаты', action: 'clean' },
                 { title: '──────────', separator: true },
                 { title: '❌ Закрыть', action: 'cancel' }
             ],
@@ -729,6 +643,10 @@
                         syncFromGist(true);
                     }, 1000);
                     setTimeout(() => showMainMenu(), 2000);
+                }
+                else if (item.action === 'clean') {
+                    cleanDuplicates();
+                    setTimeout(() => showMainMenu(), 1500);
                 }
             },
             onBack: () => {
