@@ -36,7 +36,8 @@
             cleanup_days: 30,
             cleanup_completed: true,
             end_credits_threshold: 180,
-            always_show_timeline: true
+            always_show_timeline: true,
+            timeline_position: 'bottom'
         }) || {};
     }
 
@@ -173,56 +174,101 @@
         return Lampa.Storage.field('source') || 'tmdb';
     }
 
+    function isTouchDevice() {
+        return (Lampa.Platform && (Lampa.Platform.is('android') || Lampa.Platform.is('ios'))) ||
+               ('ontouchstart' in window) ||
+               (navigator.maxTouchPoints > 0) ||
+               document.body.classList.contains('touch-device') ||
+               document.body.classList.contains('true--mobile');
+    }
+
     // ============ ВСЕГДА ПОКАЗЫВАТЬ ТАЙМКОДЫ ============
+    function getPositionStyles() {
+        const c = cfg();
+        const pos = c.timeline_position || 'bottom';
+        
+        const styles = {
+            bottom: `
+                bottom: 2.5em !important;
+                top: auto !important;
+            `,
+            center: `
+                bottom: auto !important;
+                top: 50% !important;
+                transform: translateY(-50%) !important;
+            `,
+            top: `
+                bottom: auto !important;
+                top: 0.5em !important;
+            `
+        };
+        
+        return styles[pos] || styles.bottom;
+    }
+
     function injectTimelineStyles() {
         const oldStyle = document.getElementById('tl-sync-styles');
         if (oldStyle) oldStyle.remove();
         
+        const positionStyles = getPositionStyles();
+        const c = cfg();
+        
         const style = document.createElement('style');
         style.id = 'tl-sync-styles';
         style.textContent = `
-            /* ВСЕГДА ПОКАЗЫВАТЬ ТАЙМКОДЫ НА КАРТОЧКАХ */
+            /* ВСЕГДА ПОКАЗЫВАТЬ ТАЙМКОДЫ НА КАРТОЧКАХ - ВСЕ РЕЖИМЫ */
             
             /* Основной контейнер таймкода - всегда показываем */
-            .card .card-watched {
+            .card .card-watched,
+            .view--card .card-watched,
+            .card--movie .card-watched,
+            .card--tv .card-watched {
                 display: block !important;
                 opacity: 1 !important;
                 visibility: visible !important;
                 pointer-events: none;
+                ${positionStyles}
+                left: 0.8em !important;
+                right: 0.8em !important;
+                z-index: 5 !important;
             }
             
             /* Убираем зависимость от фокуса */
-            .card:not(.focus) .card-watched {
+            .card:not(.focus) .card-watched,
+            .card:not(:hover) .card-watched,
+            .card:not(.hover) .card-watched {
                 display: block !important;
                 opacity: 1 !important;
                 visibility: visible !important;
             }
             
-            /* Для сенсорных устройств */
+            /* СПЕЦИАЛЬНО ДЛЯ СЕНСОРНОГО РЕЖИМА */
+            body.touch-device .card .card-watched,
+            body.true--mobile .card .card-watched,
             .touch .card .card-watched,
-            .mobile .card .card-watched,
-            body.touch-device .card .card-watched {
+            .mobile .card .card-watched {
                 display: block !important;
                 opacity: 1 !important;
                 visibility: visible !important;
+            }
+            
+            /* Принудительно показываем даже если скрыто через style */
+            .card-watched[style*="display: none"],
+            .card-watched[style*="display:none"] {
+                display: block !important;
             }
             
             /* Таймлайн внутри карточки */
-            .card .time-line {
+            .card .time-line,
+            .card-watched .time-line {
                 display: block !important;
                 opacity: 1 !important;
                 visibility: visible !important;
             }
             
             /* Элементы внутри card-watched */
-            .card-watched__inner {
-                opacity: 1 !important;
-            }
-            
-            .card-watched__body {
-                opacity: 1 !important;
-            }
-            
+            .card-watched__inner,
+            .card-watched__body,
             .card-watched__item {
                 opacity: 1 !important;
             }
@@ -230,33 +276,19 @@
             /* Прогресс-бар */
             .time-line > div {
                 opacity: 1 !important;
-            }
-            
-            /* Для режима пульта/мыши - тоже показываем */
-            .mouse .card .card-watched,
-            .remote .card .card-watched,
-            body:not(.touch) .card .card-watched {
-                display: block !important;
-                opacity: 1 !important;
-                visibility: visible !important;
-            }
-            
-            /* Сбрасываем возможные скрытия */
-            .card-watched[style*="display: none"],
-            .card-watched[style*="display:none"] {
-                display: block !important;
+                background-color: #fff !important;
             }
             
             /* Делаем таймкод полупрозрачным чтобы не мешал */
             .card .card-watched {
-                background-color: rgba(0, 0, 0, 0.6) !important;
+                background-color: rgba(0, 0, 0, 0.7) !important;
                 -webkit-backdrop-filter: blur(2px);
                 backdrop-filter: blur(2px);
             }
             
             /* Уменьшаем отступы для компактности */
             .card-watched__item {
-                margin-top: 0.5em !important;
+                margin-top: 0.4em !important;
             }
             
             .card-watched__item:first-child {
@@ -272,10 +304,29 @@
             .card--wide .card-watched__item:nth-child(n+2) {
                 display: none !important;
             }
+            
+            /* Для позиции center - центрируем содержимое */
+            ${c.timeline_position === 'center' ? `
+            .card .card-watched {
+                display: flex !important;
+                align-items: center !important;
+            }
+            .card-watched__inner {
+                width: 100% !important;
+            }
+            ` : ''}
+            
+            /* Исправляем для мобильной версии */
+            @media screen and (max-width: 480px) {
+                .card .card-watched {
+                    left: 0.5em !important;
+                    right: 0.5em !important;
+                }
+            }
         `;
         document.head.appendChild(style);
         styleInjected = true;
-        console.log('[Sync] Стили для всегда видимых таймкодов добавлены');
+        console.log('[Sync] Стили для всегда видимых таймкодов добавлены (позиция: ' + c.timeline_position + ')');
     }
 
     function removeTimelineStyles() {
@@ -293,21 +344,55 @@
             Lampa.Timeline.read(true);
         }
         
+        const pos = c.timeline_position || 'bottom';
+        
+        setTimeout(function() {
+            const cards = document.querySelectorAll('.card');
+            cards.forEach(function(card) {
+                const watched = card.querySelector('.card-watched');
+                if (watched) {
+                    watched.style.setProperty('display', 'block', 'important');
+                    watched.style.setProperty('opacity', '1', 'important');
+                    watched.style.setProperty('visibility', 'visible', 'important');
+                    
+                    if (pos === 'bottom') {
+                        watched.style.setProperty('bottom', '2.5em', 'important');
+                        watched.style.setProperty('top', 'auto', 'important');
+                        watched.style.setProperty('transform', 'none', 'important');
+                    } else if (pos === 'center') {
+                        watched.style.setProperty('bottom', 'auto', 'important');
+                        watched.style.setProperty('top', '50%', 'important');
+                        watched.style.setProperty('transform', 'translateY(-50%)', 'important');
+                    } else if (pos === 'top') {
+                        watched.style.setProperty('bottom', 'auto', 'important');
+                        watched.style.setProperty('top', '0.5em', 'important');
+                        watched.style.setProperty('transform', 'none', 'important');
+                    }
+                }
+                
+                const timeLine = card.querySelector('.time-line');
+                if (timeLine) {
+                    timeLine.style.setProperty('display', 'block', 'important');
+                    timeLine.style.setProperty('opacity', '1', 'important');
+                }
+            });
+            
+            const watchedElements = document.querySelectorAll('.card-watched');
+            watchedElements.forEach(function(el) {
+                el.style.setProperty('display', 'block', 'important');
+                el.style.setProperty('opacity', '1', 'important');
+                el.style.setProperty('visibility', 'visible', 'important');
+            });
+        }, 100);
+        
         setTimeout(function() {
             const watchedElements = document.querySelectorAll('.card-watched');
             watchedElements.forEach(function(el) {
-                el.style.display = 'block';
-                el.style.opacity = '1';
-                el.style.visibility = 'visible';
+                el.style.setProperty('display', 'block', 'important');
+                el.style.setProperty('opacity', '1', 'important');
+                el.style.setProperty('visibility', 'visible', 'important');
             });
-            
-            const timeLines = document.querySelectorAll('.time-line');
-            timeLines.forEach(function(el) {
-                el.style.display = 'block';
-                el.style.opacity = '1';
-                el.style.visibility = 'visible';
-            });
-        }, 100);
+        }, 500);
     }
 
     function startStyleObserver() {
@@ -363,9 +448,12 @@
             clearInterval(visibilityInterval);
         }
         
+        const intervalTime = isTouchDevice() ? 500 : 1000;
+        const c = cfg();
+        const pos = c.timeline_position || 'bottom';
+        
         visibilityInterval = setInterval(function() {
-            const c = cfg();
-            if (!c.always_show_timeline) return;
+            if (!cfg().always_show_timeline) return;
             
             const watchedElements = document.querySelectorAll('.card-watched');
             watchedElements.forEach(function(el) {
@@ -376,9 +464,24 @@
                     el.style.setProperty('visibility', 'visible', 'important');
                 }
             });
-        }, 1000);
+            
+            if (isTouchDevice()) {
+                const cards = document.querySelectorAll('.card');
+                cards.forEach(function(card) {
+                    const watched = card.querySelector('.card-watched');
+                    if (!watched) return;
+                    
+                    const style = window.getComputedStyle(watched);
+                    if (style.display === 'none') {
+                        watched.style.display = 'block';
+                        watched.style.opacity = '1';
+                        watched.style.visibility = 'visible';
+                    }
+                });
+            }
+        }, intervalTime);
         
-        console.log('[Sync] Интервал проверки видимости запущен');
+        console.log(`[Sync] Интервал проверки видимости запущен (${intervalTime}мс)`);
     }
 
     function stopVisibilityInterval() {
@@ -393,6 +496,19 @@
         startStyleObserver();
         startVisibilityInterval();
         forceRefreshCards();
+        
+        if (isTouchDevice()) {
+            console.log('[Sync] Обнаружено сенсорное устройство, применяем дополнительные стили');
+            
+            if (!document.body.classList.contains('touch-device')) {
+                document.body.classList.add('touch-device');
+            }
+            
+            setTimeout(forceRefreshCards, 200);
+            setTimeout(forceRefreshCards, 500);
+            setTimeout(forceRefreshCards, 1000);
+            setTimeout(forceRefreshCards, 2000);
+        }
     }
 
     function disableAlwaysShowTimeline() {
@@ -1478,6 +1594,7 @@
         const c = cfg();
         const strategyIcon = c.sync_strategy === 'max_time' ? '⏱️' : '📅';
         const strategyName = c.sync_strategy === 'max_time' ? 'по длительности' : 'по дате';
+        const positionName = c.timeline_position === 'bottom' ? 'снизу' : (c.timeline_position === 'center' ? 'по центру' : 'сверху');
         
         Lampa.Select.show({
             title: 'Синхронизация таймкодов',
@@ -1488,6 +1605,7 @@
                 { title: `${c.smart_sync ? '✅' : '❌'} Умная синхр.: ${c.smart_sync ? 'Вкл' : 'Выкл'}`, action: 'toggle_smart_sync' },
                 { title: '──────────', separator: true },
                 { title: `${c.always_show_timeline ? '✅' : '❌'} Таймкоды всегда: ${c.always_show_timeline ? 'Вкл' : 'Выкл'}`, action: 'toggle_always_show' },
+                { title: `📍 Позиция таймкода: ${positionName}`, action: 'toggle_position' },
                 { title: `${strategyIcon} Стратегия: ${strategyName}`, action: 'toggle_strategy' },
                 { title: `⏱️ Интервал синхр.: ${c.sync_interval || 30} сек`, action: 'set_interval' },
                 { title: `🎬 Порог титров: ${c.end_credits_threshold || 180} сек`, action: 'set_threshold' },
@@ -1565,6 +1683,29 @@
                         notify('ℹ️ Таймкоды только при наведении');
                     }
                     showMainMenu();
+                }
+                else if (item.action === 'toggle_position') {
+                    Lampa.Select.show({
+                        title: 'Позиция таймкода',
+                        items: [
+                            { title: '⬇️ Снизу', action: 'bottom' },
+                            { title: '📍 По центру', action: 'center' },
+                            { title: '⬆️ Сверху', action: 'top' }
+                        ],
+                        onSelect: function(subItem) {
+                            if (subItem.action) {
+                                c.timeline_position = subItem.action;
+                                saveCfg(c);
+                                if (c.always_show_timeline) {
+                                    enableAlwaysShowTimeline();
+                                }
+                                const posName = subItem.action === 'bottom' ? 'снизу' : (subItem.action === 'center' ? 'по центру' : 'сверху');
+                                notify(`📍 Позиция: ${posName}`);
+                            }
+                            showMainMenu();
+                        },
+                        onBack: function() { showMainMenu(); }
+                    });
                 }
                 else if (item.action === 'toggle_strategy') {
                     c.sync_strategy = c.sync_strategy === 'max_time' ? 'last_watch' : 'max_time';
@@ -1784,7 +1925,7 @@
             }
         }, 3000);
         
-        notify('✅ Синхронизация v6.4 загружена');
+        notify('✅ Синхронизация v6.5 загружена');
     }
 
     if (window.Lampa && Lampa.Listener) {
