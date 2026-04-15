@@ -582,79 +582,193 @@
 
     // ============ КОНТЕКСТНОЕ МЕНЮ ============
     function addContextMenu() {
-        // Добавляем пункты в меню карточки фильма/сериала
-        const originalMovieMore = Lampa.Component.get('movie_more');
-        if (originalMovieMore && originalMovieMore.prototype) {
-            const originalBuild = originalMovieMore.prototype.build;
+        // Ждём загрузки компонентов
+        const checkAndPatch = () => {
+            // Пробуем разные способы добавить пункты в контекстное меню
             
-            originalMovieMore.prototype.build = function() {
-                const items = originalBuild.call(this);
-                
-                // Добавляем разделитель
-                items.push({ title: '──────────', separator: true });
-                
-                // Пункты синхронизации
-                items.push({
-                    title: '🔄 Синхронизировать прогресс',
-                    action: () => {
-                        const movie = this.movie;
-                        if (movie) {
-                            syncMovieProgress(movie);
+            // Способ 1: Через Lampa.Component
+            if (Lampa.Component && Lampa.Component.get) {
+                const movieMore = Lampa.Component.get('movie_more');
+                if (movieMore && movieMore.prototype && movieMore.prototype.build) {
+                    const originalBuild = movieMore.prototype.build;
+                    
+                    movieMore.prototype.build = function() {
+                        const items = originalBuild.call(this);
+                        
+                        // Проверяем, не добавили ли уже наши пункты
+                        const hasSyncItems = items.some(item => item.action === 'sync_progress');
+                        if (!hasSyncItems && this.movie) {
+                            // Добавляем разделитель
+                            items.push({ title: '──────────', separator: true });
+                            
+                            // Пункты синхронизации
+                            items.push({
+                                title: '🔄 Синхронизировать прогресс',
+                                action: 'sync_progress',
+                                onSelect: () => {
+                                    syncMovieProgress(this.movie);
+                                }
+                            });
+                            
+                            items.push({
+                                title: '🗑️ Сбросить прогресс везде',
+                                action: 'reset_progress',
+                                onSelect: () => {
+                                    resetMovieProgress(this.movie);
+                                }
+                            });
+                            
+                            items.push({
+                                title: '✅ Отметить как просмотренное',
+                                action: 'mark_watched',
+                                onSelect: () => {
+                                    markMovieAsWatched(this.movie);
+                                }
+                            });
                         }
+                        
+                        return items;
+                    };
+                    
+                    console.log('[Sync] Контекстное меню добавлено через Component');
+                    return true;
+                }
+            }
+            
+            // Способ 2: Через Lampa.Arrays
+            if (Lampa.Arrays && Lampa.Arrays.movie_more) {
+                const originalArray = Lampa.Arrays.movie_more;
+                Lampa.Arrays.movie_more = function(movie) {
+                    const items = originalArray(movie);
+                    
+                    const hasSyncItems = items.some(item => item.action === 'sync_progress');
+                    if (!hasSyncItems && movie) {
+                        items.push({ title: '──────────', separator: true });
+                        items.push({
+                            title: '🔄 Синхронизировать прогресс',
+                            action: 'sync_progress',
+                            onSelect: () => syncMovieProgress(movie)
+                        });
+                        items.push({
+                            title: '🗑️ Сбросить прогресс везде',
+                            action: 'reset_progress',
+                            onSelect: () => resetMovieProgress(movie)
+                        });
+                        items.push({
+                            title: '✅ Отметить как просмотренное',
+                            action: 'mark_watched',
+                            onSelect: () => markMovieAsWatched(movie)
+                        });
                     }
-                });
+                    
+                    return items;
+                };
                 
-                items.push({
-                    title: '🗑️ Сбросить прогресс везде',
-                    action: () => {
-                        const movie = this.movie;
-                        if (movie) {
-                            resetMovieProgress(movie);
-                        }
+                console.log('[Sync] Контекстное меню добавлено через Arrays');
+                return true;
+            }
+            
+            // Способ 3: Через глобальный объект меню
+            if (window.movie_menu && Array.isArray(window.movie_menu)) {
+                const hasSyncItems = window.movie_menu.some(item => item.action === 'sync_progress');
+                if (!hasSyncItems) {
+                    window.movie_menu.push({ title: '──────────', separator: true });
+                    window.movie_menu.push({
+                        title: '🔄 Синхронизировать прогресс',
+                        action: 'sync_progress',
+                        onSelect: (movie) => syncMovieProgress(movie)
+                    });
+                    window.movie_menu.push({
+                        title: '🗑️ Сбросить прогресс везде',
+                        action: 'reset_progress',
+                        onSelect: (movie) => resetMovieProgress(movie)
+                    });
+                    window.movie_menu.push({
+                        title: '✅ Отметить как просмотренное',
+                        action: 'mark_watched',
+                        onSelect: (movie) => markMovieAsWatched(movie)
+                    });
+                }
+                
+                console.log('[Sync] Контекстное меню добавлено через window.movie_menu');
+                return true;
+            }
+            
+            return false;
+        };
+        
+        // Пробуем добавить сразу
+        if (!checkAndPatch()) {
+            // Если не получилось, пробуем ещё раз через секунду
+            setTimeout(() => {
+                if (!checkAndPatch()) {
+                    // Пробуем ещё раз позже
+                    setTimeout(checkAndPatch, 3000);
+                }
+            }, 1000);
+        }
+        
+        // Добавляем обработчик для динамически создаваемых меню
+        const originalShow = Lampa.Select.show;
+        if (originalShow) {
+            Lampa.Select.show = function(config) {
+                // Если это меню фильма и у нас нет наших пунктов
+                if (config.title === 'Меню фильма' || config.title === 'Меню сериала') {
+                    const hasSyncItems = config.items && config.items.some(item => 
+                        item.action === 'sync_progress' || item.action === 'reset_progress' || item.action === 'mark_watched'
+                    );
+                    
+                    if (!hasSyncItems && config.movie) {
+                        config.items = config.items || [];
+                        config.items.push({ title: '──────────', separator: true });
+                        config.items.push({
+                            title: '🔄 Синхронизировать прогресс',
+                            action: 'sync_progress',
+                            onSelect: () => syncMovieProgress(config.movie)
+                        });
+                        config.items.push({
+                            title: '🗑️ Сбросить прогресс везде',
+                            action: 'reset_progress',
+                            onSelect: () => resetMovieProgress(config.movie)
+                        });
+                        config.items.push({
+                            title: '✅ Отметить как просмотренное',
+                            action: 'mark_watched',
+                            onSelect: () => markMovieAsWatched(config.movie)
+                        });
                     }
-                });
+                }
                 
-                items.push({
-                    title: '✅ Отметить как просмотренное',
-                    action: () => {
-                        const movie = this.movie;
-                        if (movie) {
-                            markMovieAsWatched(movie);
-                        }
-                    }
-                });
-                
-                return items;
+                return originalShow.call(this, config);
             };
+            
+            console.log('[Sync] Добавлен перехватчик Lampa.Select.show');
         }
     }
 
     function syncMovieProgress(movie) {
         const tmdbId = extractTmdbIdFromItem(movie);
         if (!tmdbId) {
-            notify('❌ Не удалось определить ID фильма');
+            notify('❌ Не удалось определить ID');
             return;
         }
         
-        notify('🔄 Синхронизация прогресса...');
+        notify('🔄 Синхронизация...');
         
-        // Принудительная синхронизация этого конкретного фильма
-        syncToGist(false, () => {
-            syncFromGist(false, () => {
-                notify('✅ Прогресс синхронизирован');
-                
-                // Обновляем отображение
-                if (Lampa.Timeline && Lampa.Timeline.read) {
-                    Lampa.Timeline.read(true);
-                }
-            });
+        // Принудительная синхронизация
+        syncFromGist(false, () => {
+            notify('✅ Прогресс синхронизирован');
+            
+            if (Lampa.Timeline && Lampa.Timeline.read) {
+                Lampa.Timeline.read(true);
+            }
         });
     }
 
     function resetMovieProgress(movie) {
         const tmdbId = extractTmdbIdFromItem(movie);
         if (!tmdbId) {
-            notify('❌ Не удалось определить ID фильма');
+            notify('❌ Не удалось определить ID');
             return;
         }
         
@@ -668,7 +782,7 @@
                 if (item.action === 'confirm') {
                     const fileView = getFileView();
                     
-                    // Удаляем все записи для этого фильма (включая серии)
+                    // Удаляем все записи для этого фильма
                     for (const key in fileView) {
                         if (key.startsWith(tmdbId)) {
                             delete fileView[key];
@@ -678,7 +792,6 @@
                     setFileView(fileView);
                     notify('✅ Прогресс сброшен');
                     
-                    // Синхронизируем изменения
                     syncToGist(false);
                     
                     if (Lampa.Timeline && Lampa.Timeline.read) {
@@ -692,7 +805,7 @@
     function markMovieAsWatched(movie) {
         const tmdbId = extractTmdbIdFromItem(movie);
         if (!tmdbId) {
-            notify('❌ Не удалось определить ID фильма');
+            notify('❌ Не удалось определить ID');
             return;
         }
         
@@ -719,7 +832,7 @@
     }
 
     // ============ СТАТИСТИКА ============
-    function showStatistics() {
+    function showStatistics(closePrevious = true) {
         const fileView = getFileView();
         const meta = getSyncMeta();
         const c = cfg();
@@ -729,6 +842,7 @@
         let totalEpisodes = 0;
         let completedCount = 0;
         let totalWatchTime = meta.total_watch_time || 0;
+        let inProgressCount = 0;
         
         for (const key in fileView) {
             const record = fileView[key];
@@ -739,6 +853,8 @@
             }
             if (record.percent >= 95) {
                 completedCount++;
+            } else if (record.percent > 0) {
+                inProgressCount++;
             }
         }
         
@@ -749,6 +865,7 @@
             { title: `🎬 Фильмов: ${totalMovies}`, disabled: true },
             { title: `📺 Серий: ${totalEpisodes}`, disabled: true },
             { title: `✅ Просмотрено: ${completedCount}`, disabled: true },
+            { title: `🔄 В процессе: ${inProgressCount}`, disabled: true },
             { title: `⏱️ Общее время: ${formatDuration(totalWatchTime)}`, disabled: true },
             { title: '──────────', separator: true },
             { title: `🔄 Синхронизаций: ${meta.sync_count || 0}`, disabled: true },
@@ -758,7 +875,8 @@
             { title: '──────────', separator: true },
             { title: '🔄 Обновить статистику', action: 'refresh' },
             { title: '📤 Экспорт статистики', action: 'export' },
-            { title: '❌ Закрыть', action: 'close' }
+            { title: '🧹 Очистить статистику', action: 'clear_stats' },
+            { title: '⬅️ Назад', action: 'back' }
         ];
         
         Lampa.Select.show({
@@ -766,11 +884,71 @@
             items: items,
             onSelect: (item) => {
                 if (item.action === 'refresh') {
-                    showStatistics();
+                    showStatistics(false);
                 } else if (item.action === 'export') {
                     exportStatistics();
+                    setTimeout(() => showStatistics(false), 500);
+                } else if (item.action === 'clear_stats') {
+                    clearStatistics();
+                } else if (item.action === 'back') {
+                    showMainMenu();
                 }
+            },
+            onBack: () => {
+                showMainMenu();
             }
+        });
+    }
+
+    function clearStatistics() {
+        Lampa.Select.show({
+            title: 'Очистить статистику?',
+            items: [
+                { title: '❌ Отмена', action: 'cancel' },
+                { title: '🗑️ Очистить только счётчики', action: 'clear_counters' },
+                { title: '⚠️ Очистить ВСЁ (включая таймкоды)', action: 'clear_all' }
+            ],
+            onSelect: (item) => {
+                if (item.action === 'clear_counters') {
+                    const meta = getSyncMeta();
+                    meta.sync_count = 0;
+                    meta.total_watch_time = 0;
+                    saveSyncMeta(meta);
+                    notify('📊 Счётчики очищены');
+                    setTimeout(() => showStatistics(false), 500);
+                } else if (item.action === 'clear_all') {
+                    Lampa.Select.show({
+                        title: 'Точно очистить ВСЁ?',
+                        items: [
+                            { title: '❌ Нет, отмена', action: 'cancel' },
+                            { title: '✅ Да, очистить всё', action: 'confirm' }
+                        ],
+                        onSelect: (subItem) => {
+                            if (subItem.action === 'confirm') {
+                                setFileView({});
+                                const meta = getSyncMeta();
+                                meta.sync_count = 0;
+                                meta.total_watch_time = 0;
+                                meta.last_sync = 0;
+                                saveSyncMeta(meta);
+                                notify('🗑️ Все данные очищены');
+                                
+                                if (Lampa.Timeline && Lampa.Timeline.read) {
+                                    Lampa.Timeline.read(true);
+                                }
+                                
+                                setTimeout(() => showStatistics(false), 500);
+                            } else {
+                                showStatistics(false);
+                            }
+                        },
+                        onBack: () => showStatistics(false)
+                    });
+                } else {
+                    showStatistics(false);
+                }
+            },
+            onBack: () => showStatistics(false)
         });
     }
 
@@ -793,12 +971,10 @@
         
         const json = JSON.stringify(stats, null, 2);
         
-        // Для Android - копируем в буфер обмена
         if (Lampa.Platform.is('android')) {
             Lampa.Utils.copyText(json);
-            notify('📋 Статистика скопирована в буфер');
+            notify('📋 Статистика скопирована');
         } else {
-            // Для Web - скачиваем файл
             const blob = new Blob([json], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -949,7 +1125,7 @@
                 { title: '🔄 Отправить таймкоды', action: 'upload' },
                 { title: '📥 Загрузить таймкоды', action: 'download' },
                 { title: '🔄 Полная синхронизация', action: 'force' },
-                { title: '🧹 Очистить старые записи', action: 'cleanup_now' },
+                { title: '🧹 Очистить сейчас', action: 'cleanup_now' },
                 { title: '──────────', separator: true },
                 { title: '❌ Закрыть', action: 'cancel' }
             ],
@@ -1071,7 +1247,7 @@
                     });
                 }
                 else if (item.action === 'statistics') {
-                    showStatistics();
+                    setTimeout(() => showStatistics(true), 100);
                 }
                 else if (item.action === 'upload') {
                     syncToGist(true);
@@ -1110,14 +1286,24 @@
             component: 'timeline_sync',
             param: { name: 'open_menu', type: 'button' },
             field: { name: '⚙️ Открыть меню настроек' },
-            onChange: () => showMainMenu()
+            onChange: () => {
+                if (Lampa.Controller && Lampa.Controller.toggle) {
+                    Lampa.Controller.toggle('settings');
+                }
+                setTimeout(() => showMainMenu(), 100);
+            }
         });
         
         Lampa.SettingsApi.addParam({
             component: 'timeline_sync',
             param: { name: 'open_stats', type: 'button' },
             field: { name: '📊 Статистика' },
-            onChange: () => showStatistics()
+            onChange: () => {
+                if (Lampa.Controller && Lampa.Controller.toggle) {
+                    Lampa.Controller.toggle('settings');
+                }
+                setTimeout(() => showStatistics(true), 100);
+            }
         });
     }
 
