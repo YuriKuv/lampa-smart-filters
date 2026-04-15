@@ -9,6 +9,7 @@
     let syncInProgress = false;
     let pendingSync = false;
     let currentMovieId = null;
+    let currentSeriesKey = null;
     let lastSavedTime = 0;
     let currentMovieTime = 0;
     let autoSyncInterval = null;
@@ -20,7 +21,7 @@
             auto_sync: true,
             auto_save: true,
             sync_on_stop: true,
-            sync_strategy: 'cloud_priority',
+            sync_strategy: 'max_time',
             gist_token: '',
             gist_id: '',
             device_name: Lampa.Platform.get() || 'Unknown',
@@ -85,39 +86,38 @@
         return null;
     }
 
-    function extractTmdbIdFromKey(key, item) {
-        if (/^\d{6,8}$/.test(key)) return key;
-        if (key.startsWith('tmdb_')) return key.replace('tmdb_', '');
-        if (key.startsWith('cub_') && item) {
-            return extractTmdbIdFromItem(item);
-        }
-        return extractTmdbIdFromItem(item);
-    }
-
-    function normalizeKeys(data) {
-        const result = {};
-        for (const key in data) {
-            const tmdbId = extractTmdbIdFromKey(key, data[key]);
-            if (tmdbId) {
-                if (!result[tmdbId] || (data[key].time || 0) > (result[tmdbId].time || 0)) {
-                    result[tmdbId] = { ...data[key], tmdb_id: tmdbId };
+    function getSeriesInfoFromUrl() {
+        try {
+            const playerData = Lampa.Player.playdata();
+            if (playerData && playerData.path) {
+                const url = playerData.path;
+                const patterns = [
+                    /S(\d+)E(\d+)/i,
+                    /S(\d+)[\s.]*E(\d+)/i,
+                    /(\d+)x(\d+)/i,
+                    /Season[.\s]*(\d+)[.\s]*Episode[.\s]*(\d+)/i
+                ];
+                
+                for (const pattern of patterns) {
+                    const match = url.match(pattern);
+                    if (match && match[1] && match[2]) {
+                        return { season: parseInt(match[1]), episode: parseInt(match[2]) };
+                    }
                 }
-            } else {
-                result[key] = data[key];
             }
-        }
-        return result;
+        } catch(e) {}
+        return null;
     }
 
-    function getProgressData() {
-        return {
-            version: 5,
-            profile_id: getCurrentProfileId(),
-            device: cfg().device_name,
-            source: Lampa.Storage.field('source') || 'tmdb',
-            updated: Date.now(),
-            file_view: normalizeKeys(getFileView())
-        };
+    function getCurrentMovieKey() {
+        const tmdbId = getCurrentMovieTmdbId();
+        if (!tmdbId) return null;
+        
+        const seriesInfo = getSeriesInfoFromUrl();
+        if (seriesInfo) {
+            return `${tmdbId}_s${seriesInfo.season}_e${seriesInfo.episode}`;
+        }
+        return tmdbId;
     }
 
     function getCurrentMovieTmdbId() {
@@ -138,31 +138,34 @@
         const c = cfg();
         if (!c.auto_save && !force) return false;
         
-        const tmdbId = getCurrentMovieTmdbId();
-        if (!tmdbId) return false;
+        const movieKey = getCurrentMovieKey();
+        if (!movieKey) return false;
         
         const fileView = getFileView();
         const currentTime = Math.floor(timeInSeconds);
-        const savedTime = fileView[tmdbId]?.time || 0;
+        const savedTime = fileView[movieKey]?.time || 0;
         
         if (force || Math.abs(currentTime - savedTime) >= 10) {
             const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
             
-            fileView[tmdbId] = {
+            const seriesInfo = getSeriesInfoFromUrl();
+            
+            fileView[movieKey] = {
                 time: currentTime,
                 percent: percent,
                 duration: duration,
                 updated: Date.now(),
-                tmdb_id: tmdbId
+                tmdb_id: getCurrentMovieTmdbId(),
+                ...(seriesInfo && { season: seriesInfo.season, episode: seriesInfo.episode })
             };
             setFileView(fileView);
-            console.log(`[Sync] 💾 Сохранён прогресс: ${formatTime(currentTime)} (${percent}%) для ${tmdbId}`);
+            console.log(`[Sync] 💾 Сохранён прогресс: ${formatTime(currentTime)} (${percent}%) для ${movieKey}`);
             lastSavedTime = currentTime;
             
             if (Lampa.Timeline && Lampa.Timeline.update) {
                 Lampa.Timeline.update({
-                    hash: tmdbId,
+                    hash: movieKey,
                     percent: percent,
                     time: currentTime,
                     duration: duration
@@ -277,46 +280,43 @@
                         const localFileView = getFileView();
                         const strategy = c.sync_strategy;
                         
-                        let merged = {};
+                        let merged = { ...localFileView };
                         let changed = false;
                         
-                        if (strategy === 'cloud_priority') {
-                            // Облако важнее - полностью заменяем локальные данные облачными
-                            merged = { ...remoteFileView };
-                            changed = Object.keys(merged).length !== Object.keys(localFileView).length;
-                            if (!changed && Object.keys(merged).length > 0) {
-                                // Проверяем, изменились ли значения
-                                for (const key in merged) {
-                                    if (JSON.stringify(merged[key]) !== JSON.stringify(localFileView[key])) {
-                                        changed = true;
-                                        break;
-                                    }
+                        for (const key in remoteFileView) {
+                            const localRecord = localFileView[key];
+                            const remoteRecord = remoteFileView[key];
+                            
+                            if (!localRecord) {
+                                merged[key] = remoteRecord;
+                                changed = true;
+                                console.log(`[Sync] ➕ Новый: ${key}`);
+                                continue;
+                            }
+                            
+                            let shouldUseRemote = false;
+                            let reason = '';
+                            
+                            if (strategy === 'max_time') {
+                                // По длительности просмотра
+                                if (remoteRecord.time > localRecord.time + 5) {
+                                    shouldUseRemote = true;
+                                    reason = `время ${formatTime(localRecord.time)} → ${formatTime(remoteRecord.time)}`;
+                                }
+                            } else if (strategy === 'last_watch') {
+                                // По дате просмотра
+                                const remoteUpdated = remoteRecord.updated || 0;
+                                const localUpdated = localRecord.updated || 0;
+                                if (remoteUpdated > localUpdated) {
+                                    shouldUseRemote = true;
+                                    reason = `дата ${new Date(localUpdated).toLocaleString()} → ${new Date(remoteUpdated).toLocaleString()}`;
                                 }
                             }
-                            console.log(`[Sync] 🌩️ Стратегия: приоритет облака (изменений: ${changed})`);
-                        } else if (strategy === 'last_watch') {
-                            // По последнему просмотру
-                            merged = { ...localFileView };
-                            for (const key in remoteFileView) {
-                                const remoteUpdated = remoteFileView[key]?.updated || 0;
-                                const localUpdated = localFileView[key]?.updated || 0;
-                                if (!localFileView[key] || remoteUpdated > localUpdated) {
-                                    merged[key] = remoteFileView[key];
-                                    changed = true;
-                                    console.log(`[Sync] 🔄 Обновлён ${key} по дате`);
-                                }
-                            }
-                        } else {
-                            // По большему времени (max_time)
-                            merged = { ...localFileView };
-                            for (const key in remoteFileView) {
-                                const remoteTime = remoteFileView[key]?.time || 0;
-                                const localTime = localFileView[key]?.time || 0;
-                                if (!localFileView[key] || remoteTime > localTime + 5) {
-                                    merged[key] = remoteFileView[key];
-                                    changed = true;
-                                    console.log(`[Sync] 🔄 Обновлён ${key} по времени`);
-                                }
+                            
+                            if (shouldUseRemote) {
+                                merged[key] = remoteRecord;
+                                changed = true;
+                                console.log(`[Sync] 🔄 Обновлён ${key} (${reason})`);
                             }
                         }
                         
@@ -329,7 +329,7 @@
                             }
                             
                             if (showNotify) {
-                                const strategyName = strategy === 'cloud_priority' ? 'приоритет облака' : (strategy === 'last_watch' ? 'по дате' : 'по времени');
+                                const strategyName = strategy === 'max_time' ? 'по длительности' : 'по дате';
                                 notify(`📥 Загружено ${count} таймкодов (${strategyName})`);
                             }
                         } else if (showNotify) {
@@ -355,6 +355,17 @@
                 syncInProgress = false;
             }
         });
+    }
+
+    function getProgressData() {
+        return {
+            version: 5,
+            profile_id: getCurrentProfileId(),
+            device: cfg().device_name,
+            source: Lampa.Storage.field('source') || 'tmdb',
+            updated: Date.now(),
+            file_view: getFileView()
+        };
     }
 
     function saveCurrentProgressForce() {
@@ -401,6 +412,7 @@
         }
         
         let wasPlayerOpen = false;
+        let lastMovieKey = null;
         
         playerCheckInterval = setInterval(() => {
             const c = cfg();
@@ -420,6 +432,13 @@
                 if (movieId) {
                     currentMovieId = movieId;
                     currentMovieTime = currentTime;
+                    
+                    const movieKey = getCurrentMovieKey();
+                    if (movieKey && movieKey !== lastMovieKey) {
+                        console.log(`[Sync] 🎬 Новый ключ: ${movieKey}`);
+                        lastMovieKey = movieKey;
+                        lastSavedProgress = 0;
+                    }
                     
                     if (c.auto_save && Math.floor(currentTime) - lastSavedProgress >= 10) {
                         if (saveCurrentProgress(currentTime)) {
@@ -456,8 +475,8 @@
 
     function showMainMenu() {
         const c = cfg();
-        const strategyIcon = c.sync_strategy === 'cloud_priority' ? '☁️' : (c.sync_strategy === 'last_watch' ? '📅' : '⏱️');
-        const strategyName = c.sync_strategy === 'cloud_priority' ? 'приоритет облака' : (c.sync_strategy === 'last_watch' ? 'по дате просмотра' : 'по времени');
+        const strategyIcon = c.sync_strategy === 'max_time' ? '⏱️' : '📅';
+        const strategyName = c.sync_strategy === 'max_time' ? 'по длительности просмотра' : 'по дате просмотра';
         
         Lampa.Select.show({
             title: 'Синхронизация таймкодов',
@@ -516,13 +535,10 @@
                     showMainMenu();
                 }
                 else if (item.action === 'toggle_strategy') {
-                    const strategies = ['cloud_priority', 'last_watch', 'max_time'];
-                    const currentIndex = strategies.indexOf(c.sync_strategy);
-                    const nextIndex = (currentIndex + 1) % strategies.length;
-                    c.sync_strategy = strategies[nextIndex];
+                    c.sync_strategy = c.sync_strategy === 'max_time' ? 'last_watch' : 'max_time';
                     saveCfg(c);
-                    const strategyName = c.sync_strategy === 'cloud_priority' ? 'приоритет облака' : (c.sync_strategy === 'last_watch' ? 'по последнему просмотру' : 'по большему времени');
-                    notify(`Стратегия синхронизации: ${strategyName}`);
+                    const strategyName = c.sync_strategy === 'max_time' ? 'по длительности просмотра' : 'по дате просмотра';
+                    notify(`Стратегия: ${strategyName}`);
                     showMainMenu();
                 }
                 else if (item.action === 'set_interval') {
@@ -585,13 +601,9 @@
                 }
                 else if (item.action === 'force') {
                     notify('🔄 Полная синхронизация...');
-                    const oldAutoSync = c.auto_sync;
-                    c.auto_sync = true;
                     syncToGist(true);
                     setTimeout(() => {
                         syncFromGist(true);
-                        c.auto_sync = oldAutoSync;
-                        saveCfg(c);
                     }, 1000);
                     setTimeout(() => showMainMenu(), 2000);
                 }
@@ -624,18 +636,11 @@
         console.log(`[Sync] Плагин: ${c.enabled ? 'Вкл' : 'Выкл'}`);
         console.log(`[Sync] Автосинхронизация: ${c.auto_sync ? 'Вкл' : 'Выкл'}`);
         console.log(`[Sync] Автосохранение: ${c.auto_save ? 'Вкл' : 'Выкл'}`);
-        console.log(`[Sync] Стратегия: ${c.sync_strategy === 'cloud_priority' ? 'приоритет облака' : (c.sync_strategy === 'last_watch' ? 'по дате' : 'по времени')}`);
+        console.log(`[Sync] Стратегия: ${c.sync_strategy === 'max_time' ? 'по длительности' : 'по дате'}`);
         
         if (!c.enabled) {
             console.log('[Sync] Плагин выключен в настройках');
             return;
-        }
-        
-        const current = getFileView();
-        const normalized = normalizeKeys(current);
-        if (JSON.stringify(current) !== JSON.stringify(normalized)) {
-            console.log('[Sync] Нормализация ключей');
-            setFileView(normalized);
         }
         
         initPlayerHandler();
