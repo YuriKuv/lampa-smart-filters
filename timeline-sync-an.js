@@ -521,7 +521,7 @@
             }
         }, 60000);
     }
-
+    
     function saveLogsToFile() {
         const logs = Lampa.Storage.get('tl_sync_logs', []);
         if (logs.length === 0) {
@@ -534,7 +534,6 @@
         logText += `Устройство: ${cfg().device_name}\n`;
         logText += `Стратегия: ${cfg().sync_strategy}\n`;
         logText += `Профиль: ${getCurrentProfileId()}\n`;
-        logText += `Версия плагина: 2.0\n`;
         logText += '='.repeat(60) + '\n\n';
         
         logs.forEach(log => {
@@ -543,50 +542,38 @@
             logText += '\n';
         });
         
-        const fileName = `tl_sync_log_${Date.now()}.txt`;
+        // Показываем логи в диалоговом окне Lampa для копирования
+        const logLines = logText.split('\n');
+        const menuItems = [];
         
-        // Пытаемся сохранить через разные методы
-        try {
-            // Метод 1: через Lampa.Storage
-            Lampa.Storage.set('tl_sync_log_export', logText, true);
-            notify(`Логи сохранены в storage`);
-            
-            // Метод 2: через создание Blob и ссылки (может не работать в WebView)
-            const blob = new Blob([logText], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = fileName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            
-            notify('Файл логов создан, проверьте папку Downloads');
-            
-        } catch(e) {
-            console.log(logText);
-            notify('Логи выведены в консоль');
+        // Добавляем первые 20 строк в меню (Lampa не любит очень длинные списки)
+        for (let i = 0; i < Math.min(logLines.length, 25); i++) {
+            if (logLines[i].length > 50) {
+                menuItems.push({ title: logLines[i].substring(0, 50) + '...', action: null });
+            } else if (logLines[i].trim()) {
+                menuItems.push({ title: logLines[i], action: null });
+            }
         }
         
-        // Дополнительно показываем для копирования
+        menuItems.push({ title: '──────────', separator: true });
+        menuItems.push({ title: '📋 Полный лог в консоли', action: 'console' });
+        menuItems.push({ title: '❌ Закрыть', action: 'close' });
+        
         Lampa.Select.show({
-            title: 'Логи сохранены',
-            items: [
-                { title: '📋 Скопировать логи вручную', action: 'copy' },
-                { title: '❌ Закрыть', action: 'close' }
-            ],
+            title: 'Логи синхронизации (первые 25 строк)',
+            items: menuItems,
             onSelect: (item) => {
-                if (item.action === 'copy') {
-                    if (Lampa.Clipboard && Lampa.Clipboard.set) {
-                        Lampa.Clipboard.set(logText.substring(0, 10000));
-                        notify('Первые 10000 символов скопированы');
-                    } else {
-                        notify('Копирование не поддерживается');
-                    }
+                if (item.action === 'console') {
+                    console.log(logText);
+                    notify('Полный лог выведен в консоль');
+                    saveLogsToFile();
                 }
             }
         });
+        
+        // Дополнительно сохраняем в storage для возможности копирования через другие приложения
+        Lampa.Storage.set('tl_sync_log_export', logText, true);
+        notify('Логи также сохранены в Storage. Используйте файловый менеджер для поиска tl_sync_log_export');
     }
 
     function clearLogs() {
