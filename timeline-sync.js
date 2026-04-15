@@ -175,127 +175,102 @@
 
     // ============ ВСЕГДА ПОКАЗЫВАТЬ ТАЙМКОДЫ ============
     function injectTimelineStyles() {
-        // Удаляем старый стиль если есть
         const oldStyle = document.getElementById('tl-sync-styles');
         if (oldStyle) oldStyle.remove();
         
         const style = document.createElement('style');
         style.id = 'tl-sync-styles';
         style.textContent = `
-            /* СБРОС ВСЕХ ОГРАНИЧЕНИЙ ВИДИМОСТИ ТАЙМКОДОВ */
+            /* ВСЕГДА ПОКАЗЫВАТЬ ТАЙМКОДЫ НА КАРТОЧКАХ */
             
-            /* Все возможные контейнеры прогресса */
-            .card__progress,
-            .card .card__progress,
-            .card__progress-bar,
-            .card .card__progress-bar,
-            .card__timeline,
-            .card .card__timeline,
-            .card__progress-line,
-            .card .card__progress-line,
-            .card__progress-container,
-            .card .card__progress-container,
-            .view--card .card__progress,
-            .card--movie .card__progress,
-            .card--tv .card__progress,
-            .card--series .card__progress,
-            .poster .card__progress,
-            .poster .progress,
-            .movie-card .progress,
-            .movie-card .card__progress,
-            .item .progress,
-            .item .card__progress,
-            
-            /* Все элементы с progress в названии класса */
-            div[class*="progress"],
-            div[class*="timeline"],
-            div[class*="Progress"],
-            div[class*="Timeline"],
-            
-            /* Конкретные селекторы для Lampa */
-            .card .progress,
-            .card .progress-bar,
-            .card .timeline,
-            .card .timeline-bar,
-            .card .watch-progress,
-            .card [class*="progress"],
-            .card [class*="Progress"],
-            .card [class*="timeline"],
-            .card [class*="Timeline"],
-            
-            /* Линии прогресса */
-            .card__progress-line,
-            .progress-line,
-            .timeline-progress,
-            .watch-progress-bar,
-            .view-progress,
-            
-            /* Контейнеры */
-            .card__progress-wrapper,
-            .progress-wrapper,
-            .timeline-wrapper {
+            /* Основной контейнер таймкода - всегда показываем */
+            .card .card-watched {
+                display: block !important;
                 opacity: 1 !important;
                 visibility: visible !important;
-                display: flex !important;
+                pointer-events: none;
             }
             
-            /* Специально для линий прогресса */
-            .card__progress-line,
-            .progress-line,
-            .timeline-progress {
-                transform: scaleX(1) !important;
-                opacity: 1 !important;
-            }
-            
-            /* Убираем зависимость от состояний */
-            .card:not(.focus) .card__progress,
-            .card:not(.focus) [class*="progress"],
-            .card:not(.focus) [class*="Progress"],
-            .card:not(:hover) .card__progress,
-            .card:not(:hover) [class*="progress"],
-            .card:not(:hover) [class*="Progress"],
-            .card:not(.hover) .card__progress,
-            .card:not(.hover) [class*="progress"],
-            .card:not(.active) .card__progress,
-            .card:not(.selected) .card__progress,
-            
-            /* Для всех типов управления */
-            .touch .card .card__progress,
-            .touch .card [class*="progress"],
-            .mobile .card .card__progress,
-            .mobile .card [class*="progress"],
-            .mouse .card .card__progress,
-            .mouse .card [class*="progress"],
-            .remote .card .card__progress,
-            .remote .card [class*="progress"],
-            body.touch .card__progress,
-            body.mobile .card__progress,
-            body.mouse .card__progress,
-            body.remote .card__progress,
-            
-            /* Принудительно показываем */
-            .card .card__progress-container,
-            .card .progress-container,
-            .card [class*="progress-container"],
-            .card [class*="Progress-container"] {
+            /* Убираем зависимость от фокуса */
+            .card:not(.focus) .card-watched {
+                display: block !important;
                 opacity: 1 !important;
                 visibility: visible !important;
             }
             
-            /* Если прогресс скрыт через display: none */
-            .card__progress[style*="display: none"],
-            .card__progress[style*="display:none"],
-            [class*="progress"][style*="display: none"],
-            [class*="progress"][style*="display:none"] {
-                display: flex !important;
+            /* Для сенсорных устройств */
+            .touch .card .card-watched,
+            .mobile .card .card-watched,
+            body.touch-device .card .card-watched {
+                display: block !important;
+                opacity: 1 !important;
+                visibility: visible !important;
             }
             
-            /* Для WebView в Android */
-            .card .card__progress,
-            .card .card__progress-bar {
-                -webkit-transform: translateZ(0);
-                transform: translateZ(0);
-                will-change: transform;
+            /* Таймлайн внутри карточки */
+            .card .time-line {
+                display: block !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+            }
+            
+            /* Элементы внутри card-watched */
+            .card-watched__inner {
+                opacity: 1 !important;
+            }
+            
+            .card-watched__body {
+                opacity: 1 !important;
+            }
+            
+            .card-watched__item {
+                opacity: 1 !important;
+            }
+            
+            /* Прогресс-бар */
+            .time-line > div {
+                opacity: 1 !important;
+            }
+            
+            /* Для режима пульта/мыши - тоже показываем */
+            .mouse .card .card-watched,
+            .remote .card .card-watched,
+            body:not(.touch) .card .card-watched {
+                display: block !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+            }
+            
+            /* Сбрасываем возможные скрытия */
+            .card-watched[style*="display: none"],
+            .card-watched[style*="display:none"] {
+                display: block !important;
+            }
+            
+            /* Делаем таймкод полупрозрачным чтобы не мешал */
+            .card .card-watched {
+                background-color: rgba(0, 0, 0, 0.6) !important;
+                -webkit-backdrop-filter: blur(2px);
+                backdrop-filter: blur(2px);
+            }
+            
+            /* Уменьшаем отступы для компактности */
+            .card-watched__item {
+                margin-top: 0.5em !important;
+            }
+            
+            .card-watched__item:first-child {
+                margin-top: 0 !important;
+            }
+            
+            /* Показываем только 2 строки для экономии места */
+            .card-watched__item:nth-child(n+3) {
+                display: none !important;
+            }
+            
+            /* Для широких карточек показываем только одну строку */
+            .card--wide .card-watched__item:nth-child(n+2) {
+                display: none !important;
             }
         `;
         document.head.appendChild(style);
@@ -314,21 +289,23 @@
         const c = cfg();
         if (!c.always_show_timeline) return;
         
-        // Обновляем через Lampa API
         if (Lampa.Timeline && Lampa.Timeline.read) {
             Lampa.Timeline.read(true);
         }
         
-        // Принудительно обновляем все карточки
         setTimeout(function() {
-            const cards = document.querySelectorAll('.card, .poster, .movie-card, .item, [class*="card"], [class*="poster"]');
-            cards.forEach(function(card) {
-                const progressElements = card.querySelectorAll('[class*="progress"], [class*="Progress"], [class*="timeline"], [class*="Timeline"]');
-                progressElements.forEach(function(el) {
-                    el.style.setProperty('opacity', '1', 'important');
-                    el.style.setProperty('visibility', 'visible', 'important');
-                    el.style.setProperty('display', 'flex', 'important');
-                });
+            const watchedElements = document.querySelectorAll('.card-watched');
+            watchedElements.forEach(function(el) {
+                el.style.display = 'block';
+                el.style.opacity = '1';
+                el.style.visibility = 'visible';
+            });
+            
+            const timeLines = document.querySelectorAll('.time-line');
+            timeLines.forEach(function(el) {
+                el.style.display = 'block';
+                el.style.opacity = '1';
+                el.style.visibility = 'visible';
             });
         }, 100);
     }
@@ -350,10 +327,10 @@
                 if (mutation.addedNodes.length) {
                     mutation.addedNodes.forEach(function(node) {
                         if (node.nodeType === 1) {
-                            if (node.classList && (node.classList.contains('card') || node.classList.contains('poster'))) {
+                            if (node.classList && node.classList.contains('card')) {
                                 needsRefresh = true;
                             }
-                            if (node.querySelector && node.querySelector('.card, .poster, [class*="progress"]')) {
+                            if (node.querySelector && node.querySelector('.card')) {
                                 needsRefresh = true;
                             }
                         }
@@ -390,13 +367,13 @@
             const c = cfg();
             if (!c.always_show_timeline) return;
             
-            const elements = document.querySelectorAll('[class*="progress"], [class*="Progress"], [class*="timeline"], [class*="Timeline"]');
-            elements.forEach(function(el) {
+            const watchedElements = document.querySelectorAll('.card-watched');
+            watchedElements.forEach(function(el) {
                 const computedStyle = window.getComputedStyle(el);
-                if (computedStyle.opacity === '0' || computedStyle.visibility === 'hidden' || computedStyle.display === 'none') {
+                if (computedStyle.display === 'none' || computedStyle.opacity === '0') {
+                    el.style.setProperty('display', 'block', 'important');
                     el.style.setProperty('opacity', '1', 'important');
                     el.style.setProperty('visibility', 'visible', 'important');
-                    el.style.setProperty('display', 'flex', 'important');
                 }
             });
         }, 1000);
@@ -416,34 +393,12 @@
         startStyleObserver();
         startVisibilityInterval();
         forceRefreshCards();
-        
-        // Пробуем через настройки Lampa
-        if (Lampa.Storage) {
-            Lampa.Storage.set('timeline_always_show', true, true);
-            Lampa.Storage.set('timeline_hide_unfocused', false, true);
-        }
-        
-        // Пробуем через Timeline API
-        if (Lampa.Timeline) {
-            if (Lampa.Timeline.always) {
-                Lampa.Timeline.always(true);
-            }
-            if (Lampa.Timeline.read) {
-                Lampa.Timeline.read(true);
-            }
-        }
     }
 
     function disableAlwaysShowTimeline() {
         removeTimelineStyles();
         stopStyleObserver();
         stopVisibilityInterval();
-        
-        // Возвращаем настройки
-        if (Lampa.Storage) {
-            Lampa.Storage.set('timeline_always_show', false, true);
-            Lampa.Storage.set('timeline_hide_unfocused', true, true);
-        }
     }
 
     // ============ УМНАЯ ОЧИСТКА ============
@@ -1810,7 +1765,6 @@
         
         if (!c.enabled) return;
         
-        // Применяем стили для всегда видимых таймкодов
         if (c.always_show_timeline) {
             enableAlwaysShowTimeline();
         }
@@ -1830,10 +1784,9 @@
             }
         }, 3000);
         
-        notify('✅ Синхронизация v6.3 загружена');
+        notify('✅ Синхронизация v6.4 загружена');
     }
 
-    // Запуск
     if (window.Lampa && Lampa.Listener) {
         if (window.appready) {
             init();
