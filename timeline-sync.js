@@ -87,6 +87,7 @@
 
     function getSeriesInfoFromUrl() {
         try {
+            // Способ 1: Из URL плеера
             const playerData = Lampa.Player.playdata();
             if (playerData && playerData.path) {
                 const url = playerData.path;
@@ -94,20 +95,47 @@
                     /S(\d+)E(\d+)/i,
                     /S(\d+)[\s.]*E(\d+)/i,
                     /(\d+)x(\d+)/i,
-                    /Season[.\s]*(\d+)[.\s]*Episode[.\s]*(\d+)/i
+                    /Season[.\s]*(\d+)[.\s]*Episode[.\s]*(\d+)/i,
+                    /E(\d+)/i
                 ];
                 
                 for (const pattern of patterns) {
                     const match = url.match(pattern);
-                    if (match && match[1] && match[2]) {
-                        return { season: parseInt(match[1]), episode: parseInt(match[2]) };
+                    if (match) {
+                        let season = match[1] ? parseInt(match[1]) : 1;
+                        let episode = match[2] ? parseInt(match[2]) : (match[1] ? parseInt(match[1]) : null);
+                        if (episode) {
+                            return { season: season, episode: episode };
+                        }
                     }
+                }
+            }
+            
+            // Способ 2: Из activity
+            const activity = Lampa.Activity.active();
+            if (activity && activity.movie) {
+                const movie = activity.movie;
+                if (movie.season && movie.episode) {
+                    return { season: parseInt(movie.season), episode: parseInt(movie.episode) };
+                }
+                if (movie.number) {
+                    return { season: 1, episode: parseInt(movie.number) };
+                }
+            }
+            
+            // Способ 3: Из timeline hash (иногда там есть информация)
+            const playerData2 = Lampa.Player.playdata();
+            if (playerData2 && playerData2.timeline && playerData2.timeline.hash) {
+                const hash = playerData2.timeline.hash;
+                const match = hash.match(/_s(\d+)_e(\d+)/i);
+                if (match) {
+                    return { season: parseInt(match[1]), episode: parseInt(match[2]) };
                 }
             }
         } catch(e) {}
         return null;
     }
-
+    
     function getCurrentMovieTmdbId() {
         try {
             const activity = Lampa.Activity.active();
