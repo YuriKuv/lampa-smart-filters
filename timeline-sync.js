@@ -87,49 +87,40 @@
 
     function getSeriesInfoFromUrl() {
         try {
-            // Способ 1: Из URL плеера
-            const playerData = Lampa.Player.playdata();
-            if (playerData && playerData.path) {
-                const url = playerData.path;
-                const patterns = [
-                    /S(\d+)E(\d+)/i,
-                    /S(\d+)[\s.]*E(\d+)/i,
-                    /(\d+)x(\d+)/i,
-                    /Season[.\s]*(\d+)[.\s]*Episode[.\s]*(\d+)/i,
-                    /E(\d+)/i
-                ];
-                
-                for (const pattern of patterns) {
-                    const match = url.match(pattern);
-                    if (match) {
-                        let season = match[1] ? parseInt(match[1]) : 1;
-                        let episode = match[2] ? parseInt(match[2]) : (match[1] ? parseInt(match[1]) : null);
-                        if (episode) {
-                            return { season: season, episode: episode };
-                        }
+            const activity = Lampa.Activity.active();
+            if (activity && activity.movie) {
+                const movie = activity.movie;
+                if (movie.season !== undefined && movie.episode !== undefined) {
+                    return { season: parseInt(movie.season), episode: parseInt(movie.episode) };
+                }
+                if (movie.number !== undefined && movie.season !== undefined) {
+                    return { season: parseInt(movie.season), episode: parseInt(movie.number) };
+                }
+                if (movie.title) {
+                    const titleMatch = movie.title.match(/(\d+)\s*серия/i);
+                    if (titleMatch) {
+                        return { season: 1, episode: parseInt(titleMatch[1]) };
                     }
                 }
             }
             
-            // Способ 2: Из activity
-            const activity = Lampa.Activity.active();
-            if (activity && activity.movie) {
-                const movie = activity.movie;
-                if (movie.season && movie.episode) {
-                    return { season: parseInt(movie.season), episode: parseInt(movie.episode) };
+            const playerData = Lampa.Player.playdata();
+            if (playerData && playerData.path) {
+                const url = playerData.path;
+                const patterns = [
+                    /[Ss](\d+)[\.\-_]?[Ee](\d+)/i,
+                    /(\d+)[xX](\d+)/i,
+                    /Season[.\s]*(\d+)[.\s]*Episode[.\s]*(\d+)/i
+                ];
+                for (const pattern of patterns) {
+                    const match = url.match(pattern);
+                    if (match && match[1] && match[2]) {
+                        return { season: parseInt(match[1]), episode: parseInt(match[2]) };
+                    }
                 }
-                if (movie.number) {
-                    return { season: 1, episode: parseInt(movie.number) };
-                }
-            }
-            
-            // Способ 3: Из timeline hash (иногда там есть информация)
-            const playerData2 = Lampa.Player.playdata();
-            if (playerData2 && playerData2.timeline && playerData2.timeline.hash) {
-                const hash = playerData2.timeline.hash;
-                const match = hash.match(/_s(\d+)_e(\d+)/i);
-                if (match) {
-                    return { season: parseInt(match[1]), episode: parseInt(match[2]) };
+                const episodeMatch = url.match(/[Ee](\d+)/i);
+                if (episodeMatch) {
+                    return { season: 1, episode: parseInt(episodeMatch[1]) };
                 }
             }
         } catch(e) {}
@@ -183,10 +174,19 @@
         const c = cfg();
         if (!c.auto_save && !force) return false;
         
+        const fileView = getFileView();
+        const tmdbId = getCurrentMovieTmdbId();
+        const seriesInfo = getSeriesInfoFromUrl();
+        
+        // Автоматическое удаление дубликатов
+        if (seriesInfo && seriesInfo.episode && fileView[tmdbId]) {
+            delete fileView[tmdbId];
+            setFileView(fileView);
+        }
+        
         const movieKey = getCurrentMovieKey();
         if (!movieKey) return false;
         
-        const fileView = getFileView();
         const currentTime = Math.floor(timeInSeconds);
         const savedTime = fileView[movieKey]?.time || 0;
         
@@ -195,14 +195,12 @@
             const duration = playerData?.timeline?.duration || 0;
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
             
-            const seriesInfo = getSeriesInfoFromUrl();
-            
             const record = {
                 time: currentTime,
                 percent: percent,
                 duration: duration,
                 updated: Date.now(),
-                tmdb_id: getCurrentMovieTmdbId()
+                tmdb_id: tmdbId
             };
             
             if (seriesInfo && seriesInfo.season && seriesInfo.episode) {
