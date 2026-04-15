@@ -509,6 +509,25 @@
         }
     }
 
+    function clearAllTimecodes() {
+        Lampa.Select.show({
+            title: '⚠️ Очистка таймкодов',
+            items: [
+                { title: '❌ Отмена', action: 'cancel' },
+                { title: '✅ Да, очистить все таймкоды', action: 'clear' }
+            ],
+            onSelect: (item) => {
+                if (item.action === 'clear') {
+                    const fileViewKey = getFileViewKey();
+                    Lampa.Storage.set(fileViewKey, {}, true);
+                    notify('✅ Все таймкоды удалены');
+                    // Обновляем Gist
+                    setTimeout(() => syncToGist(true), 500);
+                }
+            }
+        });
+    }
+    
     function showMainMenu() {
         const c = cfg();
         const strategyIcon = c.sync_strategy === 'max_time' ? '⏱️' : '📅';
@@ -517,6 +536,9 @@
         Lampa.Select.show({
             title: 'Синхронизация таймкодов',
             items: [
+                { title: `🔑 Gist токен: ${c.gist_token ? '✓ установлен' : '❌ не установлен'}`, action: 'set_token' },
+                { title: `📄 Gist ID: ${c.gist_id ? c.gist_id.substring(0,8)+'…' : '❌ не установлен'}`, action: 'set_gist_id' },                
+                { title: '──────────', separator: true },
                 { title: `${c.enabled ? '✅' : '❌'} Плагин: ${c.enabled ? 'Включён' : 'Выключен'}`, action: 'toggle_enabled' },
                 { title: `${c.auto_sync ? '✅' : '❌'} Автосинхронизация: ${c.auto_sync ? 'Вкл' : 'Выкл'}`, action: 'toggle_auto_sync' },
                 { title: `${c.auto_save ? '✅' : '❌'} Автосохранение: ${c.auto_save ? 'Вкл' : 'Выкл'}`, action: 'toggle_auto_save' },
@@ -526,14 +548,13 @@
                 { title: `⏱️ Интервал синхр.: ${c.sync_interval || 30} сек`, action: 'set_interval' },
                 { title: `📱 Устройство: ${c.device_name}`, action: 'set_device' },
                 { title: `👤 Профиль: ${c.manual_profile_id || 'авто'}`, action: 'set_profile' },
-                { title: '──────────', separator: true },
-                { title: `🔑 Gist токен: ${c.gist_token ? '✓ установлен' : '❌ не установлен'}`, action: 'set_token' },
-                { title: `📄 Gist ID: ${c.gist_id ? c.gist_id.substring(0,8)+'…' : '❌ не установлен'}`, action: 'set_gist_id' },
-                { title: '──────────', separator: true },
+                { title: '──────────', separator: true },,
                 { title: '🔄 Отправить таймкоды', action: 'upload' },
                 { title: '📥 Загрузить таймкоды', action: 'download' },
                 { title: '🔄 Полная синхронизация', action: 'force' },
-                { title: '🧹 Очистить дубликаты', action: 'clean' },
+                { title: '──────────', separator: true },
+                { title: '🧹 Очистить дубликаты таймкодов', action: 'clean' },
+                { title: '🗑️ Очистить ВСЕ таймкоды', action: 'clear_all' },
                 { title: '──────────', separator: true },
                 { title: '❌ Закрыть', action: 'cancel' }
             ],
