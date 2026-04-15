@@ -24,7 +24,7 @@
                 message: message,
                 data: data ? (typeof data === 'string' ? data : JSON.stringify(data)) : null
             });
-            while (logs.length > 50) logs.shift();
+            while (logs.length > 100) logs.shift();
             Lampa.Storage.set('tl_sync_logs', logs, true);
             
             if (typeof console !== 'undefined') {
@@ -336,25 +336,25 @@
                                     shouldUseRemote = true;
                                     reason = `время ${formatTime(localRecord.time)} → ${formatTime(remoteRecord.time)}`;
                                     androidLog('syncFromGist: max_time - use remote', { key, localTime: localRecord.time, remoteTime: remoteRecord.time });
-                                } else {
-                                    androidLog('syncFromGist: max_time - keep local', { key, localTime: localRecord.time, remoteTime: remoteRecord.time });
                                 }
                             } else if (strategy === 'last_watch') {
                                 const remoteUpdated = remoteRecord.updated || 0;
                                 const localUpdated = localRecord.updated || 0;
                                 androidLog('syncFromGist: last_watch compare', { 
                                     key, 
-                                    localUpdated: new Date(localUpdated).toISOString(), 
-                                    remoteUpdated: new Date(remoteUpdated).toISOString(),
-                                    localUpdatedRaw: localUpdated,
-                                    remoteUpdatedRaw: remoteUpdated
+                                    localUpdated: localUpdated,
+                                    remoteUpdated: remoteUpdated,
+                                    localUpdatedStr: new Date(localUpdated).toISOString(), 
+                                    remoteUpdatedStr: new Date(remoteUpdated).toISOString(),
+                                    localUpdatedMs: localUpdated,
+                                    remoteUpdatedMs: remoteUpdated
                                 });
                                 if (remoteUpdated > localUpdated) {
                                     shouldUseRemote = true;
                                     reason = `дата ${new Date(localUpdated).toLocaleString()} → ${new Date(remoteUpdated).toLocaleString()}`;
                                     androidLog('syncFromGist: last_watch - use remote', { key, reason });
                                 } else {
-                                    androidLog('syncFromGist: last_watch - keep local', { key });
+                                    androidLog('syncFromGist: last_watch - keep local', { key, remoteUpdated, localUpdated });
                                 }
                             }
                             
@@ -522,37 +522,74 @@
         }, 60000);
     }
 
-    function showAndroidLogs() {
+    function saveLogsToFile() {
         const logs = Lampa.Storage.get('tl_sync_logs', []);
         if (logs.length === 0) {
             notify('Логов нет');
             return;
         }
         
-        let logText = '';
+        let logText = '=== ЛОГИ СИНХРОНИЗАЦИИ ТАЙМКОДОВ ===\n';
+        logText += `Время экспорта: ${new Date().toLocaleString()}\n`;
+        logText += `Устройство: ${cfg().device_name}\n`;
+        logText += `Стратегия: ${cfg().sync_strategy}\n`;
+        logText += `Профиль: ${getCurrentProfileId()}\n`;
+        logText += `Версия плагина: 2.0\n`;
+        logText += '='.repeat(60) + '\n\n';
+        
         logs.forEach(log => {
             logText += `[${log.time}] ${log.message}\n`;
-            if (log.data) logText += `  Данные: ${log.data}\n\n`;
+            if (log.data) logText += `  Данные: ${log.data}\n`;
+            logText += '\n';
         });
         
-        // Сохраняем в буфер обмена если возможно
-        if (Lampa.Clipboard && Lampa.Clipboard.set) {
-            Lampa.Clipboard.set(logText);
-            notify('Логи скопированы в буфер обмена');
-        } else {
-            // Показываем через Select
-            Lampa.Select.show({
-                title: 'Логи синхронизации',
-                items: [{ title: 'Логи сохранены, отправьте разработчику', action: 'close' }],
-                onSelect: () => {}
-            });
+        const fileName = `tl_sync_log_${Date.now()}.txt`;
+        
+        // Пытаемся сохранить через разные методы
+        try {
+            // Метод 1: через Lampa.Storage
+            Lampa.Storage.set('tl_sync_log_export', logText, true);
+            notify(`Логи сохранены в storage`);
+            
+            // Метод 2: через создание Blob и ссылки (может не работать в WebView)
+            const blob = new Blob([logText], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            notify('Файл логов создан, проверьте папку Downloads');
+            
+        } catch(e) {
+            console.log(logText);
+            notify('Логи выведены в консоль');
         }
         
-        console.log('=== ЛОГИ СИНХРОНИЗАЦИИ ===');
-        console.log(logText);
+        // Дополнительно показываем для копирования
+        Lampa.Select.show({
+            title: 'Логи сохранены',
+            items: [
+                { title: '📋 Скопировать логи вручную', action: 'copy' },
+                { title: '❌ Закрыть', action: 'close' }
+            ],
+            onSelect: (item) => {
+                if (item.action === 'copy') {
+                    if (Lampa.Clipboard && Lampa.Clipboard.set) {
+                        Lampa.Clipboard.set(logText.substring(0, 10000));
+                        notify('Первые 10000 символов скопированы');
+                    } else {
+                        notify('Копирование не поддерживается');
+                    }
+                }
+            }
+        });
     }
 
-    function clearAndroidLogs() {
+    function clearLogs() {
         Lampa.Storage.set('tl_sync_logs', [], true);
         notify('Логи очищены');
         showMainMenu();
@@ -583,7 +620,7 @@
                 { title: '📥 Загрузить таймкоды', action: 'download' },
                 { title: '🔄 Полная синхронизация', action: 'force' },
                 { title: '──────────', separator: true },
-                { title: '📋 Показать логи', action: 'show_logs' },
+                { title: '💾 Сохранить логи в файл', action: 'save_logs' },
                 { title: '🗑️ Очистить логи', action: 'clear_logs' },
                 { title: '──────────', separator: true },
                 { title: '❌ Закрыть', action: 'cancel' }
@@ -695,12 +732,12 @@
                     }, 1000);
                     setTimeout(() => showMainMenu(), 2000);
                 }
-                else if (item.action === 'show_logs') {
-                    showAndroidLogs();
+                else if (item.action === 'save_logs') {
+                    saveLogsToFile();
                     setTimeout(() => showMainMenu(), 2000);
                 }
                 else if (item.action === 'clear_logs') {
-                    clearAndroidLogs();
+                    clearLogs();
                 }
             },
             onBack: () => {
