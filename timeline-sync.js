@@ -512,27 +512,22 @@
                                 merged[key] = { ...remoteRecord, updated: originalUpdated };
                                 changed = true;
                                 newCount++;
-                                console.log(`[Sync] ➕ Новый: ${key} (${formatTime(remoteRecord.time)})`);
                                 continue;
                             }
                             
                             let shouldUseRemote = false;
-                            let reason = '';
                             
                             if (forceOverwrite) {
                                 if (remoteRecord.time > localRecord.time) {
                                     shouldUseRemote = true;
-                                    reason = `принудительно (время ${formatTime(localRecord.time)} → ${formatTime(remoteRecord.time)})`;
                                 } else if (remoteRecord.percent === 100 && localRecord.percent < 100) {
                                     shouldUseRemote = true;
-                                    reason = 'принудительно (завершено на сервере)';
                                 } else {
                                     skippedCount++;
                                 }
                             } else if (strategy === 'max_time') {
                                 if (remoteRecord.time > localRecord.time + 5) {
                                     shouldUseRemote = true;
-                                    reason = `время ${formatTime(localRecord.time)} → ${formatTime(remoteRecord.time)}`;
                                 }
                             } else if (strategy === 'last_watch') {
                                 const remoteUpdated = remoteRecord.updated || 0;
@@ -540,17 +535,13 @@
                                 
                                 if (remoteRecord.time > localRecord.time + 30) {
                                     shouldUseRemote = true;
-                                    reason = `значительно большее время (${formatTime(localRecord.time)} → ${formatTime(remoteRecord.time)})`;
                                 } else if (remoteRecord.percent === 100 && localRecord.percent < 100) {
                                     shouldUseRemote = true;
-                                    reason = 'завершено на сервере';
                                 } else if (remoteUpdated > localUpdated + 5000) {
                                     shouldUseRemote = true;
-                                    reason = `дата ${new Date(localUpdated).toLocaleString()} → ${new Date(remoteUpdated).toLocaleString()}`;
                                 } else if (Math.abs(remoteUpdated - localUpdated) <= 5000) {
                                     if (remoteRecord.time > localRecord.time) {
                                         shouldUseRemote = true;
-                                        reason = `время (даты близки) ${formatTime(localRecord.time)} → ${formatTime(remoteRecord.time)}`;
                                     }
                                 }
                             }
@@ -559,7 +550,6 @@
                                 merged[key] = { ...remoteRecord, updated: originalUpdated };
                                 changed = true;
                                 updatedCount++;
-                                console.log(`[Sync] 🔄 Обновлён ${key} (${reason})`);
                             }
                         }
                         
@@ -580,7 +570,7 @@
                             }
                         } else if (showNotify) {
                             if (skippedCount > 0) {
-                                notify(`ℹ️ Пропущено ${skippedCount} записей (локальные новее)`);
+                                notify(`ℹ️ Пропущено ${skippedCount} записей`);
                             } else {
                                 notify('✅ Данные актуальны');
                             }
@@ -691,7 +681,6 @@
                         if (showNotify) {
                             notify(`✅ С сервера: +${addedCount} новых, ${replacedCount} обновлено`);
                         }
-                        console.log(`[Sync] Принудительная загрузка: +${addedCount} новых, ${replacedCount} обновлено`);
                         
                         const meta = getSyncMeta();
                         meta.last_sync = Date.now();
@@ -759,8 +748,6 @@
                 meta.last_sync = Date.now();
                 meta.sync_count++;
                 saveSyncMeta(meta);
-                
-                console.log(`[Sync] Принудительная отправка: ${count} записей`);
             },
             error: function(xhr) {
                 console.error('[Sync] ❌ Ошибка отправки:', xhr.status);
@@ -810,7 +797,6 @@
                         if (showNotify) {
                             notify(`✅ Загружено ${count} записей с сервера`);
                         }
-                        console.log(`[Sync] Полный сброс: загружено ${count} записей`);
                         
                         const meta = getSyncMeta();
                         meta.last_sync = Date.now();
@@ -831,7 +817,7 @@
         });
     }
 
-    // ============ КОНТЕКСТНОЕ МЕНЮ ============
+    // ============ КОНТЕКСТНОЕ МЕНЮ (ИСПРАВЛЕНО) ============
     function syncMovieProgress(movie) {
         const tmdbId = extractTmdbIdFromItem(movie);
         if (!tmdbId) {
@@ -843,7 +829,6 @@
         
         syncFromGist(false, function() {
             notify('✅ Прогресс синхронизирован');
-            
             if (Lampa.Timeline && Lampa.Timeline.read) {
                 Lampa.Timeline.read(true);
             }
@@ -866,18 +851,14 @@
             onSelect: function(item) {
                 if (item.action === 'confirm') {
                     const fileView = getFileView();
-                    
                     for (const key in fileView) {
                         if (key.startsWith(tmdbId)) {
                             delete fileView[key];
                         }
                     }
-                    
                     setFileView(fileView);
                     notify('✅ Прогресс сброшен');
-                    
                     syncToGist(false);
-                    
                     if (Lampa.Timeline && Lampa.Timeline.read) {
                         Lampa.Timeline.read(true);
                     }
@@ -908,7 +889,6 @@
         
         setFileView(fileView);
         notify('✅ Отмечено как просмотренное');
-        
         forceSyncToServer(false);
         
         if (Lampa.Timeline && Lampa.Timeline.read) {
@@ -916,8 +896,44 @@
         }
     }
 
+    // Без переопределения Lampa.Select.show - только через Arrays
     function addContextMenu() {
-        // Для Lampa 3.x используем Lampa.Maker.map
+        // Способ 1: Lampa.Arrays (самый безопасный)
+        if (Lampa.Arrays && Lampa.Arrays.movie_more) {
+            const originalArray = Lampa.Arrays.movie_more;
+            Lampa.Arrays.movie_more = function(movie) {
+                const items = originalArray(movie);
+                
+                const hasSyncItems = items.some(function(item) {
+                    return item.action === 'sync_progress';
+                });
+                
+                if (!hasSyncItems && movie) {
+                    items.push({ title: '──────────', separator: true });
+                    items.push({
+                        title: '🔄 Синхронизировать прогресс',
+                        action: 'sync_progress',
+                        onSelect: function() { syncMovieProgress(movie); }
+                    });
+                    items.push({
+                        title: '🗑️ Сбросить прогресс везде',
+                        action: 'reset_progress',
+                        onSelect: function() { resetMovieProgress(movie); }
+                    });
+                    items.push({
+                        title: '✅ Отметить как просмотренное',
+                        action: 'mark_watched',
+                        onSelect: function() { markMovieAsWatched(movie); }
+                    });
+                }
+                
+                return items;
+            };
+            console.log('[Sync] Контекстное меню добавлено через Arrays');
+            return;
+        }
+        
+        // Способ 2: Lampa.Maker.map для v3
         if (isV3 && Lampa.Maker && Lampa.Maker.map) {
             try {
                 const cardMap = Lampa.Maker.map('Card');
@@ -952,65 +968,14 @@
                         
                         return items;
                     };
-                    
-                    console.log('[Sync] Контекстное меню добавлено через Maker.map (v3)');
+                    console.log('[Sync] Контекстное меню добавлено через Maker.map');
                     return;
                 }
-            } catch(e) {
-                console.log('[Sync] Ошибка добавления через Maker.map:', e);
-            }
+            } catch(e) {}
         }
         
-        // Fallback для Lampa 2.x
-        const checkAndPatch = function() {
-            if (Lampa.Component && Lampa.Component.get) {
-                const movieMore = Lampa.Component.get('movie_more');
-                if (movieMore && movieMore.prototype && movieMore.prototype.build) {
-                    const originalBuild = movieMore.prototype.build;
-                    
-                    movieMore.prototype.build = function() {
-                        const items = originalBuild.call(this);
-                        
-                        const hasSyncItems = items.some(function(item) {
-                            return item.action === 'sync_progress';
-                        });
-                        
-                        if (!hasSyncItems && this.movie) {
-                            items.push({ title: '──────────', separator: true });
-                            
-                            items.push({
-                                title: '🔄 Синхронизировать прогресс',
-                                action: 'sync_progress',
-                                onSelect: function() {
-                                    syncMovieProgress(this.movie);
-                                }.bind(this)
-                            });
-                            
-                            items.push({
-                                title: '🗑️ Сбросить прогресс везде',
-                                action: 'reset_progress',
-                                onSelect: function() {
-                                    resetMovieProgress(this.movie);
-                                }.bind(this)
-                            });
-                            
-                            items.push({
-                                title: '✅ Отметить как просмотренное',
-                                action: 'mark_watched',
-                                onSelect: function() {
-                                    markMovieAsWatched(this.movie);
-                                }.bind(this)
-                            });
-                        }
-                        
-                        return items;
-                    };
-                    
-                    console.log('[Sync] Контекстное меню добавлено через Component (v2)');
-                    return true;
-                }
-            }
-            
+        // Способ 3: Отложенная попытка
+        setTimeout(function() {
             if (Lampa.Arrays && Lampa.Arrays.movie_more) {
                 const originalArray = Lampa.Arrays.movie_more;
                 Lampa.Arrays.movie_more = function(movie) {
@@ -1041,57 +1006,9 @@
                     
                     return items;
                 };
-                
-                console.log('[Sync] Контекстное меню добавлено через Arrays (v2)');
-                return true;
+                console.log('[Sync] Контекстное меню добавлено через Arrays (отложено)');
             }
-            
-            return false;
-        };
-        
-        if (!checkAndPatch()) {
-            setTimeout(function() {
-                if (!checkAndPatch()) {
-                    setTimeout(checkAndPatch, 3000);
-                }
-            }, 1000);
-        }
-        
-        // Перехватчик Lampa.Select.show
-        const originalShow = Lampa.Select.show;
-        if (originalShow) {
-            Lampa.Select.show = function(config) {
-                if (config.title === 'Меню фильма' || config.title === 'Меню сериала') {
-                    const hasSyncItems = config.items && config.items.some(function(item) {
-                        return item.action === 'sync_progress' || item.action === 'reset_progress' || item.action === 'mark_watched';
-                    });
-                    
-                    if (!hasSyncItems && config.movie) {
-                        config.items = config.items || [];
-                        config.items.push({ title: '──────────', separator: true });
-                        config.items.push({
-                            title: '🔄 Синхронизировать прогресс',
-                            action: 'sync_progress',
-                            onSelect: function() { syncMovieProgress(config.movie); }
-                        });
-                        config.items.push({
-                            title: '🗑️ Сбросить прогресс везде',
-                            action: 'reset_progress',
-                            onSelect: function() { resetMovieProgress(config.movie); }
-                        });
-                        config.items.push({
-                            title: '✅ Отметить как просмотренное',
-                            action: 'mark_watched',
-                            onSelect: function() { markMovieAsWatched(config.movie); }
-                        });
-                    }
-                }
-                
-                return originalShow.call(this, config);
-            };
-            
-            console.log('[Sync] Добавлен перехватчик Lampa.Select.show');
-        }
+        }, 2000);
     }
 
     // ============ СТАТИСТИКА ============
@@ -1195,11 +1112,9 @@
                                 meta.last_sync = 0;
                                 saveSyncMeta(meta);
                                 notify('🗑️ Все данные очищены');
-                                
                                 if (Lampa.Timeline && Lampa.Timeline.read) {
                                     Lampa.Timeline.read(true);
                                 }
-                                
                                 setTimeout(function() { showStatistics(); }, 500);
                             } else {
                                 showStatistics();
@@ -1297,7 +1212,6 @@
             const currentTime = getCurrentPlayerTime();
             
             if (wasPlayerOpen && !isPlayerOpen && currentMovieTime > 0) {
-                console.log(`[Sync] 🛑 Плеер закрыт, сохранение на ${formatTime(currentMovieTime)}`);
                 saveCurrentProgressForce();
                 endCreditsDetected = false;
             }
@@ -1311,7 +1225,6 @@
                     
                     const movieKey = getCurrentMovieKey();
                     if (movieKey && movieKey !== lastMovieKey) {
-                        console.log(`[Sync] 🎬 Новый ключ: ${movieKey}`);
                         lastMovieKey = movieKey;
                         lastSavedProgress = 0;
                         endCreditsDetected = false;
@@ -1323,7 +1236,6 @@
                             
                             const now = Date.now();
                             if (c.auto_sync && (now - lastSyncToGist) >= (c.sync_interval * 1000)) {
-                                console.log('[Sync] 📤 Автоотправка');
                                 syncToGist(false);
                                 lastSyncToGist = now;
                             }
@@ -1332,8 +1244,6 @@
                 }
             }
         }, 1000);
-        
-        console.log('[Sync] Обработчик плеера запущен');
     }
 
     function stopPlayerHandler() {
@@ -1354,7 +1264,6 @@
             
             timerId = function() {
                 if (!syncInProgress && c.auto_sync && c.enabled && !Lampa.Player.opened()) {
-                    console.log('[Sync] 🔄 Фоновая синхронизация (Timer)');
                     syncFromGist(false);
                     syncToGist(false);
                     cleanupOldRecords(false);
@@ -1362,40 +1271,17 @@
             };
             
             Lampa.Timer.add(c.sync_interval * 1000, timerId);
-            console.log('[Sync] Фоновая синхронизация через Lampa.Timer');
         } else {
             if (autoSyncInterval) clearInterval(autoSyncInterval);
             
             autoSyncInterval = setInterval(function() {
                 const currentCfg = cfg();
                 if (!syncInProgress && currentCfg.auto_sync && currentCfg.enabled && !Lampa.Player.opened()) {
-                    console.log('[Sync] 🔄 Фоновая синхронизация');
                     syncFromGist(false);
                     syncToGist(false);
                     cleanupOldRecords(false);
                 }
             }, c.sync_interval * 1000);
-            
-            console.log('[Sync] Фоновая синхронизация через setInterval');
-        }
-    }
-
-    // ============ ПОДПИСКА НА ИЗМЕНЕНИЯ ============
-    function subscribeToTimelineChanges() {
-        if (Lampa.Listener) {
-            Lampa.Listener.on('state:changed', function(e) {
-                if (e.target === 'timeline') {
-                    console.log(`[Sync] Timeline изменён, причина: ${e.reason}`);
-                    
-                    if (e.reason !== 'sync_plugin') {
-                        const c = cfg();
-                        if (c.enabled && c.auto_sync) {
-                            setTimeout(function() { syncToGist(false); }, 2000);
-                        }
-                    }
-                }
-            });
-            console.log('[Sync] Подписка на state:changed добавлена');
         }
     }
 
@@ -1669,26 +1555,15 @@
 
     function init() {
         isV3 = Lampa.Manifest && Lampa.Manifest.app_digital >= 300;
-        console.log(`[Sync] Lampa версия: ${isV3 ? '3.x' : '2.x'}`);
         
         const c = cfg();
         
-        console.log('[Sync] Инициализация v6.0');
-        console.log(`[Sync] Профиль: ${getCurrentProfileId() || 'глобальный'}`);
-        console.log(`[Sync] Плагин: ${c.enabled ? 'Вкл' : 'Выкл'}`);
-        console.log(`[Sync] Умная синхр.: ${c.smart_sync ? 'Вкл' : 'Выкл'}`);
-        console.log(`[Sync] Стратегия: ${c.sync_strategy === 'max_time' ? 'по длительности' : 'по дате'}`);
-        
-        if (!c.enabled) {
-            console.log('[Sync] Плагин выключен в настройках');
-            return;
-        }
+        if (!c.enabled) return;
         
         initPlayerHandler();
         addSettingsButton();
         addContextMenu();
         startBackgroundSync();
-        subscribeToTimelineChanges();
         
         setTimeout(function() {
             const c2 = cfg();
