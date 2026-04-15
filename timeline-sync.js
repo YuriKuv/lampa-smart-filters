@@ -16,6 +16,7 @@
     let lastPosition = 0;
     let endCreditsDetected = false;
     let isV3 = false;
+    let styleInjected = false;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -32,7 +33,8 @@
             smart_sync: true,
             cleanup_days: 30,
             cleanup_completed: true,
-            end_credits_threshold: 180
+            end_credits_threshold: 180,
+            always_show_timeline: true
         }) || {};
     }
 
@@ -167,6 +169,64 @@
 
     function getSource() {
         return Lampa.Storage.field('source') || 'tmdb';
+    }
+
+    // ============ ВСЕГДА ПОКАЗЫВАТЬ ТАЙМКОДЫ ============
+    function injectTimelineStyles() {
+        if (styleInjected) return;
+        styleInjected = true;
+        
+        const style = document.createElement('style');
+        style.textContent = `
+            /* Всегда показываем прогресс-бар на карточках */
+            .card .card__progress,
+            .card .timeline-progress,
+            .card [class*="progress"] {
+                opacity: 1 !important;
+                visibility: visible !important;
+                display: flex !important;
+            }
+            
+            /* Прогресс-бар всегда виден */
+            .card .card__progress-bar,
+            .card .timeline-bar,
+            .card [class*="progress-bar"] {
+                opacity: 1 !important;
+                visibility: visible !important;
+            }
+            
+            /* Для сенсорного режима - прогресс всегда виден */
+            .touch .card .card__progress,
+            .touch .card .timeline-progress,
+            .mobile .card .card__progress,
+            .mobile .card .timeline-progress {
+                opacity: 1 !important;
+                visibility: visible !important;
+            }
+            
+            /* Убираем скрытие при отсутствии фокуса */
+            .card:not(.focus) .card__progress,
+            .card:not(:hover) .card__progress,
+            .card:not(.focus) .timeline-progress,
+            .card:not(:hover) .timeline-progress {
+                opacity: 1 !important;
+                visibility: visible !important;
+            }
+        `;
+        document.head.appendChild(style);
+        console.log('[Sync] Стили для всегда видимых таймкодов добавлены');
+    }
+
+    function removeTimelineStyles() {
+        // Не удаляем, просто оставляем
+        styleInjected = false;
+    }
+
+    function updateTimelineVisibility() {
+        const c = cfg();
+        if (c.always_show_timeline) {
+            injectTimelineStyles();
+        }
     }
 
     // ============ УМНАЯ ОЧИСТКА ============
@@ -817,7 +877,7 @@
         });
     }
 
-    // ============ КОНТЕКСТНОЕ МЕНЮ (ИСПРАВЛЕНО) ============
+    // ============ КОНТЕКСТНОЕ МЕНЮ ============
     function syncMovieProgress(movie) {
         const tmdbId = extractTmdbIdFromItem(movie);
         if (!tmdbId) {
@@ -896,9 +956,7 @@
         }
     }
 
-    // Без переопределения Lampa.Select.show - только через Arrays
     function addContextMenu() {
-        // Способ 1: Lampa.Arrays (самый безопасный)
         if (Lampa.Arrays && Lampa.Arrays.movie_more) {
             const originalArray = Lampa.Arrays.movie_more;
             Lampa.Arrays.movie_more = function(movie) {
@@ -933,48 +991,6 @@
             return;
         }
         
-        // Способ 2: Lampa.Maker.map для v3
-        if (isV3 && Lampa.Maker && Lampa.Maker.map) {
-            try {
-                const cardMap = Lampa.Maker.map('Card');
-                if (cardMap && cardMap.More) {
-                    const originalMore = cardMap.More.onMore;
-                    
-                    cardMap.More.onMore = function(data) {
-                        const items = originalMore ? originalMore.call(this, data) : [];
-                        
-                        const hasSyncItems = items.some(function(item) {
-                            return item.action === 'sync_progress';
-                        });
-                        
-                        if (!hasSyncItems) {
-                            items.push({ title: '──────────', separator: true });
-                            items.push({
-                                title: '🔄 Синхронизировать прогресс',
-                                action: 'sync_progress',
-                                onSelect: function() { syncMovieProgress(data); }
-                            });
-                            items.push({
-                                title: '🗑️ Сбросить прогресс везде',
-                                action: 'reset_progress',
-                                onSelect: function() { resetMovieProgress(data); }
-                            });
-                            items.push({
-                                title: '✅ Отметить как просмотренное',
-                                action: 'mark_watched',
-                                onSelect: function() { markMovieAsWatched(data); }
-                            });
-                        }
-                        
-                        return items;
-                    };
-                    console.log('[Sync] Контекстное меню добавлено через Maker.map');
-                    return;
-                }
-            } catch(e) {}
-        }
-        
-        // Способ 3: Отложенная попытка
         setTimeout(function() {
             if (Lampa.Arrays && Lampa.Arrays.movie_more) {
                 const originalArray = Lampa.Arrays.movie_more;
@@ -1299,6 +1315,7 @@
                 { title: `${c.auto_save ? '✅' : '❌'} Автосохранение: ${c.auto_save ? 'Вкл' : 'Выкл'}`, action: 'toggle_auto_save' },
                 { title: `${c.smart_sync ? '✅' : '❌'} Умная синхр.: ${c.smart_sync ? 'Вкл' : 'Выкл'}`, action: 'toggle_smart_sync' },
                 { title: '──────────', separator: true },
+                { title: `${c.always_show_timeline ? '✅' : '❌'} Таймкоды всегда: ${c.always_show_timeline ? 'Вкл' : 'Выкл'}`, action: 'toggle_always_show' },
                 { title: `${strategyIcon} Стратегия: ${strategyName}`, action: 'toggle_strategy' },
                 { title: `⏱️ Интервал синхр.: ${c.sync_interval || 30} сек`, action: 'set_interval' },
                 { title: `🎬 Порог титров: ${c.end_credits_threshold || 180} сек`, action: 'set_threshold' },
@@ -1359,6 +1376,17 @@
                     c.smart_sync = !c.smart_sync;
                     saveCfg(c);
                     notify(`Умная синхронизация ${c.smart_sync ? 'включена' : 'выключена'}`);
+                    showMainMenu();
+                }
+                else if (item.action === 'toggle_always_show') {
+                    c.always_show_timeline = !c.always_show_timeline;
+                    saveCfg(c);
+                    if (c.always_show_timeline) {
+                        injectTimelineStyles();
+                        notify('✅ Таймкоды всегда видны');
+                    } else {
+                        notify('ℹ️ Таймкоды только при наведении/фокусе (требуется перезагрузка)');
+                    }
                     showMainMenu();
                 }
                 else if (item.action === 'toggle_strategy') {
@@ -1560,6 +1588,11 @@
         
         if (!c.enabled) return;
         
+        // Применяем стили для всегда видимых таймкодов
+        if (c.always_show_timeline) {
+            injectTimelineStyles();
+        }
+        
         initPlayerHandler();
         addSettingsButton();
         addContextMenu();
@@ -1573,7 +1606,7 @@
             }
         }, 3000);
         
-        notify('✅ Синхронизация v6.0 загружена');
+        notify('✅ Синхронизация v6.1 загружена');
     }
 
     // Запуск
