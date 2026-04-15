@@ -512,16 +512,21 @@
     function clearAllTimecodes() {
         Lampa.Select.show({
             title: '⚠️ Очистка таймкодов',
+            text: 'Вы уверены? Все локальные таймкоды будут удалены, а в Gist останутся.',
             items: [
                 { title: '❌ Отмена', action: 'cancel' },
-                { title: '✅ Да, очистить все таймкоды', action: 'clear' }
+                { title: '✅ Очистить локально', action: 'clear_local' },
+                { title: '🌩️ Очистить локально и в Gist', action: 'clear_both' }
             ],
             onSelect: (item) => {
-                if (item.action === 'clear') {
+                if (item.action === 'clear_local') {
                     const fileViewKey = getFileViewKey();
                     Lampa.Storage.set(fileViewKey, {}, true);
-                    notify('✅ Все таймкоды удалены');
-                    // Обновляем Gist
+                    notify('✅ Локальные таймкоды удалены');
+                } else if (item.action === 'clear_both') {
+                    const fileViewKey = getFileViewKey();
+                    Lampa.Storage.set(fileViewKey, {}, true);
+                    notify('✅ Локальные таймкоды удалены');
                     setTimeout(() => syncToGist(true), 500);
                 }
             }
