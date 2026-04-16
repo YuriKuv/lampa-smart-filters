@@ -968,7 +968,7 @@
                 { title: '──────────', separator: true },
                 { title: 'Синхронизировать сейчас', action: 'sync_now' },
                 { title: 'Полный сброс (загрузить с сервера)', action: 'full_reset' },
-                { title: 'Очистить пустые записи', action: 'force_cleanup' },
+                { title: '🗑️ Очистить пустые записи', action: 'force_cleanup' },
                 { title: '──────────', separator: true },
                 { title: 'Закрыть', action: 'cancel' }
             ],
@@ -1169,6 +1169,24 @@
                             if (subItem.action === 'confirm') {
                                 Lampa.Controller.toggle('content');
                                 fullResetFromServer(true);
+                            } else {
+                                showMainMenu();
+                            }
+                        },
+                        onBack: function() { showMainMenu(); }
+                    });
+                }
+                else if (item.action === 'force_cleanup') {
+                    Lampa.Select.show({
+                        title: 'Очистить пустые записи?',
+                        items: [
+                            { title: '❌ Отмена', action: 'cancel' },
+                            { title: '✅ Да, очистить', action: 'confirm' }
+                        ],
+                        onSelect: function(subItem) {
+                            if (subItem.action === 'confirm') {
+                                Lampa.Controller.toggle('content');
+                                forceCleanupEmptyRecords();
                             } else {
                                 showMainMenu();
                             }
