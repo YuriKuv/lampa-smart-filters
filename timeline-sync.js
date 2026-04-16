@@ -284,7 +284,7 @@
     function cleanupOldRecords() {
         const c = cfg();
         const now = Date.now();
-        const pluginFileView = getPluginFileView(); // ИСПРАВЛЕНО: используем изолированное хранилище
+        const pluginFileView = getPluginFileView();
         let cleaned = 0;
         let completed_cleaned = 0;
         
@@ -294,24 +294,37 @@
             const record = pluginFileView[key];
             let shouldDelete = false;
             
-            if (c.cleanup_days > 0 && record.updated && record.updated < cutoffDate) {
+            // Проверяем, что запись имеет время и дату
+            const time = record.time || 0;
+            const percent = record.percent || 0;
+            const updated = record.updated || 0;
+            
+            // Удаляем пустые записи
+            if (time === 0 && percent === 0) {
                 shouldDelete = true;
                 cleaned++;
             }
-            
-            if (c.cleanup_completed && record.percent >= 95) {
+            // Удаляем старые записи
+            else if (c.cleanup_days > 0 && updated < cutoffDate) {
+                shouldDelete = true;
+                cleaned++;
+            }
+            // Удаляем завершённые записи
+            else if (c.cleanup_completed && percent >= 95) {
                 shouldDelete = true;
                 completed_cleaned++;
             }
             
-            if (shouldDelete) delete pluginFileView[key];
+            if (shouldDelete) {
+                console.log(`[Sync] Удалена запись: ${key}, time=${time}, percent=${percent}%`);
+                delete pluginFileView[key];
+            }
         }
         
         if (cleaned > 0 || completed_cleaned > 0) {
             setPluginFileView(pluginFileView);
-            // Синхронизируем изменения с Lampa
             syncPluginToLampa();
-            console.log(`[Sync] Очистка: удалено ${cleaned} старых и ${completed_cleaned} завершённых`);
+            console.log(`[Sync] Очистка: удалено ${cleaned} старых/пустых и ${completed_cleaned} завершённых`);
         }
     }
 
@@ -326,9 +339,20 @@
             const pluginRecord = pluginFileView[key];
             const lampaRecord = lampaFileView[key];
             
-            if (!lampaRecord || pluginRecord.time > lampaRecord.time || pluginRecord.updated > lampaRecord.updated) {
+            if (!lampaRecord) {
                 lampaFileView[key] = { ...pluginRecord };
                 hasChanges = true;
+            } else {
+                const pluginTime = pluginRecord.time || 0;
+                const lampaTime = lampaRecord.time || 0;
+                const pluginUpdated = pluginRecord.updated || 0;
+                const lampaUpdated = lampaRecord.updated || 0;
+                
+                // Обновляем если запись в плагине новее или имеет большее время
+                if (pluginTime > lampaTime || pluginUpdated > lampaUpdated) {
+                    lampaFileView[key] = { ...pluginRecord };
+                    hasChanges = true;
+                }
             }
         }
         
@@ -337,6 +361,16 @@
             if (Lampa.Timeline && Lampa.Timeline.read) {
                 Lampa.Timeline.read(true);
             }
+            
+            // Обновляем видимые карточки
+            setTimeout(() => {
+                document.querySelectorAll('.card').forEach(card => {
+                    card.classList.add('focus');
+                    setTimeout(() => card.classList.remove('focus'), 50);
+                });
+            }, 100);
+            
+            console.log('[Sync] Данные синхронизированы с Lampa');
         }
     }
 
@@ -425,7 +459,7 @@
                 time: currentTime,
                 percent: percent,
                 duration: duration,
-                updated: Date.now(), // ВАЖНО: всегда обновляем дату
+                updated: Date.now(),
                 tmdb_id: getCurrentMovieTmdbId(),
                 source: getSource(),
                 ...(seriesInfo && { season: seriesInfo.season, episode: seriesInfo.episode })
@@ -443,7 +477,6 @@
         }
         return false;
     }
-
     // ============ СИНХРОНИЗАЦИЯ ============
     function syncNow(showNotify, callback) {
         if (showNotify === undefined) showNotify = true;
@@ -478,7 +511,7 @@
                 try {
                     const content = response.files['timeline.json']?.content;
                     let remoteData = { file_view: {} };
-                    let removedCount = 0; // ← ОБЪЯВЛЯЕМ ЗДЕСЬ, В НАЧАЛЕ ФУНКЦИИ
+                    let removedCount = 0;
                     
                     if (content) {
                         remoteData = JSON.parse(content);
@@ -487,9 +520,13 @@
                         const filtered = {};
                         for (const key in remoteData.file_view) {
                             const record = remoteData.file_view[key];
+                            const time = record.time || 0;
+                            const percent = record.percent || 0;
+                            
                             // Игнорируем записи с time=0 И percent=0
-                            if (record.time === 0 && record.percent === 0) {
+                            if (time === 0 && percent === 0) {
                                 removedCount++;
+                                console.log(`[Sync] Пропущена пустая запись с сервера: ${key}`);
                                 continue;
                             }
                             filtered[key] = record;
@@ -512,8 +549,12 @@
                     let localRemoved = 0;
                     for (const key in localFileView) {
                         const record = localFileView[key];
-                        if (record.time === 0 && record.percent === 0) {
+                        const time = record.time || 0;
+                        const percent = record.percent || 0;
+                        
+                        if (time === 0 && percent === 0) {
                             localRemoved++;
+                            console.log(`[Sync] Пропущена пустая локальная запись: ${key}`);
                             continue;
                         }
                         localFiltered[key] = record;
@@ -630,6 +671,19 @@
                                 }
                             }),
                             success: function() {
+                                // Принудительно обновляем таймлайн Lampa
+                                if (Lampa.Timeline && Lampa.Timeline.read) {
+                                    Lampa.Timeline.read(true);
+                                }
+                                
+                                // Обновляем видимые карточки
+                                setTimeout(() => {
+                                    document.querySelectorAll('.card').forEach(card => {
+                                        card.classList.add('focus');
+                                        setTimeout(() => card.classList.remove('focus'), 50);
+                                    });
+                                }, 200);
+                                
                                 let msg = '';
                                 if (newCount > 0) msg += '+ ' + newCount + ' новых';
                                 if (updatedCount > 0) msg += (msg ? ', ' : '') + updatedCount + ' обновлено';
@@ -680,6 +734,7 @@
             }
         });
     }
+        
     function fullResetFromServer(showNotify) {
         if (showNotify === undefined) showNotify = true;
         
