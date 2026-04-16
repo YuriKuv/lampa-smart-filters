@@ -25,7 +25,7 @@
             auto_sync: true,
             auto_save: true,
             sync_on_stop: true,
-            sync_strategy: 'max_time',
+            sync_strategy: 'last_watch', // ИЗМЕНЕНО: по умолчанию last_watch
             gist_token: '',
             gist_id: '',
             device_name: Lampa.Platform ? Lampa.Platform.get() : 'Unknown',
@@ -131,6 +131,21 @@
         const secs = Math.floor(seconds % 60);
         if (hours > 0) return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
         return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // ============ ИЗОЛИРОВАННОЕ ХРАНЕНИЕ ============
+    function getPluginFileViewKey() {
+        const profileId = getCurrentProfileId();
+        return profileId ? `tl_sync_plugin_file_view_${profileId}` : 'tl_sync_plugin_file_view';
+    }
+    
+    function getPluginFileView() {
+        return Lampa.Storage.get(getPluginFileViewKey(), {});
+    }
+    
+    function setPluginFileView(data) {
+        Lampa.Storage.set(getPluginFileViewKey(), data, true);
+        return data;
     }
 
     // ============ ПАТЧ МОДУЛЯ WATCHED ============
@@ -269,14 +284,14 @@
     function cleanupOldRecords() {
         const c = cfg();
         const now = Date.now();
-        const fileView = getFileView();
+        const pluginFileView = getPluginFileView(); // ИСПРАВЛЕНО: используем изолированное хранилище
         let cleaned = 0;
         let completed_cleaned = 0;
         
         const cutoffDate = now - (c.cleanup_days * 86400000);
         
-        for (const key in fileView) {
-            const record = fileView[key];
+        for (const key in pluginFileView) {
+            const record = pluginFileView[key];
             let shouldDelete = false;
             
             if (c.cleanup_days > 0 && record.updated && record.updated < cutoffDate) {
@@ -289,12 +304,39 @@
                 completed_cleaned++;
             }
             
-            if (shouldDelete) delete fileView[key];
+            if (shouldDelete) delete pluginFileView[key];
         }
         
         if (cleaned > 0 || completed_cleaned > 0) {
-            setFileView(fileView);
+            setPluginFileView(pluginFileView);
+            // Синхронизируем изменения с Lampa
+            syncPluginToLampa();
             console.log(`[Sync] Очистка: удалено ${cleaned} старых и ${completed_cleaned} завершённых`);
+        }
+    }
+
+    // ============ СИНХРОНИЗАЦИЯ PLUGIN -> LAMPA ============
+    function syncPluginToLampa() {
+        const pluginFileView = getPluginFileView();
+        const lampaFileView = getFileView();
+        let hasChanges = false;
+        
+        // Копируем все записи из плагина в Lampa
+        for (const key in pluginFileView) {
+            const pluginRecord = pluginFileView[key];
+            const lampaRecord = lampaFileView[key];
+            
+            if (!lampaRecord || pluginRecord.time > lampaRecord.time || pluginRecord.updated > lampaRecord.updated) {
+                lampaFileView[key] = { ...pluginRecord };
+                hasChanges = true;
+            }
+        }
+        
+        if (hasChanges) {
+            setFileView(lampaFileView);
+            if (Lampa.Timeline && Lampa.Timeline.read) {
+                Lampa.Timeline.read(true);
+            }
         }
     }
 
@@ -328,7 +370,6 @@
         if (!movieKey) return;
         
         const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
-        const lampaFileView = getFileView();
         const pluginFileView = getPluginFileView();
         
         const record = {
@@ -341,11 +382,9 @@
             completed: true
         };
         
-        lampaFileView[movieKey] = { ...record };
-        pluginFileView[movieKey] = { ...record };
-        
-        setFileView(lampaFileView);
+        pluginFileView[movieKey] = record;
         setPluginFileView(pluginFileView);
+        syncPluginToLampa();
         
         notify('Отмечено как просмотренное');
         
@@ -362,7 +401,8 @@
             setTimeout(function() { syncNow(false); }, 500);
         }
     }
-        // ============ СОХРАНЕНИЕ ПРОГРЕССА ============
+
+    // ============ СОХРАНЕНИЕ ПРОГРЕССА ============
     function saveCurrentProgress(timeInSeconds, force) {
         if (force === undefined) force = false;
         
@@ -372,10 +412,7 @@
         const movieKey = getCurrentMovieKey();
         if (!movieKey) return false;
         
-        // Сохраняем в ОБА хранилища
-        const lampaFileView = getFileView();
         const pluginFileView = getPluginFileView();
-        
         const currentTime = Math.floor(timeInSeconds);
         const savedTime = pluginFileView[movieKey]?.time || 0;
         
@@ -388,120 +425,26 @@
                 time: currentTime,
                 percent: percent,
                 duration: duration,
-                updated: Date.now(),
+                updated: Date.now(), // ВАЖНО: всегда обновляем дату
                 tmdb_id: getCurrentMovieTmdbId(),
                 source: getSource(),
                 ...(seriesInfo && { season: seriesInfo.season, episode: seriesInfo.episode })
             };
             
-            // Сохраняем в оба хранилища
-            lampaFileView[movieKey] = { ...record };
-            pluginFileView[movieKey] = { ...record };
-            
-            setFileView(lampaFileView);
+            pluginFileView[movieKey] = record;
             setPluginFileView(pluginFileView);
+            syncPluginToLampa();
             
-            console.log(`[Sync] Сохранён прогресс: ${formatTime(currentTime)} (${percent}%) для ${movieKey}`);
+            console.log(`[Sync] Сохранён прогресс: ${formatTime(currentTime)} (${percent}%) для ${movieKey}, updated=${record.updated}`);
             
             if (duration > 0) checkEndCredits(currentTime, duration);
-            
-            if (Lampa.Timeline && Lampa.Timeline.update) {
-                Lampa.Timeline.update({
-                    hash: movieKey,
-                    percent: percent,
-                    time: currentTime,
-                    duration: duration
-                });
-            }
             
             return true;
         }
         return false;
     }
+
     // ============ СИНХРОНИЗАЦИЯ ============
-    // ============ ИЗОЛИРОВАННОЕ ХРАНЕНИЕ ============
-    function getPluginFileViewKey() {
-        const profileId = getCurrentProfileId();
-        return profileId ? `tl_sync_plugin_file_view_${profileId}` : 'tl_sync_plugin_file_view';
-    }
-    
-    function getPluginFileView() {
-        return Lampa.Storage.get(getPluginFileViewKey(), {});
-    }
-    
-    function setPluginFileView(data) {
-        Lampa.Storage.set(getPluginFileViewKey(), data, true);
-        return data;
-    }
-    
-    // ============ СИНХРОНИЗАЦИЯ С LAMPA TIMELINE ============
-    function syncWithLampaTimeline() {
-        // Копируем данные из Lampa file_view в наше хранилище
-        const lampaFileView = getFileView();
-        const pluginFileView = getPluginFileView();
-        let hasChanges = false;
-        
-        for (const key in lampaFileView) {
-            const lampaRecord = lampaFileView[key];
-            const pluginRecord = pluginFileView[key];
-            
-            if (!pluginRecord) {
-                // Новая запись от Lampa
-                pluginFileView[key] = { ...lampaRecord, updated: lampaRecord.updated || Date.now() };
-                hasChanges = true;
-            } else {
-                // Проверяем, какая запись актуальнее
-                const lampaTime = lampaRecord.time || 0;
-                const pluginTime = pluginRecord.time || 0;
-                const lampaUpdated = lampaRecord.updated || 0;
-                const pluginUpdated = pluginRecord.updated || 0;
-                
-                // Если запись Lampa новее или имеет большее время
-                if (lampaTime > pluginTime && lampaUpdated >= pluginUpdated - 5000) {
-                    pluginFileView[key] = { ...lampaRecord, updated: lampaUpdated || Date.now() };
-                    hasChanges = true;
-                }
-            }
-        }
-        
-        // Также обновляем Lampa file_view из нашего хранилища
-        for (const key in pluginFileView) {
-            const pluginRecord = pluginFileView[key];
-            const lampaRecord = lampaFileView[key];
-            
-            if (!lampaRecord) {
-                lampaFileView[key] = { ...pluginRecord };
-                hasChanges = true;
-            } else {
-                const pluginTime = pluginRecord.time || 0;
-                const lampaTime = lampaRecord.time || 0;
-                const pluginUpdated = pluginRecord.updated || 0;
-                const lampaUpdated = lampaRecord.updated || 0;
-                
-                // Если наша запись новее и имеет большее или равное время
-                if (pluginUpdated > lampaUpdated && pluginTime >= lampaTime) {
-                    lampaFileView[key] = { ...pluginRecord };
-                    hasChanges = true;
-                } else if (pluginTime > lampaTime && pluginUpdated >= lampaUpdated - 5000) {
-                    lampaFileView[key] = { ...pluginRecord };
-                    hasChanges = true;
-                }
-            }
-        }
-        
-        if (hasChanges) {
-            setFileView(lampaFileView);
-            setPluginFileView(pluginFileView);
-            
-            if (Lampa.Timeline && Lampa.Timeline.read) {
-                Lampa.Timeline.read(true);
-            }
-            
-            console.log('[Sync] Синхронизация с Lampa timeline выполнена');
-        }
-    }
-    
-    // ============ ОСНОВНАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ ============
     function syncNow(showNotify, callback) {
         if (showNotify === undefined) showNotify = true;
         
@@ -522,10 +465,6 @@
         
         if (showNotify) notify('Синхронизация...');
         
-        // Сначала синхронизируем с Lampa timeline
-        syncWithLampaTimeline();
-        
-        // ВСЕГДА получаем данные с сервера перед отправкой
         console.log('[Sync] Загрузка данных с Gist...');
         
         $.ajax({
@@ -544,7 +483,7 @@
                         remoteData = JSON.parse(content);
                         console.log('[Sync] Данные с Gist получены, записей:', Object.keys(remoteData.file_view || {}).length);
                     } else {
-                        console.log('[Sync] Gist пуст, создаём новый');
+                        console.log('[Sync] Gist пуст');
                     }
                     
                     const localFileView = getPluginFileView();
@@ -562,6 +501,7 @@
                         if (!localFileView[key]) {
                             merged[key] = remoteFileView[key];
                             remoteNewerCount++;
+                            console.log(`[Sync] Новая запись с сервера: ${key}, time=${remoteFileView[key].time}, updated=${remoteFileView[key].updated}`);
                         }
                     }
                     
@@ -571,12 +511,11 @@
                         const remoteRecord = remoteFileView[key];
                         
                         if (!remoteRecord) {
-                            // Новая локальная запись
                             merged[key] = localRecord;
                             hasChanges = true;
                             newCount++;
+                            console.log(`[Sync] Новая локальная запись: ${key}, time=${localRecord.time}, updated=${localRecord.updated}`);
                         } else {
-                            // Запись есть и локально и на сервере
                             let shouldUseLocal = false;
                             
                             const localUpdated = localRecord.updated || 0;
@@ -585,25 +524,28 @@
                             const remoteTime = remoteRecord.time || 0;
                             
                             if (strategy === 'max_time') {
-                                // По длительности - приоритет у большего времени
                                 if (localTime > remoteTime) {
                                     shouldUseLocal = true;
+                                    console.log(`[Sync] ${key}: локальное время ${localTime} > удалённое ${remoteTime}`);
                                 }
                             } else {
-                                // По дате (last_watch) - приоритет у более свежей записи
+                                // last_watch - приоритет у более свежей записи
                                 if (localUpdated > remoteUpdated) {
                                     shouldUseLocal = true;
+                                    console.log(`[Sync] ${key}: локальная дата ${localUpdated} > удалённая ${remoteUpdated}`);
                                 } else if (localUpdated === remoteUpdated) {
-                                    // Даты равны - сравниваем время
                                     if (localTime > remoteTime) {
                                         shouldUseLocal = true;
+                                        console.log(`[Sync] ${key}: даты равны, локальное время ${localTime} > удалённое ${remoteTime}`);
                                     }
+                                } else {
+                                    console.log(`[Sync] ${key}: удалённая запись новее (${remoteUpdated} > ${localUpdated})`);
                                 }
                             }
                             
-                            // Особые случаи
                             if (localRecord.percent >= 95 && remoteRecord.percent < 95) {
                                 shouldUseLocal = true;
+                                console.log(`[Sync] ${key}: локальная запись завершена`);
                             }
                             
                             if (shouldUseLocal) {
@@ -618,10 +560,8 @@
                     
                     // Сохраняем объединённые данные
                     setPluginFileView(merged);
-                    syncWithLampaTimeline();
+                    syncPluginToLampa();
                     
-                    // ВСЕГДА отправляем данные на сервер, если есть ЛЮБЫЕ изменения
-                    // или если получили новые данные с сервера (чтобы обновить updated)
                     const needSend = hasChanges || remoteNewerCount > 0;
                     
                     if (needSend) {
@@ -653,10 +593,6 @@
                                 }
                             }),
                             success: function() {
-                                if (Lampa.Timeline && Lampa.Timeline.read) {
-                                    Lampa.Timeline.read(true);
-                                }
-                                
                                 let msg = '';
                                 if (newCount > 0) msg += '+ ' + newCount + ' новых';
                                 if (updatedCount > 0) msg += (msg ? ', ' : '') + updatedCount + ' обновлено';
@@ -700,58 +636,13 @@
             },
             error: function(xhr) {
                 console.error('[Sync] Ошибка получения данных с Gist:', xhr.status);
-                
-                // Если Gist не найден (404), создаём новый
-                if (xhr.status === 404) {
-                    console.log('[Sync] Gist не найден, создаём новый...');
-                    
-                    const localFileView = getPluginFileView();
-                    const dataToSend = {
-                        version: 6,
-                        profile_id: getCurrentProfileId(),
-                        device: c.device_name,
-                        source: getSource(),
-                        updated: Date.now(),
-                        file_view: localFileView
-                    };
-                    
-                    $.ajax({
-                        url: 'https://api.github.com/gists/' + c.gist_id,
-                        method: 'PATCH',
-                        headers: {
-                            'Authorization': 'token ' + c.gist_token,
-                            'Accept': 'application/vnd.github.v3+json'
-                        },
-                        data: JSON.stringify({
-                            description: 'Lampa Timeline Sync',
-                            public: false,
-                            files: {
-                                'timeline.json': {
-                                    content: JSON.stringify(dataToSend, null, 2)
-                                }
-                            }
-                        }),
-                        success: function() {
-                            console.log('[Sync] Gist создан');
-                            if (showNotify) notify('Gist создан, данные отправлены');
-                            syncInProgress = false;
-                            if (callback) callback(true);
-                        },
-                        error: function(xhr2) {
-                            console.error('[Sync] Ошибка создания Gist:', xhr2.status);
-                            if (showNotify) notify('Ошибка создания Gist: ' + xhr2.status);
-                            syncInProgress = false;
-                            if (callback) callback(false);
-                        }
-                    });
-                } else {
-                    if (showNotify) notify('Ошибка загрузки: ' + xhr.status);
-                    syncInProgress = false;
-                    if (callback) callback(false);
-                }
+                if (showNotify) notify('Ошибка загрузки: ' + xhr.status);
+                syncInProgress = false;
+                if (callback) callback(false);
             }
         });
     }
+
     function fullResetFromServer(showNotify) {
         if (showNotify === undefined) showNotify = true;
         
@@ -777,15 +668,8 @@
                         const remote = JSON.parse(content);
                         const remoteFileView = remote.file_view || {};
                         
-                        // Сохраняем в изолированное хранилище
                         setPluginFileView(remoteFileView);
-                        
-                        // Синхронизируем с Lampa
-                        syncWithLampaTimeline();
-                        
-                        if (Lampa.Timeline && Lampa.Timeline.read) {
-                            Lampa.Timeline.read(true);
-                        }
+                        syncPluginToLampa();
                         
                         const count = Object.keys(remoteFileView).length;
                         if (showNotify) notify('Загружено ' + count + ' записей');
@@ -803,6 +687,7 @@
             }
         });
     }
+
     // ============ ПЛЕЕР ============
     function saveCurrentProgressForce() {
         if (currentMovieTime > 0) {
@@ -848,7 +733,6 @@
             const isPlayerOpen = Lampa.Player.opened();
             const currentTime = getCurrentPlayerTime();
             
-            // При закрытии плеера сохраняем прогресс
             if (wasPlayerOpen && !isPlayerOpen && currentMovieTime > 0) {
                 saveCurrentProgressForce();
                 endCreditsDetected = false;
@@ -1216,7 +1100,6 @@
         addSettingsButton();
         startBackgroundSync();
         
-        // Первая синхронизация через 3 секунды
         setTimeout(function() {
             const c2 = cfg();
             if (c2.enabled && c2.auto_sync) {
@@ -1226,7 +1109,7 @@
             forceRefreshCards();
         }, 3000);
         
-        console.log('[Sync] Плагин загружен v7.0');
+        console.log('[Sync] Плагин загружен v7.1');
     }
 
     // Запуск
