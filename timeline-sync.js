@@ -481,24 +481,61 @@
                     
                     if (content) {
                         remoteData = JSON.parse(content);
+                        
+                        // ФИЛЬТРУЕМ ПУСТЫЕ ЗАПИСИ С СЕРВЕРА
+                        const filtered = {};
+                        let removedCount = 0;
+                        for (const key in remoteData.file_view) {
+                            const record = remoteData.file_view[key];
+                            // Игнорируем записи с time=0 И percent=0
+                            if (record.time === 0 && record.percent === 0) {
+                                removedCount++;
+                                continue;
+                            }
+                            filtered[key] = record;
+                        }
+                        
+                        if (removedCount > 0) {
+                            console.log('[Sync] Отфильтровано пустых записей с сервера:', removedCount);
+                            remoteData.file_view = filtered;
+                        }
+                        
                         console.log('[Sync] Данные с Gist получены, записей:', Object.keys(remoteData.file_view || {}).length);
                     } else {
                         console.log('[Sync] Gist пуст');
                     }
                     
                     const localFileView = getPluginFileView();
+                    
+                    // ФИЛЬТРУЕМ ПУСТЫЕ ЗАПИСИ ЛОКАЛЬНО
+                    const localFiltered = {};
+                    let localRemoved = 0;
+                    for (const key in localFileView) {
+                        const record = localFileView[key];
+                        if (record.time === 0 && record.percent === 0) {
+                            localRemoved++;
+                            continue;
+                        }
+                        localFiltered[key] = record;
+                    }
+                    
+                    if (localRemoved > 0) {
+                        console.log('[Sync] Отфильтровано пустых локальных записей:', localRemoved);
+                        setPluginFileView(localFiltered);
+                    }
+                    
                     const remoteFileView = remoteData.file_view || {};
                     const strategy = c.sync_strategy;
                     
                     let merged = { ...remoteFileView };
-                    let hasChanges = false;
+                    let hasChanges = localRemoved > 0;
                     let updatedCount = 0;
                     let newCount = 0;
                     let remoteNewerCount = 0;
                     
                     // Сначала добавляем удалённые записи, которых нет локально
                     for (const key in remoteFileView) {
-                        if (!localFileView[key]) {
+                        if (!localFiltered[key]) {
                             merged[key] = remoteFileView[key];
                             remoteNewerCount++;
                             console.log(`[Sync] Новая запись с сервера: ${key}, time=${remoteFileView[key].time}, updated=${remoteFileView[key].updated}`);
@@ -506,8 +543,8 @@
                     }
                     
                     // Теперь обрабатываем локальные записи
-                    for (const key in localFileView) {
-                        const localRecord = localFileView[key];
+                    for (const key in localFiltered) {
+                        const localRecord = localFiltered[key];
                         const remoteRecord = remoteFileView[key];
                         
                         if (!remoteRecord) {
@@ -562,7 +599,7 @@
                     setPluginFileView(merged);
                     syncPluginToLampa();
                     
-                    const needSend = hasChanges || remoteNewerCount > 0;
+                    const needSend = hasChanges || remoteNewerCount > 0 || removedCount > 0;
                     
                     if (needSend) {
                         const dataToSend = {
@@ -597,6 +634,7 @@
                                 if (newCount > 0) msg += '+ ' + newCount + ' новых';
                                 if (updatedCount > 0) msg += (msg ? ', ' : '') + updatedCount + ' обновлено';
                                 if (remoteNewerCount > 0) msg += (msg ? ', ' : '') + remoteNewerCount + ' с сервера';
+                                if (removedCount > 0) msg += (msg ? ', ' : '') + 'удалено ' + removedCount + ' пустых';
                                 
                                 if (msg) {
                                     if (showNotify) notify('Синхронизировано: ' + msg);
