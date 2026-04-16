@@ -525,7 +525,9 @@
         // Сначала синхронизируем с Lampa timeline
         syncWithLampaTimeline();
         
-        // Получаем данные с сервера
+        // ВСЕГДА получаем данные с сервера перед отправкой
+        console.log('[Sync] Загрузка данных с Gist...');
+        
         $.ajax({
             url: 'https://api.github.com/gists/' + c.gist_id,
             method: 'GET',
@@ -540,9 +542,12 @@
                     
                     if (content) {
                         remoteData = JSON.parse(content);
+                        console.log('[Sync] Данные с Gist получены, записей:', Object.keys(remoteData.file_view || {}).length);
+                    } else {
+                        console.log('[Sync] Gist пуст, создаём новый');
                     }
                     
-                    const localFileView = getPluginFileView(); // Используем ИЗОЛИРОВАННОЕ хранилище
+                    const localFileView = getPluginFileView();
                     const remoteFileView = remoteData.file_view || {};
                     const strategy = c.sync_strategy;
                     
@@ -552,10 +557,11 @@
                     let newCount = 0;
                     let remoteNewerCount = 0;
                     
-                    // Сначала применяем все удалённые записи, которых нет локально
+                    // Сначала добавляем удалённые записи, которых нет локально
                     for (const key in remoteFileView) {
                         if (!localFileView[key]) {
                             merged[key] = remoteFileView[key];
+                            remoteNewerCount++;
                         }
                     }
                     
@@ -570,82 +576,34 @@
                             hasChanges = true;
                             newCount++;
                         } else {
-                            // Запись есть и локально и на сервере - нужно решить, какую оставить
+                            // Запись есть и локально и на сервере
                             let shouldUseLocal = false;
-                            let shouldUseRemote = false;
                             
                             const localUpdated = localRecord.updated || 0;
                             const remoteUpdated = remoteRecord.updated || 0;
                             const localTime = localRecord.time || 0;
                             const remoteTime = remoteRecord.time || 0;
                             
-                            // Отладка
-                            const debugKey = localStorage.getItem('tl_sync_debug_key');
-                            if (debugKey && (key === debugKey || key.includes(debugKey))) {
-                                console.log('[Sync] DEBUG сравнение для ' + key + ':');
-                                console.log('  Локально:  time=' + localTime + ', percent=' + localRecord.percent + '%, updated=' + localUpdated + ' (' + new Date(localUpdated).toLocaleString() + ')');
-                                console.log('  Удалённо:  time=' + remoteTime + ', percent=' + remoteRecord.percent + '%, updated=' + remoteUpdated + ' (' + new Date(remoteUpdated).toLocaleString() + ')');
-                                console.log('  Стратегия: ' + strategy);
-                            }
-                            
                             if (strategy === 'max_time') {
-                                // Стратегия "по длительности" - приоритет у большего времени просмотра
-                                if (localTime > remoteTime + 5) {
+                                // По длительности - приоритет у большего времени
+                                if (localTime > remoteTime) {
                                     shouldUseLocal = true;
-                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Локальное время больше, используем локальную');
-                                } else if (remoteTime > localTime + 5) {
-                                    shouldUseRemote = true;
-                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Удалённое время больше, используем удалённую');
-                                } else {
-                                    // Времена примерно равны - оставляем ту, что новее
-                                    if (localUpdated > remoteUpdated) {
-                                        shouldUseLocal = true;
-                                    } else {
-                                        shouldUseRemote = true;
-                                    }
-                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Времена примерно равны, используем ' + (shouldUseLocal ? 'локальную' : 'удалённую'));
                                 }
                             } else {
-                                // Стратегия "по дате" (last_watch) - приоритет у более свежей записи
-                                
-                                // Проверяем, какая запись новее
-                                if (localUpdated > remoteUpdated + 5000) {
-                                    // Локальная запись значительно новее (> 5 сек)
+                                // По дате (last_watch) - приоритет у более свежей записи
+                                if (localUpdated > remoteUpdated) {
                                     shouldUseLocal = true;
-                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Локальная дата новее на ' + (localUpdated - remoteUpdated) + 'мс, используем локальную');
-                                } else if (remoteUpdated > localUpdated + 5000) {
-                                    // Удалённая запись значительно новее (> 5 сек)
-                                    shouldUseRemote = true;
-                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Удалённая дата новее на ' + (remoteUpdated - localUpdated) + 'мс, используем удалённую');
-                                } else {
-                                    // Даты примерно равны (разница < 5 сек)
-                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Даты примерно равны (разница ' + Math.abs(localUpdated - remoteUpdated) + 'мс)');
-                                    
-                                    // Сравниваем время просмотра
+                                } else if (localUpdated === remoteUpdated) {
+                                    // Даты равны - сравниваем время
                                     if (localTime > remoteTime) {
                                         shouldUseLocal = true;
-                                        if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Локальное время больше, используем локальную');
-                                    } else if (remoteTime > localTime) {
-                                        shouldUseRemote = true;
-                                        if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Удалённое время больше, используем удалённую');
-                                    } else {
-                                        shouldUseLocal = true;
-                                        if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Времена равны, используем локальную');
                                     }
                                 }
-                                
-                                // Особые случаи, которые переопределяют решение
-                                if (localRecord.percent >= 95 && remoteRecord.percent < 95) {
-                                    shouldUseLocal = true;
-                                    shouldUseRemote = false;
-                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Локальная запись завершена, приоритет локальной');
-                                }
-                                
-                                if (remoteRecord.percent >= 95 && localRecord.percent < 95) {
-                                    shouldUseRemote = true;
-                                    shouldUseLocal = false;
-                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Удалённая запись завершена, приоритет удалённой');
-                                }
+                            }
+                            
+                            // Особые случаи
+                            if (localRecord.percent >= 95 && remoteRecord.percent < 95) {
+                                shouldUseLocal = true;
                             }
                             
                             if (shouldUseLocal) {
@@ -653,28 +611,20 @@
                                     merged[key] = localRecord;
                                     hasChanges = true;
                                     updatedCount++;
-                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> РЕЗУЛЬТАТ: используем локальную запись');
-                                } else {
-                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> РЕЗУЛЬТАТ: записи идентичны');
                                 }
-                            } else if (shouldUseRemote) {
-                                // Удалённая запись новее - оставляем её (она уже в merged)
-                                remoteNewerCount++;
-                                if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> РЕЗУЛЬТАТ: используем удалённую запись');
-                            } else {
-                                if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> РЕЗУЛЬТАТ: не определено, оставляем удалённую');
                             }
                         }
                     }
                     
-                    // Сохраняем объединённые данные в ИЗОЛИРОВАННОЕ хранилище
+                    // Сохраняем объединённые данные
                     setPluginFileView(merged);
-                    
-                    // И синхронизируем с Lampa timeline
                     syncWithLampaTimeline();
                     
-                    if (hasChanges) {
-                        // Отправляем полный file_view
+                    // ВСЕГДА отправляем данные на сервер, если есть ЛЮБЫЕ изменения
+                    // или если получили новые данные с сервера (чтобы обновить updated)
+                    const needSend = hasChanges || remoteNewerCount > 0;
+                    
+                    if (needSend) {
                         const dataToSend = {
                             version: 6,
                             profile_id: getCurrentProfileId(),
@@ -683,6 +633,8 @@
                             updated: Date.now(),
                             file_view: merged
                         };
+                        
+                        console.log('[Sync] Отправка данных на Gist...');
                         
                         $.ajax({
                             url: 'https://api.github.com/gists/' + c.gist_id,
@@ -705,18 +657,18 @@
                                     Lampa.Timeline.read(true);
                                 }
                                 
-                                if (showNotify) {
-                                    let msg = 'Синхронизировано';
-                                    if (newCount > 0) msg += ': +' + newCount + ' новых';
-                                    if (updatedCount > 0) msg += ', ' + updatedCount + ' обновлено';
-                                    if (remoteNewerCount > 0) msg += ', ' + remoteNewerCount + ' с сервера';
-                                    if (newCount === 0 && updatedCount === 0 && remoteNewerCount === 0) {
-                                        msg = 'Данные актуальны';
-                                    }
-                                    notify(msg);
-                                }
+                                let msg = '';
+                                if (newCount > 0) msg += '+ ' + newCount + ' новых';
+                                if (updatedCount > 0) msg += (msg ? ', ' : '') + updatedCount + ' обновлено';
+                                if (remoteNewerCount > 0) msg += (msg ? ', ' : '') + remoteNewerCount + ' с сервера';
                                 
-                                console.log('[Sync] Синхронизация завершена: +' + newCount + ' новых, ' + updatedCount + ' обновлено, ' + remoteNewerCount + ' с сервера');
+                                if (msg) {
+                                    if (showNotify) notify('Синхронизировано: ' + msg);
+                                    console.log('[Sync] Синхронизация завершена: ' + msg);
+                                } else {
+                                    if (showNotify) notify('Данные актуальны');
+                                    console.log('[Sync] Данные актуальны');
+                                }
                                 
                                 syncInProgress = false;
                                 if (pendingSync) {
@@ -734,17 +686,8 @@
                             }
                         });
                     } else {
-                        if (remoteNewerCount > 0) {
-                            if (Lampa.Timeline && Lampa.Timeline.read) {
-                                Lampa.Timeline.read(true);
-                            }
-                            if (showNotify) notify('Получено с сервера: ' + remoteNewerCount + ' записей');
-                            console.log('[Sync] Получено с сервера: ' + remoteNewerCount + ' записей');
-                        } else {
-                            console.log('[Sync] Нет изменений');
-                            if (showNotify) notify('Данные актуальны');
-                        }
-                        
+                        console.log('[Sync] Нет изменений для отправки');
+                        if (showNotify) notify('Данные актуальны');
                         syncInProgress = false;
                         if (callback) callback(true);
                     }
@@ -756,10 +699,56 @@
                 }
             },
             error: function(xhr) {
-                console.error('[Sync] Ошибка получения данных:', xhr.status);
-                if (showNotify) notify('Ошибка: ' + xhr.status);
-                syncInProgress = false;
-                if (callback) callback(false);
+                console.error('[Sync] Ошибка получения данных с Gist:', xhr.status);
+                
+                // Если Gist не найден (404), создаём новый
+                if (xhr.status === 404) {
+                    console.log('[Sync] Gist не найден, создаём новый...');
+                    
+                    const localFileView = getPluginFileView();
+                    const dataToSend = {
+                        version: 6,
+                        profile_id: getCurrentProfileId(),
+                        device: c.device_name,
+                        source: getSource(),
+                        updated: Date.now(),
+                        file_view: localFileView
+                    };
+                    
+                    $.ajax({
+                        url: 'https://api.github.com/gists/' + c.gist_id,
+                        method: 'PATCH',
+                        headers: {
+                            'Authorization': 'token ' + c.gist_token,
+                            'Accept': 'application/vnd.github.v3+json'
+                        },
+                        data: JSON.stringify({
+                            description: 'Lampa Timeline Sync',
+                            public: false,
+                            files: {
+                                'timeline.json': {
+                                    content: JSON.stringify(dataToSend, null, 2)
+                                }
+                            }
+                        }),
+                        success: function() {
+                            console.log('[Sync] Gist создан');
+                            if (showNotify) notify('Gist создан, данные отправлены');
+                            syncInProgress = false;
+                            if (callback) callback(true);
+                        },
+                        error: function(xhr2) {
+                            console.error('[Sync] Ошибка создания Gist:', xhr2.status);
+                            if (showNotify) notify('Ошибка создания Gist: ' + xhr2.status);
+                            syncInProgress = false;
+                            if (callback) callback(false);
+                        }
+                    });
+                } else {
+                    if (showNotify) notify('Ошибка загрузки: ' + xhr.status);
+                    syncInProgress = false;
+                    if (callback) callback(false);
+                }
             }
         });
     }
