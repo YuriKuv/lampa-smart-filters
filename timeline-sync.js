@@ -328,9 +328,10 @@
         if (!movieKey) return;
         
         const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
-        const fileView = getFileView();
+        const lampaFileView = getFileView();
+        const pluginFileView = getPluginFileView();
         
-        fileView[movieKey] = {
+        const record = {
             time: duration,
             percent: 100,
             duration: duration,
@@ -340,7 +341,12 @@
             completed: true
         };
         
-        setFileView(fileView);
+        lampaFileView[movieKey] = { ...record };
+        pluginFileView[movieKey] = { ...record };
+        
+        setFileView(lampaFileView);
+        setPluginFileView(pluginFileView);
+        
         notify('Отмечено как просмотренное');
         
         if (Lampa.Timeline && Lampa.Timeline.update) {
@@ -356,8 +362,7 @@
             setTimeout(function() { syncNow(false); }, 500);
         }
     }
-
-    // ============ СОХРАНЕНИЕ ПРОГРЕССА ============
+        // ============ СОХРАНЕНИЕ ПРОГРЕССА ============
     function saveCurrentProgress(timeInSeconds, force) {
         if (force === undefined) force = false;
         
@@ -367,16 +372,19 @@
         const movieKey = getCurrentMovieKey();
         if (!movieKey) return false;
         
-        const fileView = getFileView();
+        // Сохраняем в ОБА хранилища
+        const lampaFileView = getFileView();
+        const pluginFileView = getPluginFileView();
+        
         const currentTime = Math.floor(timeInSeconds);
-        const savedTime = fileView[movieKey]?.time || 0;
+        const savedTime = pluginFileView[movieKey]?.time || 0;
         
         if (force || Math.abs(currentTime - savedTime) >= 10) {
             const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
             const seriesInfo = getSeriesInfoFromUrl();
             
-            fileView[movieKey] = {
+            const record = {
                 time: currentTime,
                 percent: percent,
                 duration: duration,
@@ -386,7 +394,13 @@
                 ...(seriesInfo && { season: seriesInfo.season, episode: seriesInfo.episode })
             };
             
-            setFileView(fileView);
+            // Сохраняем в оба хранилища
+            lampaFileView[movieKey] = { ...record };
+            pluginFileView[movieKey] = { ...record };
+            
+            setFileView(lampaFileView);
+            setPluginFileView(pluginFileView);
+            
             console.log(`[Sync] Сохранён прогресс: ${formatTime(currentTime)} (${percent}%) для ${movieKey}`);
             
             if (duration > 0) checkEndCredits(currentTime, duration);
@@ -404,8 +418,90 @@
         }
         return false;
     }
-
     // ============ СИНХРОНИЗАЦИЯ ============
+    // ============ ИЗОЛИРОВАННОЕ ХРАНЕНИЕ ============
+    function getPluginFileViewKey() {
+        const profileId = getCurrentProfileId();
+        return profileId ? `tl_sync_plugin_file_view_${profileId}` : 'tl_sync_plugin_file_view';
+    }
+    
+    function getPluginFileView() {
+        return Lampa.Storage.get(getPluginFileViewKey(), {});
+    }
+    
+    function setPluginFileView(data) {
+        Lampa.Storage.set(getPluginFileViewKey(), data, true);
+        return data;
+    }
+    
+    // ============ СИНХРОНИЗАЦИЯ С LAMPA TIMELINE ============
+    function syncWithLampaTimeline() {
+        // Копируем данные из Lampa file_view в наше хранилище
+        const lampaFileView = getFileView();
+        const pluginFileView = getPluginFileView();
+        let hasChanges = false;
+        
+        for (const key in lampaFileView) {
+            const lampaRecord = lampaFileView[key];
+            const pluginRecord = pluginFileView[key];
+            
+            if (!pluginRecord) {
+                // Новая запись от Lampa
+                pluginFileView[key] = { ...lampaRecord, updated: lampaRecord.updated || Date.now() };
+                hasChanges = true;
+            } else {
+                // Проверяем, какая запись актуальнее
+                const lampaTime = lampaRecord.time || 0;
+                const pluginTime = pluginRecord.time || 0;
+                const lampaUpdated = lampaRecord.updated || 0;
+                const pluginUpdated = pluginRecord.updated || 0;
+                
+                // Если запись Lampa новее или имеет большее время
+                if (lampaTime > pluginTime && lampaUpdated >= pluginUpdated - 5000) {
+                    pluginFileView[key] = { ...lampaRecord, updated: lampaUpdated || Date.now() };
+                    hasChanges = true;
+                }
+            }
+        }
+        
+        // Также обновляем Lampa file_view из нашего хранилища
+        for (const key in pluginFileView) {
+            const pluginRecord = pluginFileView[key];
+            const lampaRecord = lampaFileView[key];
+            
+            if (!lampaRecord) {
+                lampaFileView[key] = { ...pluginRecord };
+                hasChanges = true;
+            } else {
+                const pluginTime = pluginRecord.time || 0;
+                const lampaTime = lampaRecord.time || 0;
+                const pluginUpdated = pluginRecord.updated || 0;
+                const lampaUpdated = lampaRecord.updated || 0;
+                
+                // Если наша запись новее и имеет большее или равное время
+                if (pluginUpdated > lampaUpdated && pluginTime >= lampaTime) {
+                    lampaFileView[key] = { ...pluginRecord };
+                    hasChanges = true;
+                } else if (pluginTime > lampaTime && pluginUpdated >= lampaUpdated - 5000) {
+                    lampaFileView[key] = { ...pluginRecord };
+                    hasChanges = true;
+                }
+            }
+        }
+        
+        if (hasChanges) {
+            setFileView(lampaFileView);
+            setPluginFileView(pluginFileView);
+            
+            if (Lampa.Timeline && Lampa.Timeline.read) {
+                Lampa.Timeline.read(true);
+            }
+            
+            console.log('[Sync] Синхронизация с Lampa timeline выполнена');
+        }
+    }
+    
+    // ============ ОСНОВНАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ ============
     function syncNow(showNotify, callback) {
         if (showNotify === undefined) showNotify = true;
         
@@ -426,6 +522,9 @@
         
         if (showNotify) notify('Синхронизация...');
         
+        // Сначала синхронизируем с Lampa timeline
+        syncWithLampaTimeline();
+        
         // Получаем данные с сервера
         $.ajax({
             url: 'https://api.github.com/gists/' + c.gist_id,
@@ -443,7 +542,7 @@
                         remoteData = JSON.parse(content);
                     }
                     
-                    const localFileView = getFileView();
+                    const localFileView = getPluginFileView(); // Используем ИЗОЛИРОВАННОЕ хранилище
                     const remoteFileView = remoteData.file_view || {};
                     const strategy = c.sync_strategy;
                     
@@ -475,57 +574,77 @@
                             let shouldUseLocal = false;
                             let shouldUseRemote = false;
                             
+                            const localUpdated = localRecord.updated || 0;
+                            const remoteUpdated = remoteRecord.updated || 0;
+                            const localTime = localRecord.time || 0;
+                            const remoteTime = remoteRecord.time || 0;
+                            
+                            // Отладка
+                            const debugKey = localStorage.getItem('tl_sync_debug_key');
+                            if (debugKey && (key === debugKey || key.includes(debugKey))) {
+                                console.log('[Sync] DEBUG сравнение для ' + key + ':');
+                                console.log('  Локально:  time=' + localTime + ', percent=' + localRecord.percent + '%, updated=' + localUpdated + ' (' + new Date(localUpdated).toLocaleString() + ')');
+                                console.log('  Удалённо:  time=' + remoteTime + ', percent=' + remoteRecord.percent + '%, updated=' + remoteUpdated + ' (' + new Date(remoteUpdated).toLocaleString() + ')');
+                                console.log('  Стратегия: ' + strategy);
+                            }
+                            
                             if (strategy === 'max_time') {
                                 // Стратегия "по длительности" - приоритет у большего времени просмотра
-                                if (localRecord.time > remoteRecord.time + 5) {
+                                if (localTime > remoteTime + 5) {
                                     shouldUseLocal = true;
-                                } else if (remoteRecord.time > localRecord.time + 5) {
+                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Локальное время больше, используем локальную');
+                                } else if (remoteTime > localTime + 5) {
                                     shouldUseRemote = true;
+                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Удалённое время больше, используем удалённую');
                                 } else {
-                                    // Времена примерно равны - оставляем локальную
-                                    shouldUseLocal = true;
+                                    // Времена примерно равны - оставляем ту, что новее
+                                    if (localUpdated > remoteUpdated) {
+                                        shouldUseLocal = true;
+                                    } else {
+                                        shouldUseRemote = true;
+                                    }
+                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Времена примерно равны, используем ' + (shouldUseLocal ? 'локальную' : 'удалённую'));
                                 }
                             } else {
                                 // Стратегия "по дате" (last_watch) - приоритет у более свежей записи
-                                const localUpdated = localRecord.updated || 0;
-                                const remoteUpdated = remoteRecord.updated || 0;
                                 
                                 // Проверяем, какая запись новее
                                 if (localUpdated > remoteUpdated + 5000) {
                                     // Локальная запись значительно новее (> 5 сек)
                                     shouldUseLocal = true;
+                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Локальная дата новее на ' + (localUpdated - remoteUpdated) + 'мс, используем локальную');
                                 } else if (remoteUpdated > localUpdated + 5000) {
                                     // Удалённая запись значительно новее (> 5 сек)
                                     shouldUseRemote = true;
+                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Удалённая дата новее на ' + (remoteUpdated - localUpdated) + 'мс, используем удалённую');
                                 } else {
                                     // Даты примерно равны (разница < 5 сек)
+                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Даты примерно равны (разница ' + Math.abs(localUpdated - remoteUpdated) + 'мс)');
+                                    
                                     // Сравниваем время просмотра
-                                    if (localRecord.time > remoteRecord.time) {
+                                    if (localTime > remoteTime) {
                                         shouldUseLocal = true;
-                                    } else if (remoteRecord.time > localRecord.time) {
+                                        if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Локальное время больше, используем локальную');
+                                    } else if (remoteTime > localTime) {
                                         shouldUseRemote = true;
+                                        if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Удалённое время больше, используем удалённую');
                                     } else {
-                                        // Всё равно - оставляем локальную
                                         shouldUseLocal = true;
+                                        if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Времена равны, используем локальную');
                                     }
                                 }
                                 
                                 // Особые случаи, которые переопределяют решение
-                                if (!shouldUseLocal && !shouldUseRemote) {
-                                    // Если не определились, оставляем локальную
-                                    shouldUseLocal = true;
-                                }
-                                
-                                // Если локальная запись завершена, а удалённая нет - приоритет локальной
                                 if (localRecord.percent >= 95 && remoteRecord.percent < 95) {
                                     shouldUseLocal = true;
                                     shouldUseRemote = false;
+                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Локальная запись завершена, приоритет локальной');
                                 }
                                 
-                                // Если удалённая запись завершена, а локальная нет - приоритет удалённой
                                 if (remoteRecord.percent >= 95 && localRecord.percent < 95) {
                                     shouldUseRemote = true;
                                     shouldUseLocal = false;
+                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> Удалённая запись завершена, приоритет удалённой');
                                 }
                             }
                             
@@ -534,16 +653,25 @@
                                     merged[key] = localRecord;
                                     hasChanges = true;
                                     updatedCount++;
+                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> РЕЗУЛЬТАТ: используем локальную запись');
+                                } else {
+                                    if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> РЕЗУЛЬТАТ: записи идентичны');
                                 }
                             } else if (shouldUseRemote) {
                                 // Удалённая запись новее - оставляем её (она уже в merged)
                                 remoteNewerCount++;
+                                if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> РЕЗУЛЬТАТ: используем удалённую запись');
+                            } else {
+                                if (debugKey && (key === debugKey || key.includes(debugKey))) console.log('  -> РЕЗУЛЬТАТ: не определено, оставляем удалённую');
                             }
                         }
                     }
                     
-                    // Сохраняем объединённые данные
-                    setFileView(merged);
+                    // Сохраняем объединённые данные в ИЗОЛИРОВАННОЕ хранилище
+                    setPluginFileView(merged);
+                    
+                    // И синхронизируем с Lampa timeline
+                    syncWithLampaTimeline();
                     
                     if (hasChanges) {
                         // Отправляем полный file_view
@@ -606,9 +734,7 @@
                             }
                         });
                     } else {
-                        // Даже если нет локальных изменений, могли быть изменения с сервера
                         if (remoteNewerCount > 0) {
-                            // Обновляем таймлайн, так как данные изменились
                             if (Lampa.Timeline && Lampa.Timeline.read) {
                                 Lampa.Timeline.read(true);
                             }
@@ -637,7 +763,6 @@
             }
         });
     }
-
     function fullResetFromServer(showNotify) {
         if (showNotify === undefined) showNotify = true;
         
@@ -663,7 +788,11 @@
                         const remote = JSON.parse(content);
                         const remoteFileView = remote.file_view || {};
                         
-                        setFileView(remoteFileView);
+                        // Сохраняем в изолированное хранилище
+                        setPluginFileView(remoteFileView);
+                        
+                        // Синхронизируем с Lampa
+                        syncWithLampaTimeline();
                         
                         if (Lampa.Timeline && Lampa.Timeline.read) {
                             Lampa.Timeline.read(true);
@@ -685,7 +814,6 @@
             }
         });
     }
-
     // ============ ПЛЕЕР ============
     function saveCurrentProgressForce() {
         if (currentMovieTime > 0) {
@@ -693,7 +821,7 @@
             if (cfg().sync_on_stop) syncNow(false);
         }
     }
-
+    
     function initPlayerHandler() {
         let lastSavedProgress = 0;
         let lastSyncToGist = 0;
@@ -766,7 +894,7 @@
             }
         }, 1000);
     }
-
+    
     function stopPlayerHandler() {
         if (playerCheckInterval) {
             clearInterval(playerCheckInterval);
