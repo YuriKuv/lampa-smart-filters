@@ -25,7 +25,7 @@
             auto_sync: true,
             auto_save: true,
             sync_on_stop: true,
-            sync_strategy: 'last_watch', // ИЗМЕНЕНО: по умолчанию last_watch
+            sync_strategy: 'last_watch',
             gist_token: '',
             gist_id: '',
             device_name: Lampa.Platform ? Lampa.Platform.get() : 'Unknown',
@@ -294,23 +294,17 @@
             const record = pluginFileView[key];
             let shouldDelete = false;
             
-            // Проверяем, что запись имеет время и дату
             const time = record.time || 0;
             const percent = record.percent || 0;
             const updated = record.updated || 0;
             
-            // Удаляем пустые записи
-            if (time === 0 && percent === 0) {
+            if (time === 0) {
                 shouldDelete = true;
                 cleaned++;
-            }
-            // Удаляем старые записи
-            else if (c.cleanup_days > 0 && updated < cutoffDate) {
+            } else if (c.cleanup_days > 0 && updated < cutoffDate) {
                 shouldDelete = true;
                 cleaned++;
-            }
-            // Удаляем завершённые записи
-            else if (c.cleanup_completed && percent >= 95) {
+            } else if (c.cleanup_completed && percent >= 95) {
                 shouldDelete = true;
                 completed_cleaned++;
             }
@@ -328,61 +322,12 @@
         }
     }
 
-    // ============ СИНХРОНИЗАЦИЯ PLUGIN -> LAMPA ============
-    function syncPluginToLampa() {
-        const pluginFileView = getPluginFileView();
-        const lampaFileView = getFileView();
-        let hasChanges = false;
-        
-        // Копируем все записи из плагина в Lampa
-        for (const key in pluginFileView) {
-            const pluginRecord = pluginFileView[key];
-            const lampaRecord = lampaFileView[key];
-            
-            if (!lampaRecord) {
-                lampaFileView[key] = { ...pluginRecord };
-                hasChanges = true;
-            } else {
-                const pluginTime = pluginRecord.time || 0;
-                const lampaTime = lampaRecord.time || 0;
-                const pluginUpdated = pluginRecord.updated || 0;
-                const lampaUpdated = lampaRecord.updated || 0;
-                
-                // Обновляем если запись в плагине новее или имеет большее время
-                if (pluginTime > lampaTime || pluginUpdated > lampaUpdated) {
-                    lampaFileView[key] = { ...pluginRecord };
-                    hasChanges = true;
-                }
-            }
-        }
-        
-        // Удаляем из Lampa записи с time=0
-        for (const key in lampaFileView) {
-            const record = lampaFileView[key];
-            if ((record.time || 0) === 0) {
-                delete lampaFileView[key];
-                hasChanges = true;
-            }
-        }
-        
-        if (hasChanges) {
-            setFileView(lampaFileView);
-            
-            // Принудительно обновляем UI
-            setTimeout(() => forceUITimelineUpdate(), 100);
-            setTimeout(() => forceUITimelineUpdate(), 300);
-            
-            console.log('[Sync] Данные синхронизированы с Lampa');
-        }
-    }
-
+    // ============ ПРИНУДИТЕЛЬНОЕ ОБНОВЛЕНИЕ UI ============
     function forceUITimelineUpdate() {
-        // 1. Принудительно обновляем Timeline Lampa
         if (Lampa.Timeline && Lampa.Timeline.read) {
             Lampa.Timeline.read(true);
         }
         
-        // 2. Отправляем событие обновления
         if (Lampa.Listener) {
             Lampa.Listener.send('state:changed', {
                 target: 'timeline',
@@ -391,28 +336,22 @@
             });
         }
         
-        // 3. Принудительно обновляем все карточки на экране
         const cards = document.querySelectorAll('.card');
-        
         cards.forEach(card => {
-            // Очищаем возможный кеш карточки
             if (card.card_data) {
                 delete card.card_data._timeline_cache;
             }
             
-            // Вызываем событие update на карточке
             try {
                 card.dispatchEvent(new Event('update'));
             } catch(e) {}
             
-            // Принудительно вызываем watched для карточек в фокусе
             if (card.classList.contains('focus')) {
                 card.classList.remove('focus');
                 setTimeout(() => card.classList.add('focus'), 10);
             }
         });
         
-        // 4. Обновляем через Lampa.Maker если доступно
         if (Lampa.Maker && Lampa.Maker.map) {
             try {
                 const cardMap = Lampa.Maker.map('Card');
@@ -428,7 +367,6 @@
             } catch(e) {}
         }
         
-        // 5. Сбрасываем кеш Lampa если есть
         if (Lampa.Cache) {
             try {
                 Lampa.Cache.clear('timeline');
@@ -437,24 +375,139 @@
         
         console.log('[Sync] UI таймкоды принудительно обновлены');
     }
+
+    // ============ СИНХРОНИЗАЦИЯ PLUGIN -> LAMPA ============
+    function syncPluginToLampa() {
+        const pluginFileView = getPluginFileView();
+        const lampaFileView = getFileView();
+        let hasChanges = false;
         
-        // 4. Обновляем через Lampa.Maker если доступно
-        if (Lampa.Maker && Lampa.Maker.map) {
-            const cardMap = Lampa.Maker.map('Card');
-            if (cardMap && cardMap.Watched) {
-                // Принудительно вызываем watched для всех активных карточек
-                document.querySelectorAll('.card').forEach(card => {
-                    const instance = card.instance;
-                    if (instance && instance.emit) {
-                        instance.emit('watched');
-                    }
-                });
+        for (const key in pluginFileView) {
+            const pluginRecord = pluginFileView[key];
+            const lampaRecord = lampaFileView[key];
+            
+            if (!lampaRecord) {
+                lampaFileView[key] = { ...pluginRecord };
+                hasChanges = true;
+            } else {
+                const pluginTime = pluginRecord.time || 0;
+                const lampaTime = lampaRecord.time || 0;
+                const pluginUpdated = pluginRecord.updated || 0;
+                const lampaUpdated = lampaRecord.updated || 0;
+                
+                if (pluginTime > lampaTime || pluginUpdated > lampaUpdated) {
+                    lampaFileView[key] = { ...pluginRecord };
+                    hasChanges = true;
+                }
             }
         }
         
-        console.log('[Sync] UI таймкоды принудительно обновлены');
+        for (const key in lampaFileView) {
+            const record = lampaFileView[key];
+            if ((record.time || 0) === 0) {
+                delete lampaFileView[key];
+                hasChanges = true;
+            }
+        }
+        
+        if (hasChanges) {
+            setFileView(lampaFileView);
+            setTimeout(() => forceUITimelineUpdate(), 100);
+            setTimeout(() => forceUITimelineUpdate(), 300);
+            console.log('[Sync] Данные синхронизированы с Lampa');
+        }
     }
-    
+
+    function forceSyncToLampaOnStart() {
+        const pluginFileView = getPluginFileView();
+        const lampaFileView = getFileView();
+        let hasChanges = false;
+        let updatedCount = 0;
+        
+        for (const key in pluginFileView) {
+            const pluginRecord = pluginFileView[key];
+            const lampaRecord = lampaFileView[key];
+            
+            if (!lampaRecord) {
+                lampaFileView[key] = { ...pluginRecord };
+                hasChanges = true;
+                updatedCount++;
+            } else {
+                const pluginTime = pluginRecord.time || 0;
+                const lampaTime = lampaRecord.time || 0;
+                const pluginUpdated = pluginRecord.updated || 0;
+                const lampaUpdated = lampaRecord.updated || 0;
+                
+                if (pluginTime > lampaTime || pluginUpdated > lampaUpdated) {
+                    lampaFileView[key] = { ...pluginRecord };
+                    hasChanges = true;
+                    updatedCount++;
+                }
+            }
+        }
+        
+        for (const key in lampaFileView) {
+            const record = lampaFileView[key];
+            if ((record.time || 0) === 0) {
+                delete lampaFileView[key];
+                hasChanges = true;
+            }
+        }
+        
+        if (hasChanges) {
+            setFileView(lampaFileView);
+            setTimeout(() => forceUITimelineUpdate(), 100);
+            setTimeout(() => forceUITimelineUpdate(), 500);
+            setTimeout(() => forceUITimelineUpdate(), 1000);
+            console.log(`[Sync] Lampa обновлена при старте: ${updatedCount} записей`);
+        }
+    }
+
+    function fullResetAndReload() {
+        const lampaFileView = {};
+        const pluginFileView = getPluginFileView();
+        
+        for (const key in pluginFileView) {
+            lampaFileView[key] = { ...pluginFileView[key] };
+        }
+        setFileView(lampaFileView);
+        
+        if (Lampa.Timeline && Lampa.Timeline.read) {
+            Lampa.Timeline.read(true);
+        }
+        
+        setTimeout(() => forceUITimelineUpdate(), 100);
+        
+        notify('Данные перезагружены');
+        console.log('[Sync] Полная перезагрузка выполнена');
+    }
+
+    function forceCleanupEmptyRecords() {
+        const pluginFileView = getPluginFileView();
+        let removed = 0;
+        
+        for (const key in pluginFileView) {
+            const record = pluginFileView[key];
+            const time = record.time || 0;
+            
+            if (time === 0) {
+                delete pluginFileView[key];
+                removed++;
+                console.log(`[Sync] Принудительно удалена пустая запись: ${key}`);
+            }
+        }
+        
+        if (removed > 0) {
+            setPluginFileView(pluginFileView);
+            syncPluginToLampa();
+            console.log(`[Sync] Принудительно удалено ${removed} пустых записей`);
+            notify('🗑️ Удалено ' + removed + ' пустых записей');
+            setTimeout(() => syncNow(true), 500);
+        } else {
+            notify('✅ Пустых записей не найдено');
+        }
+    }
+
     // ============ АВТО-ОПРЕДЕЛЕНИЕ ФИНАЛА ============
     function checkEndCredits(currentTime, duration) {
         const c = cfg();
@@ -546,14 +599,10 @@
                 ...(seriesInfo && { season: seriesInfo.season, episode: seriesInfo.episode })
             };
             
-            // Сохраняем в изолированное хранилище плагина
             pluginFileView[movieKey] = record;
             setPluginFileView(pluginFileView);
-            
-            // Синхронизируем с Lampa
             syncPluginToLampa();
             
-            // Принудительно обновляем UI
             setTimeout(() => forceUITimelineUpdate(), 50);
             setTimeout(() => forceUITimelineUpdate(), 200);
             
@@ -565,106 +614,7 @@
         }
         return false;
     }
-        // ============ ПРИНУДИТЕЛЬНАЯ ОЧИСТКА ПУСТЫХ ЗАПИСЕЙ ============
-    function forceCleanupEmptyRecords() {
-        const pluginFileView = getPluginFileView();
-        let removed = 0;
-        
-        for (const key in pluginFileView) {
-            const record = pluginFileView[key];
-            const time = record.time || 0;
-            const percent = record.percent || 0;
-            
-            if (time === 0 && percent === 0) {
-                delete pluginFileView[key];
-                removed++;
-                console.log(`[Sync] Принудительно удалена пустая запись: ${key}`);
-            }
-        }
-        
-        if (removed > 0) {
-            setPluginFileView(pluginFileView);
-            syncPluginToLampa();
-            console.log(`[Sync] Принудительно удалено ${removed} пустых записей`);
-            notify('🗑️ Удалено ' + removed + ' пустых записей');
-            
-            // Запускаем синхронизацию чтобы удалить их и из Gist
-            setTimeout(() => syncNow(true), 500);
-        } else {
-            notify('✅ Пустых записей не найдено');
-        }
-    }    
 
-    function forceSyncToLampaOnStart() {
-        const pluginFileView = getPluginFileView();
-        const lampaFileView = getFileView();
-        let hasChanges = false;
-        let updatedCount = 0;
-        
-        // Копируем ВСЕ данные из плагина в Lampa
-        for (const key in pluginFileView) {
-            const pluginRecord = pluginFileView[key];
-            const lampaRecord = lampaFileView[key];
-            
-            if (!lampaRecord) {
-                lampaFileView[key] = { ...pluginRecord };
-                hasChanges = true;
-                updatedCount++;
-            } else {
-                const pluginTime = pluginRecord.time || 0;
-                const lampaTime = lampaRecord.time || 0;
-                const pluginUpdated = pluginRecord.updated || 0;
-                const lampaUpdated = lampaRecord.updated || 0;
-                
-                if (pluginTime > lampaTime || pluginUpdated > lampaUpdated) {
-                    lampaFileView[key] = { ...pluginRecord };
-                    hasChanges = true;
-                    updatedCount++;
-                }
-            }
-        }
-        
-        // Удаляем из Lampa записи с time=0
-        for (const key in lampaFileView) {
-            const record = lampaFileView[key];
-            if ((record.time || 0) === 0) {
-                delete lampaFileView[key];
-                hasChanges = true;
-            }
-        }
-        
-        if (hasChanges) {
-            setFileView(lampaFileView);
-            
-            // Множественные попытки обновления UI
-            setTimeout(() => forceUITimelineUpdate(), 100);
-            setTimeout(() => forceUITimelineUpdate(), 500);
-            setTimeout(() => forceUITimelineUpdate(), 1000);
-            
-            console.log(`[Sync] Lampa обновлена при старте: ${updatedCount} записей`);
-        }
-    }
-
-    function fullResetAndReload() {
-        // Очищаем Lampa
-        const lampaFileView = {};
-        setFileView(lampaFileView);
-        
-        // Копируем данные из плагина
-        const pluginFileView = getPluginFileView();
-        for (const key in pluginFileView) {
-            lampaFileView[key] = { ...pluginFileView[key] };
-        }
-        setFileView(lampaFileView);
-        
-        if (Lampa.Timeline && Lampa.Timeline.read) {
-            Lampa.Timeline.read(true);
-        }
-        
-        notify('Данные перезагружены');
-        console.log('[Sync] Полная перезагрузка выполнена');
-    }
-    
     // ============ СИНХРОНИЗАЦИЯ ============
     function syncNow(showNotify, callback) {
         if (showNotify === undefined) showNotify = true;
@@ -704,7 +654,6 @@
                     if (content) {
                         remoteData = JSON.parse(content);
                         
-                        // ФИЛЬТРУЕМ ВСЕ ЗАПИСИ С time=0
                         const filtered = {};
                         for (const key in remoteData.file_view) {
                             const record = remoteData.file_view[key];
@@ -730,7 +679,6 @@
                     
                     const localFileView = getPluginFileView();
                     
-                    // ФИЛЬТРУЕМ ВСЕ ЗАПИСИ С time=0 ЛОКАЛЬНО
                     const localFiltered = {};
                     let localRemoved = 0;
                     for (const key in localFileView) {
@@ -759,7 +707,6 @@
                     let newCount = 0;
                     let remoteNewerCount = 0;
                     
-                    // Добавляем удалённые записи, которых нет локально
                     for (const key in remoteFileView) {
                         if (!localFiltered[key]) {
                             merged[key] = remoteFileView[key];
@@ -768,7 +715,6 @@
                         }
                     }
                     
-                    // Обрабатываем локальные записи
                     for (const key in localFiltered) {
                         const localRecord = localFiltered[key];
                         const remoteRecord = remoteFileView[key];
@@ -898,7 +844,7 @@
             }
         });
     }
-        
+
     function fullResetFromServer(showNotify) {
         if (showNotify === undefined) showNotify = true;
         
@@ -1101,8 +1047,8 @@
                 { title: '──────────', separator: true },
                 { title: 'Синхронизировать сейчас', action: 'sync_now' },
                 { title: 'Полный сброс (загрузить с сервера)', action: 'full_reset' },
-                { title: 'Очистить пустые записи', action: 'force_cleanup' },
-                { title: 'Перезагрузить таймкоды', action: 'force_reload' },
+                { title: '🗑️ Очистить пустые записи', action: 'force_cleanup' },
+                { title: '🔄 Перезагрузить таймкоды', action: 'force_reload' },
                 { title: '──────────', separator: true },
                 { title: 'Закрыть', action: 'cancel' }
             ],
@@ -1130,7 +1076,6 @@
                     Lampa.Controller.toggle('content');
                     forceSyncToLampaOnStart();
                     fullResetAndReload();
-                    notify('Таймкоды перезагружены');
                 }
                 else if (item.action === 'toggle_auto_sync') {
                     c.auto_sync = !c.auto_sync;
@@ -1320,8 +1265,8 @@
                     Lampa.Select.show({
                         title: 'Очистить пустые записи?',
                         items: [
-                            { title: 'Отмена', action: 'cancel' },
-                            { title: 'Да, очистить', action: 'confirm' }
+                            { title: '❌ Отмена', action: 'cancel' },
+                            { title: '✅ Да, очистить', action: 'confirm' }
                         ],
                         onSelect: function(subItem) {
                             if (subItem.action === 'confirm') {
@@ -1371,7 +1316,6 @@
     function init() {
         isV3 = Lampa.Manifest && Lampa.Manifest.app_digital >= 300;
         
-        // ВАЖНО: Всегда добавляем кнопку в настройки, ДО проверки enabled
         addSettingsButton();
         
         const c = cfg();
@@ -1380,7 +1324,7 @@
             return;
         }
         
-        console.log('[Sync] Инициализация плагина v7.3...');
+        console.log('[Sync] Инициализация плагина v7.4...');
         
         if (c.always_show_timeline) {
             enableAlwaysShowTimeline();
@@ -1389,18 +1333,10 @@
         initPlayerHandler();
         startBackgroundSync();
         
-        // Принудительно синхронизируем с Lampa при запуске (если функция существует)
         setTimeout(() => {
-            if (typeof forceSyncToLampaOnStart === 'function') {
-                try {
-                    forceSyncToLampaOnStart();
-                } catch(e) {
-                    console.warn('[Sync] Ошибка в forceSyncToLampaOnStart:', e);
-                }
-            }
+            forceSyncToLampaOnStart();
         }, 1000);
         
-        // Первая синхронизация с Gist
         setTimeout(function() {
             const c2 = cfg();
             if (c2.enabled && c2.auto_sync) {
@@ -1410,19 +1346,19 @@
             forceRefreshCards();
         }, 3000);
         
-        console.log('[Sync] Плагин загружен v7.3');
+        console.log('[Sync] Плагин загружен v7.4');
     }
 
     // Запуск
-if (window.Lampa && Lampa.Listener) {
-    if (window.appready) init();
-    else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
-} else {
-    setTimeout(function waitLampa() {
-        if (window.Lampa && Lampa.Listener) {
-            if (window.appready) init();
-            else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
-        } else setTimeout(waitLampa, 100);
-    }, 100);
-}
+    if (window.Lampa && Lampa.Listener) {
+        if (window.appready) init();
+        else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
+    } else {
+        setTimeout(function waitLampa() {
+            if (window.Lampa && Lampa.Listener) {
+                if (window.appready) init();
+                else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
+            } else setTimeout(waitLampa, 100);
+        }, 100);
+    }
 })();
