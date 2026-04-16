@@ -13,12 +13,11 @@
     let autoSyncInterval = null;
     let playerCheckInterval = null;
     let timerId = null;
-    let styleObserver = null;
-    let visibilityInterval = null;
     let lastPosition = 0;
     let endCreditsDetected = false;
     let isV3 = false;
     let styleInjected = false;
+    let modulePatched = false;
 
     function cfg() {
         return Lampa.Storage.get(CFG_KEY, {
@@ -68,10 +67,7 @@
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
         const secs = Math.floor(seconds % 60);
-        
-        if (hours > 0) {
-            return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-        }
+        if (hours > 0) return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
         return `${minutes}:${secs.toString().padStart(2, '0')}`;
     }
 
@@ -79,10 +75,7 @@
         if (!seconds || seconds < 0) return '0 мин';
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
-        
-        if (hours > 0) {
-            return `${hours} ч ${minutes} мин`;
-        }
+        if (hours > 0) return `${hours} ч ${minutes} мин`;
         return `${minutes} мин`;
     }
 
@@ -113,12 +106,8 @@
     function extractTmdbIdFromItem(item) {
         if (!item) return null;
         if (item.tmdb_id) return String(item.tmdb_id);
-        if (item.id && /^\d{6,8}$/.test(String(item.id))) {
-            return String(item.id);
-        }
-        if (item.movie_id && /^\d{6,8}$/.test(String(item.movie_id))) {
-            return String(item.movie_id);
-        }
+        if (item.id && /^\d{6,8}$/.test(String(item.id))) return String(item.id);
+        if (item.movie_id && /^\d{6,8}$/.test(String(item.movie_id))) return String(item.movie_id);
         return null;
     }
 
@@ -127,18 +116,10 @@
             const playerData = Lampa.Player.playdata();
             if (playerData && playerData.path) {
                 const url = playerData.path;
-                const patterns = [
-                    /S(\d+)E(\d+)/i,
-                    /S(\d+)[\s.]*E(\d+)/i,
-                    /(\d+)x(\d+)/i,
-                    /Season[.\s]*(\d+)[.\s]*Episode[.\s]*(\d+)/i
-                ];
-                
+                const patterns = [/S(\d+)E(\d+)/i, /S(\d+)[\s.]*E(\d+)/i, /(\d+)x(\d+)/i, /Season[.\s]*(\d+)[.\s]*Episode[.\s]*(\d+)/i];
                 for (const pattern of patterns) {
                     const match = url.match(pattern);
-                    if (match && match[1] && match[2]) {
-                        return { season: parseInt(match[1]), episode: parseInt(match[2]) };
-                    }
+                    if (match && match[1] && match[2]) return { season: parseInt(match[1]), episode: parseInt(match[2]) };
                 }
             }
         } catch(e) {}
@@ -148,11 +129,8 @@
     function getCurrentMovieKey() {
         const tmdbId = getCurrentMovieTmdbId();
         if (!tmdbId) return null;
-        
         const seriesInfo = getSeriesInfoFromUrl();
-        if (seriesInfo) {
-            return `${tmdbId}_s${seriesInfo.season}_e${seriesInfo.episode}`;
-        }
+        if (seriesInfo) return `${tmdbId}_s${seriesInfo.season}_e${seriesInfo.episode}`;
         return tmdbId;
     }
 
@@ -160,8 +138,7 @@
         try {
             const activity = Lampa.Activity.active();
             if (activity && activity.movie) {
-                const movie = activity.movie;
-                const tmdbId = extractTmdbIdFromItem(movie);
+                const tmdbId = extractTmdbIdFromItem(activity.movie);
                 if (tmdbId) return tmdbId;
             }
             return currentMovieId;
@@ -174,35 +151,50 @@
         return Lampa.Storage.field('source') || 'tmdb';
     }
 
-    function isTouchDevice() {
-        return (Lampa.Platform && (Lampa.Platform.is('android') || Lampa.Platform.is('ios'))) ||
-               ('ontouchstart' in window) ||
-               (navigator.maxTouchPoints > 0) ||
-               document.body.classList.contains('touch-device') ||
-               document.body.classList.contains('true--mobile');
+    // ============ ПАТЧ МОДУЛЯ WATCHED ============
+    function patchWatchedModule() {
+        if (modulePatched) return;
+        if (!Lampa.Maker || !Lampa.Maker.map) return;
+
+        try {
+            const cardMap = Lampa.Maker.map('Card');
+            if (cardMap && cardMap.Watched) {
+                const originalOnCreate = cardMap.Watched.onCreate;
+                
+                cardMap.Watched.onCreate = function() {
+                    if (originalOnCreate) originalOnCreate.call(this);
+                    
+                    const c = cfg();
+                    if (!c.always_show_timeline) return;
+                    
+                    setTimeout(() => {
+                        this.emit('watched');
+                    }, 100);
+                    
+                    Lampa.Listener.follow('state:changed', (e) => {
+                        if (e.target === 'timeline' && (e.reason === 'read' || e.reason === 'update')) {
+                            setTimeout(() => this.emit('watched'), 50);
+                        }
+                    });
+                };
+                
+                modulePatched = true;
+                console.log('[Sync] Модуль Watched пропатчен');
+            }
+        } catch(e) {
+            console.warn('[Sync] Не удалось пропатчить модуль Watched:', e);
+        }
     }
 
-    // ============ ВСЕГДА ПОКАЗЫВАТЬ ТАЙМКОДЫ ============
+    // ============ СТИЛИ ДЛЯ ТАЙМКОДОВ ============
     function getPositionStyles() {
         const c = cfg();
         const pos = c.timeline_position || 'bottom';
-        
         const styles = {
-            bottom: `
-                bottom: 2.5em !important;
-                top: auto !important;
-            `,
-            center: `
-                bottom: auto !important;
-                top: 50% !important;
-                transform: translateY(-50%) !important;
-            `,
-            top: `
-                bottom: auto !important;
-                top: 0.5em !important;
-            `
+            bottom: `bottom: 2.5em !important; top: auto !important;`,
+            center: `bottom: auto !important; top: 50% !important; transform: translateY(-50%) !important;`,
+            top: `bottom: auto !important; top: 0.5em !important;`
         };
-        
         return styles[pos] || styles.bottom;
     }
 
@@ -216,13 +208,7 @@
         const style = document.createElement('style');
         style.id = 'tl-sync-styles';
         style.textContent = `
-            /* ВСЕГДА ПОКАЗЫВАТЬ ТАЙМКОДЫ НА КАРТОЧКАХ - ВСЕ РЕЖИМЫ */
-            
-            /* Основной контейнер таймкода - всегда показываем */
-            .card .card-watched,
-            .view--card .card-watched,
-            .card--movie .card-watched,
-            .card--tv .card-watched {
+            .card .card-watched {
                 display: block !important;
                 opacity: 1 !important;
                 visibility: visible !important;
@@ -231,92 +217,29 @@
                 left: 0.8em !important;
                 right: 0.8em !important;
                 z-index: 5 !important;
-            }
-            
-            /* Убираем зависимость от фокуса */
-            .card:not(.focus) .card-watched,
-            .card:not(:hover) .card-watched,
-            .card:not(.hover) .card-watched {
-                display: block !important;
-                opacity: 1 !important;
-                visibility: visible !important;
-            }
-            
-            /* СПЕЦИАЛЬНО ДЛЯ СЕНСОРНОГО РЕЖИМА */
-            body.touch-device .card .card-watched,
-            body.true--mobile .card .card-watched,
-            .touch .card .card-watched,
-            .mobile .card .card-watched {
-                display: block !important;
-                opacity: 1 !important;
-                visibility: visible !important;
-            }
-            
-            /* Принудительно показываем даже если скрыто через style */
-            .card-watched[style*="display: none"],
-            .card-watched[style*="display:none"] {
-                display: block !important;
-            }
-            
-            /* Таймлайн внутри карточки */
-            .card .time-line,
-            .card-watched .time-line {
-                display: block !important;
-                opacity: 1 !important;
-                visibility: visible !important;
-            }
-            
-            /* Элементы внутри card-watched */
-            .card-watched__inner,
-            .card-watched__body,
-            .card-watched__item {
-                opacity: 1 !important;
-            }
-            
-            /* Прогресс-бар */
-            .time-line > div {
-                opacity: 1 !important;
-                background-color: #fff !important;
-            }
-            
-            /* Делаем таймкод полупрозрачным чтобы не мешал */
-            .card .card-watched {
                 background-color: rgba(0, 0, 0, 0.7) !important;
                 -webkit-backdrop-filter: blur(2px);
                 backdrop-filter: blur(2px);
             }
             
-            /* Уменьшаем отступы для компактности */
-            .card-watched__item {
-                margin-top: 0.4em !important;
+            .card:not(.focus) .card-watched {
+                display: block !important;
+                opacity: 1 !important;
+                visibility: visible !important;
             }
             
-            .card-watched__item:first-child {
-                margin-top: 0 !important;
+            .card-watched[style*="display: none"] {
+                display: block !important;
             }
             
-            /* Показываем только 2 строки для экономии места */
             .card-watched__item:nth-child(n+3) {
                 display: none !important;
             }
             
-            /* Для широких карточек показываем только одну строку */
             .card--wide .card-watched__item:nth-child(n+2) {
                 display: none !important;
             }
             
-            /* Для позиции center - центрируем содержимое */
-            ${c.timeline_position === 'center' ? `
-            .card .card-watched {
-                display: flex !important;
-                align-items: center !important;
-            }
-            .card-watched__inner {
-                width: 100% !important;
-            }
-            ` : ''}
-            
-            /* Исправляем для мобильной версии */
             @media screen and (max-width: 480px) {
                 .card .card-watched {
                     left: 0.5em !important;
@@ -326,14 +249,13 @@
         `;
         document.head.appendChild(style);
         styleInjected = true;
-        console.log('[Sync] Стили для всегда видимых таймкодов добавлены (позиция: ' + c.timeline_position + ')');
+        console.log('[Sync] Стили добавлены, позиция: ' + c.timeline_position);
     }
 
     function removeTimelineStyles() {
         const oldStyle = document.getElementById('tl-sync-styles');
         if (oldStyle) oldStyle.remove();
         styleInjected = false;
-        console.log('[Sync] Стили таймкодов удалены');
     }
 
     function forceRefreshCards() {
@@ -344,177 +266,22 @@
             Lampa.Timeline.read(true);
         }
         
-        const pos = c.timeline_position || 'bottom';
-        
-        setTimeout(function() {
-            const cards = document.querySelectorAll('.card');
-            cards.forEach(function(card) {
-                const watched = card.querySelector('.card-watched');
-                if (watched) {
-                    watched.style.setProperty('display', 'block', 'important');
-                    watched.style.setProperty('opacity', '1', 'important');
-                    watched.style.setProperty('visibility', 'visible', 'important');
-                    
-                    if (pos === 'bottom') {
-                        watched.style.setProperty('bottom', '2.5em', 'important');
-                        watched.style.setProperty('top', 'auto', 'important');
-                        watched.style.setProperty('transform', 'none', 'important');
-                    } else if (pos === 'center') {
-                        watched.style.setProperty('bottom', 'auto', 'important');
-                        watched.style.setProperty('top', '50%', 'important');
-                        watched.style.setProperty('transform', 'translateY(-50%)', 'important');
-                    } else if (pos === 'top') {
-                        watched.style.setProperty('bottom', 'auto', 'important');
-                        watched.style.setProperty('top', '0.5em', 'important');
-                        watched.style.setProperty('transform', 'none', 'important');
-                    }
-                }
-                
-                const timeLine = card.querySelector('.time-line');
-                if (timeLine) {
-                    timeLine.style.setProperty('display', 'block', 'important');
-                    timeLine.style.setProperty('opacity', '1', 'important');
-                }
+        setTimeout(() => {
+            document.querySelectorAll('.card').forEach(card => {
+                card.classList.add('focus');
+                setTimeout(() => card.classList.remove('focus'), 50);
             });
-            
-            const watchedElements = document.querySelectorAll('.card-watched');
-            watchedElements.forEach(function(el) {
-                el.style.setProperty('display', 'block', 'important');
-                el.style.setProperty('opacity', '1', 'important');
-                el.style.setProperty('visibility', 'visible', 'important');
-            });
-        }, 100);
-        
-        setTimeout(function() {
-            const watchedElements = document.querySelectorAll('.card-watched');
-            watchedElements.forEach(function(el) {
-                el.style.setProperty('display', 'block', 'important');
-                el.style.setProperty('opacity', '1', 'important');
-                el.style.setProperty('visibility', 'visible', 'important');
-            });
-        }, 500);
-    }
-
-    function startStyleObserver() {
-        if (!window.MutationObserver) return;
-        
-        if (styleObserver) {
-            styleObserver.disconnect();
-        }
-        
-        styleObserver = new MutationObserver(function(mutations) {
-            const c = cfg();
-            if (!c.always_show_timeline) return;
-            
-            let needsRefresh = false;
-            
-            mutations.forEach(function(mutation) {
-                if (mutation.addedNodes.length) {
-                    mutation.addedNodes.forEach(function(node) {
-                        if (node.nodeType === 1) {
-                            if (node.classList && node.classList.contains('card')) {
-                                needsRefresh = true;
-                            }
-                            if (node.querySelector && node.querySelector('.card')) {
-                                needsRefresh = true;
-                            }
-                        }
-                    });
-                }
-            });
-            
-            if (needsRefresh) {
-                setTimeout(forceRefreshCards, 50);
-            }
-        });
-        
-        styleObserver.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-        
-        console.log('[Sync] Наблюдатель за DOM запущен');
-    }
-
-    function stopStyleObserver() {
-        if (styleObserver) {
-            styleObserver.disconnect();
-            styleObserver = null;
-        }
-    }
-
-    function startVisibilityInterval() {
-        if (visibilityInterval) {
-            clearInterval(visibilityInterval);
-        }
-        
-        const intervalTime = isTouchDevice() ? 500 : 1000;
-        const c = cfg();
-        const pos = c.timeline_position || 'bottom';
-        
-        visibilityInterval = setInterval(function() {
-            if (!cfg().always_show_timeline) return;
-            
-            const watchedElements = document.querySelectorAll('.card-watched');
-            watchedElements.forEach(function(el) {
-                const computedStyle = window.getComputedStyle(el);
-                if (computedStyle.display === 'none' || computedStyle.opacity === '0') {
-                    el.style.setProperty('display', 'block', 'important');
-                    el.style.setProperty('opacity', '1', 'important');
-                    el.style.setProperty('visibility', 'visible', 'important');
-                }
-            });
-            
-            if (isTouchDevice()) {
-                const cards = document.querySelectorAll('.card');
-                cards.forEach(function(card) {
-                    const watched = card.querySelector('.card-watched');
-                    if (!watched) return;
-                    
-                    const style = window.getComputedStyle(watched);
-                    if (style.display === 'none') {
-                        watched.style.display = 'block';
-                        watched.style.opacity = '1';
-                        watched.style.visibility = 'visible';
-                    }
-                });
-            }
-        }, intervalTime);
-        
-        console.log(`[Sync] Интервал проверки видимости запущен (${intervalTime}мс)`);
-    }
-
-    function stopVisibilityInterval() {
-        if (visibilityInterval) {
-            clearInterval(visibilityInterval);
-            visibilityInterval = null;
-        }
+        }, 200);
     }
 
     function enableAlwaysShowTimeline() {
         injectTimelineStyles();
-        startStyleObserver();
-        startVisibilityInterval();
+        patchWatchedModule();
         forceRefreshCards();
-        
-        if (isTouchDevice()) {
-            console.log('[Sync] Обнаружено сенсорное устройство, применяем дополнительные стили');
-            
-            if (!document.body.classList.contains('touch-device')) {
-                document.body.classList.add('touch-device');
-            }
-            
-            setTimeout(forceRefreshCards, 200);
-            setTimeout(forceRefreshCards, 500);
-            setTimeout(forceRefreshCards, 1000);
-            setTimeout(forceRefreshCards, 2000);
-        }
     }
 
     function disableAlwaysShowTimeline() {
         removeTimelineStyles();
-        stopStyleObserver();
-        stopVisibilityInterval();
     }
 
     // ============ УМНАЯ ОЧИСТКА ============
@@ -547,17 +314,13 @@
                 completed_cleaned++;
             }
             
-            if (shouldDelete) {
-                delete fileView[key];
-            }
+            if (shouldDelete) delete fileView[key];
         }
         
         if (cleaned > 0 || completed_cleaned > 0) {
             setFileView(fileView);
-            console.log(`[Sync] 🧹 Очистка: удалено ${cleaned} старых и ${completed_cleaned} завершённых записей`);
-            if (showNotify) {
-                notify(`🧹 Удалено: ${cleaned} старых, ${completed_cleaned} завершённых`);
-            }
+            console.log(`[Sync] 🧹 Очистка: удалено ${cleaned} старых и ${completed_cleaned} завершённых`);
+            if (showNotify) notify(`🧹 Удалено: ${cleaned} старых, ${completed_cleaned} завершённых`);
         } else if (showNotify) {
             notify('🧹 Нет записей для очистки');
         }
@@ -576,10 +339,7 @@
         
         if (remaining <= threshold && remaining > 0 && !endCreditsDetected) {
             endCreditsDetected = true;
-            
-            if (currentTime > lastPosition + 30) {
-                return false;
-            }
+            if (currentTime > lastPosition + 30) return false;
             
             console.log(`[Sync] 🎬 Обнаружены финальные титры (осталось ${Math.floor(remaining)}с)`);
             
@@ -660,7 +420,6 @@
         if (force || Math.abs(currentTime - savedTime) >= 10) {
             const duration = Lampa.Player.playdata()?.timeline?.duration || 0;
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
-            
             const seriesInfo = getSeriesInfoFromUrl();
             
             fileView[movieKey] = {
@@ -676,9 +435,7 @@
             setFileView(fileView);
             console.log(`[Sync] 💾 Сохранён прогресс: ${formatTime(currentTime)} (${percent}%) для ${movieKey}`);
             
-            if (duration > 0) {
-                checkEndCredits(currentTime, duration);
-            }
+            if (duration > 0) checkEndCredits(currentTime, duration);
             
             if (Lampa.Timeline && Lampa.Timeline.update) {
                 Lampa.Timeline.update({
@@ -690,7 +447,6 @@
             }
             
             updateWatchTime(currentTime - savedTime);
-            
             return true;
         }
         return false;
@@ -698,7 +454,6 @@
 
     function updateWatchTime(addedSeconds) {
         if (addedSeconds <= 0) return;
-        
         const meta = getSyncMeta();
         meta.total_watch_time = (meta.total_watch_time || 0) + addedSeconds;
         saveSyncMeta(meta);
@@ -726,8 +481,7 @@
             return;
         }
         
-        let data;
-        let changedCount = 0;
+        let data, changedCount = 0;
         
         if (c.smart_sync) {
             const changed = getChangedRecords();
@@ -833,8 +587,8 @@
                     const content = data.files['timeline.json']?.content;
                     if (content) {
                         const remote = JSON.parse(content);
-                        
                         let remoteFileView;
+                        
                         if (remote.smart_sync && remote.changed_records) {
                             remoteFileView = remote.changed_records;
                         } else {
@@ -845,15 +599,11 @@
                         const strategy = c.sync_strategy;
                         
                         let merged = { ...localFileView };
-                        let changed = false;
-                        let updatedCount = 0;
-                        let newCount = 0;
-                        let skippedCount = 0;
+                        let changed = false, updatedCount = 0, newCount = 0, skippedCount = 0;
                         
                         for (const key in remoteFileView) {
                             const localRecord = localFileView[key];
                             const remoteRecord = remoteFileView[key];
-                            
                             const originalUpdated = remoteRecord.updated || Date.now();
                             
                             if (!localRecord) {
@@ -874,9 +624,7 @@
                                     skippedCount++;
                                 }
                             } else if (strategy === 'max_time') {
-                                if (remoteRecord.time > localRecord.time + 5) {
-                                    shouldUseRemote = true;
-                                }
+                                if (remoteRecord.time > localRecord.time + 5) shouldUseRemote = true;
                             } else if (strategy === 'last_watch') {
                                 const remoteUpdated = remoteRecord.updated || 0;
                                 const localUpdated = localRecord.updated || 0;
@@ -888,9 +636,7 @@
                                 } else if (remoteUpdated > localUpdated + 5000) {
                                     shouldUseRemote = true;
                                 } else if (Math.abs(remoteUpdated - localUpdated) <= 5000) {
-                                    if (remoteRecord.time > localRecord.time) {
-                                        shouldUseRemote = true;
-                                    }
+                                    if (remoteRecord.time > localRecord.time) shouldUseRemote = true;
                                 }
                             }
                             
@@ -905,9 +651,7 @@
                             setFileView(merged);
                             console.log(`[Sync] Итог: +${newCount} новых, ${updatedCount} обновлено, ${skippedCount} пропущено`);
                             
-                            if (Lampa.Timeline && Lampa.Timeline.read) {
-                                Lampa.Timeline.read(true);
-                            }
+                            if (Lampa.Timeline && Lampa.Timeline.read) Lampa.Timeline.read(true);
                             
                             if (showNotify) {
                                 if (forceOverwrite) {
@@ -948,11 +692,8 @@
 
     function getProgressData() {
         const fileView = getFileView();
-        
         for (const key in fileView) {
-            if (!fileView[key].source) {
-                fileView[key].source = getSource();
-            }
+            if (!fileView[key].source) fileView[key].source = getSource();
         }
         
         return {
@@ -999,13 +740,11 @@
                         
                         const localFileView = getFileView();
                         let merged = { ...localFileView };
-                        let replacedCount = 0;
-                        let addedCount = 0;
+                        let replacedCount = 0, addedCount = 0;
                         
                         for (const key in remoteFileView) {
                             const localRecord = localFileView[key];
                             const remoteRecord = remoteFileView[key];
-                            
                             const originalUpdated = remoteRecord.updated || Date.now();
                             
                             if (!localRecord) {
@@ -1021,19 +760,13 @@
                         }
                         
                         setFileView(merged);
+                        if (Lampa.Timeline && Lampa.Timeline.read) Lampa.Timeline.read(true);
                         
-                        if (Lampa.Timeline && Lampa.Timeline.read) {
-                            Lampa.Timeline.read(true);
-                        }
-                        
-                        if (showNotify) {
-                            notify(`✅ С сервера: +${addedCount} новых, ${replacedCount} обновлено`);
-                        }
+                        if (showNotify) notify(`✅ С сервера: +${addedCount} новых, ${replacedCount} обновлено`);
                         
                         const meta = getSyncMeta();
                         meta.last_sync = Date.now();
                         saveSyncMeta(meta);
-                        
                     } else {
                         if (showNotify) notify('❌ Нет данных на сервере');
                     }
@@ -1136,20 +869,14 @@
                         }
                         
                         setFileView(remoteFileView);
-                        
-                        if (Lampa.Timeline && Lampa.Timeline.read) {
-                            Lampa.Timeline.read(true);
-                        }
+                        if (Lampa.Timeline && Lampa.Timeline.read) Lampa.Timeline.read(true);
                         
                         const count = Object.keys(remoteFileView).length;
-                        if (showNotify) {
-                            notify(`✅ Загружено ${count} записей с сервера`);
-                        }
+                        if (showNotify) notify(`✅ Загружено ${count} записей с сервера`);
                         
                         const meta = getSyncMeta();
                         meta.last_sync = Date.now();
                         saveSyncMeta(meta);
-                        
                     } else {
                         if (showNotify) notify('❌ Нет данных на сервере');
                     }
@@ -1177,9 +904,7 @@
         
         syncFromGist(false, function() {
             notify('✅ Прогресс синхронизирован');
-            if (Lampa.Timeline && Lampa.Timeline.read) {
-                Lampa.Timeline.read(true);
-            }
+            if (Lampa.Timeline && Lampa.Timeline.read) Lampa.Timeline.read(true);
         }, true);
     }
 
@@ -1200,16 +925,12 @@
                 if (item.action === 'confirm') {
                     const fileView = getFileView();
                     for (const key in fileView) {
-                        if (key.startsWith(tmdbId)) {
-                            delete fileView[key];
-                        }
+                        if (key.startsWith(tmdbId)) delete fileView[key];
                     }
                     setFileView(fileView);
                     notify('✅ Прогресс сброшен');
                     syncToGist(false);
-                    if (Lampa.Timeline && Lampa.Timeline.read) {
-                        Lampa.Timeline.read(true);
-                    }
+                    if (Lampa.Timeline && Lampa.Timeline.read) Lampa.Timeline.read(true);
                 }
             }
         });
@@ -1239,9 +960,7 @@
         notify('✅ Отмечено как просмотренное');
         forceSyncToServer(false);
         
-        if (Lampa.Timeline && Lampa.Timeline.read) {
-            Lampa.Timeline.read(true);
-        }
+        if (Lampa.Timeline && Lampa.Timeline.read) Lampa.Timeline.read(true);
     }
 
     function addContextMenu() {
@@ -1322,24 +1041,16 @@
         const c = cfg();
         
         const totalRecords = Object.keys(fileView).length;
-        let totalMovies = 0;
-        let totalEpisodes = 0;
-        let completedCount = 0;
+        let totalMovies = 0, totalEpisodes = 0, completedCount = 0, inProgressCount = 0;
         let totalWatchTime = meta.total_watch_time || 0;
-        let inProgressCount = 0;
         
         for (const key in fileView) {
             const record = fileView[key];
-            if (key.includes('_s')) {
-                totalEpisodes++;
-            } else {
-                totalMovies++;
-            }
-            if (record.percent >= 95) {
-                completedCount++;
-            } else if (record.percent > 0) {
-                inProgressCount++;
-            }
+            if (key.includes('_s')) totalEpisodes++;
+            else totalMovies++;
+            
+            if (record.percent >= 95) completedCount++;
+            else if (record.percent > 0) inProgressCount++;
         }
         
         const items = [
@@ -1367,20 +1078,12 @@
             title: 'Статистика синхронизации',
             items: items,
             onSelect: function(item) {
-                if (item.action === 'refresh') {
-                    showStatistics();
-                } else if (item.action === 'export') {
-                    exportStatistics();
-                    setTimeout(function() { showStatistics(); }, 500);
-                } else if (item.action === 'clear_stats') {
-                    clearStatistics();
-                } else if (item.action === 'back') {
-                    showMainMenu();
-                }
+                if (item.action === 'refresh') showStatistics();
+                else if (item.action === 'export') { exportStatistics(); setTimeout(showStatistics, 500); }
+                else if (item.action === 'clear_stats') clearStatistics();
+                else if (item.action === 'back') showMainMenu();
             },
-            onBack: function() {
-                showMainMenu();
-            }
+            onBack: function() { showMainMenu(); }
         });
     }
 
@@ -1399,7 +1102,7 @@
                     meta.total_watch_time = 0;
                     saveSyncMeta(meta);
                     notify('📊 Счётчики очищены');
-                    setTimeout(function() { showStatistics(); }, 500);
+                    setTimeout(showStatistics, 500);
                 } else if (item.action === 'clear_all') {
                     Lampa.Select.show({
                         title: 'Точно очистить ВСЁ?',
@@ -1416,21 +1119,15 @@
                                 meta.last_sync = 0;
                                 saveSyncMeta(meta);
                                 notify('🗑️ Все данные очищены');
-                                if (Lampa.Timeline && Lampa.Timeline.read) {
-                                    Lampa.Timeline.read(true);
-                                }
-                                setTimeout(function() { showStatistics(); }, 500);
-                            } else {
-                                showStatistics();
-                            }
+                                if (Lampa.Timeline && Lampa.Timeline.read) Lampa.Timeline.read(true);
+                                setTimeout(showStatistics, 500);
+                            } else showStatistics();
                         },
-                        onBack: function() { showStatistics(); }
+                        onBack: showStatistics
                     });
-                } else {
-                    showStatistics();
-                }
+                } else showStatistics();
             },
-            onBack: function() { showStatistics(); }
+            onBack: showStatistics
         });
     }
 
@@ -1472,24 +1169,19 @@
     function saveCurrentProgressForce() {
         if (currentMovieTime > 0) {
             saveCurrentProgress(currentMovieTime, true);
-            if (cfg().sync_on_stop) {
-                syncToGist(false);
-            }
+            if (cfg().sync_on_stop) syncToGist(false);
         }
     }
 
     function initPlayerHandler() {
-        let lastSavedProgress = 0;
-        let lastSyncToGist = 0;
+        let lastSavedProgress = 0, lastSyncToGist = 0;
         endCreditsDetected = false;
         
         function getCurrentPlayerTime() {
             try {
                 if (Lampa.Player.opened()) {
                     const playerData = Lampa.Player.playdata();
-                    if (playerData && playerData.timeline && playerData.timeline.time) {
-                        return playerData.timeline.time;
-                    }
+                    if (playerData && playerData.timeline && playerData.timeline.time) return playerData.timeline.time;
                 }
             } catch(e) {}
             return null;
@@ -1498,15 +1190,12 @@
         function getCurrentMovieIdFromActivity() {
             try {
                 const activity = Lampa.Activity.active();
-                if (activity && activity.movie) {
-                    return extractTmdbIdFromItem(activity.movie);
-                }
+                if (activity && activity.movie) return extractTmdbIdFromItem(activity.movie);
             } catch(e) {}
             return null;
         }
         
-        let wasPlayerOpen = false;
-        let lastMovieKey = null;
+        let wasPlayerOpen = false, lastMovieKey = null;
         
         playerCheckInterval = setInterval(function() {
             const c = cfg();
@@ -1562,9 +1251,7 @@
         const c = cfg();
         
         if (isV3 && Lampa.Timer) {
-            if (timerId) {
-                Lampa.Timer.remove(timerId);
-            }
+            if (timerId) Lampa.Timer.remove(timerId);
             
             timerId = function() {
                 if (!syncInProgress && c.auto_sync && c.enabled && !Lampa.Player.opened()) {
@@ -1638,19 +1325,14 @@
                     saveCfg(c);
                     notify(`Плагин ${c.enabled ? 'включён' : 'выключен'}`);
                     if (!c.enabled) {
-                        if (isV3 && Lampa.Timer && timerId) {
-                            Lampa.Timer.remove(timerId);
-                            timerId = null;
-                        }
+                        if (isV3 && Lampa.Timer && timerId) Lampa.Timer.remove(timerId);
                         if (autoSyncInterval) clearInterval(autoSyncInterval);
                         stopPlayerHandler();
                         disableAlwaysShowTimeline();
                     } else {
                         startBackgroundSync();
                         initPlayerHandler();
-                        if (c.always_show_timeline) {
-                            enableAlwaysShowTimeline();
-                        }
+                        if (c.always_show_timeline) enableAlwaysShowTimeline();
                     }
                     showMainMenu();
                 }
@@ -1696,9 +1378,7 @@
                             if (subItem.action) {
                                 c.timeline_position = subItem.action;
                                 saveCfg(c);
-                                if (c.always_show_timeline) {
-                                    enableAlwaysShowTimeline();
-                                }
+                                if (c.always_show_timeline) enableAlwaysShowTimeline();
                                 const posName = subItem.action === 'bottom' ? 'снизу' : (subItem.action === 'center' ? 'по центру' : 'сверху');
                                 notify(`📍 Позиция: ${posName}`);
                             }
@@ -1710,8 +1390,7 @@
                 else if (item.action === 'toggle_strategy') {
                     c.sync_strategy = c.sync_strategy === 'max_time' ? 'last_watch' : 'max_time';
                     saveCfg(c);
-                    const strategyName = c.sync_strategy === 'max_time' ? 'по длительности' : 'по дате';
-                    notify(`Стратегия: ${strategyName}`);
+                    notify(`Стратегия: ${c.sync_strategy === 'max_time' ? 'по длительности' : 'по дате'}`);
                     showMainMenu();
                 }
                 else if (item.action === 'set_interval') {
@@ -1810,9 +1489,7 @@
                             { title: '✅ Да, загрузить всё', action: 'confirm' }
                         ],
                         onSelect: function(subItem) {
-                            if (subItem.action === 'confirm') {
-                                forceSyncFromServer(true);
-                            }
+                            if (subItem.action === 'confirm') forceSyncFromServer(true);
                             setTimeout(function() { showMainMenu(); }, 1000);
                         },
                         onBack: function() { showMainMenu(); }
@@ -1826,9 +1503,7 @@
                             { title: '✅ Да, отправить всё', action: 'confirm' }
                         ],
                         onSelect: function(subItem) {
-                            if (subItem.action === 'confirm') {
-                                forceSyncToServer(true);
-                            }
+                            if (subItem.action === 'confirm') forceSyncToServer(true);
                             setTimeout(function() { showMainMenu(); }, 1000);
                         },
                         onBack: function() { showMainMenu(); }
@@ -1842,9 +1517,7 @@
                             { title: '⚠️ Да, заменить всё данными с сервера', action: 'confirm' }
                         ],
                         onSelect: function(subItem) {
-                            if (subItem.action === 'confirm') {
-                                fullResetFromServer(true);
-                            }
+                            if (subItem.action === 'confirm') fullResetFromServer(true);
                             setTimeout(function() { showMainMenu(); }, 1000);
                         },
                         onBack: function() { showMainMenu(); }
@@ -1879,9 +1552,7 @@
             param: { name: 'open_menu', type: 'button' },
             field: { name: '⚙️ Открыть меню настроек' },
             onChange: function() {
-                if (Lampa.Controller && Lampa.Controller.toggle) {
-                    Lampa.Controller.toggle('settings');
-                }
+                if (Lampa.Controller && Lampa.Controller.toggle) Lampa.Controller.toggle('settings');
                 setTimeout(function() { showMainMenu(); }, 100);
             }
         });
@@ -1891,9 +1562,7 @@
             param: { name: 'open_stats', type: 'button' },
             field: { name: '📊 Статистика' },
             onChange: function() {
-                if (Lampa.Controller && Lampa.Controller.toggle) {
-                    Lampa.Controller.toggle('settings');
-                }
+                if (Lampa.Controller && Lampa.Controller.toggle) Lampa.Controller.toggle('settings');
                 setTimeout(function() { showStatistics(); }, 100);
             }
         });
@@ -1903,7 +1572,6 @@
         isV3 = Lampa.Manifest && Lampa.Manifest.app_digital >= 300;
         
         const c = cfg();
-        
         if (!c.enabled) return;
         
         if (c.always_show_timeline) {
@@ -1917,7 +1585,6 @@
         
         setTimeout(function() {
             forceRefreshCards();
-            
             const c2 = cfg();
             if (c2.enabled && c2.auto_sync) {
                 syncFromGist(false);
@@ -1925,25 +1592,19 @@
             }
         }, 3000);
         
-        notify('✅ Синхронизация v6.5 загружена');
+        notify('✅ Синхронизация v6.6 загружена');
     }
 
+    // Запуск
     if (window.Lampa && Lampa.Listener) {
-        if (window.appready) {
-            init();
-        } else {
-            Lampa.Listener.follow('app', function(e) {
-                if (e.type === 'ready') init();
-            });
-        }
+        if (window.appready) init();
+        else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
     } else {
         setTimeout(function waitLampa() {
             if (window.Lampa && Lampa.Listener) {
                 if (window.appready) init();
                 else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
-            } else {
-                setTimeout(waitLampa, 100);
-            }
+            } else setTimeout(waitLampa, 100);
         }, 100);
     }
 })();
