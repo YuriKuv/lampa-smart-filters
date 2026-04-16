@@ -478,13 +478,13 @@
                 try {
                     const content = response.files['timeline.json']?.content;
                     let remoteData = { file_view: {} };
+                    let removedCount = 0; // ← ОБЪЯВЛЯЕМ ЗДЕСЬ, В НАЧАЛЕ ФУНКЦИИ
                     
                     if (content) {
                         remoteData = JSON.parse(content);
                         
                         // ФИЛЬТРУЕМ ПУСТЫЕ ЗАПИСИ С СЕРВЕРА
                         const filtered = {};
-                        let removedCount = 0;
                         for (const key in remoteData.file_view) {
                             const record = remoteData.file_view[key];
                             // Игнорируем записи с time=0 И percent=0
@@ -680,7 +680,6 @@
             }
         });
     }
-
     function fullResetFromServer(showNotify) {
         if (showNotify === undefined) showNotify = true;
         
