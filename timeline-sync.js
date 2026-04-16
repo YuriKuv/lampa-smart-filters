@@ -1293,17 +1293,16 @@ function forceSyncToLampaOnStart() {
     function init() {
         isV3 = Lampa.Manifest && Lampa.Manifest.app_digital >= 300;
         
-        const c = cfg();
-        
-        // ВАЖНО: Всегда добавляем кнопку в настройки, даже если плагин выключен
+        // ВАЖНО: Всегда добавляем кнопку в настройки, ДО проверки enabled
         addSettingsButton();
         
+        const c = cfg();
         if (!c.enabled) {
             console.log('[Sync] Плагин выключен в настройках');
             return;
         }
         
-        console.log('[Sync] Инициализация плагина...');
+        console.log('[Sync] Инициализация плагина v7.3...');
         
         if (c.always_show_timeline) {
             enableAlwaysShowTimeline();
@@ -1312,29 +1311,40 @@ function forceSyncToLampaOnStart() {
         initPlayerHandler();
         startBackgroundSync();
         
-        // Принудительно синхронизируем с Lampa при запуске
+        // Принудительно синхронизируем с Lampa при запуске (если функция существует)
         setTimeout(() => {
-            try {
-                forceSyncToLampaOnStart();
-            } catch(e) {
-                console.warn('[Sync] Ошибка в forceSyncToLampaOnStart:', e);
+            if (typeof forceSyncToLampaOnStart === 'function') {
+                try {
+                    forceSyncToLampaOnStart();
+                } catch(e) {
+                    console.warn('[Sync] Ошибка в forceSyncToLampaOnStart:', e);
+                }
             }
         }, 1000);
         
         // Первая синхронизация с Gist
         setTimeout(function() {
-            try {
-                const c2 = cfg();
-                if (c2.enabled && c2.auto_sync) {
-                    syncNow(false);
-                    cleanupOldRecords();
-                }
-                forceRefreshCards();
-            } catch(e) {
-                console.warn('[Sync] Ошибка в первой синхронизации:', e);
+            const c2 = cfg();
+            if (c2.enabled && c2.auto_sync) {
+                syncNow(false);
+                cleanupOldRecords();
             }
+            forceRefreshCards();
         }, 3000);
         
-        console.log('[Sync] Плагин загружен v7.2');
+        console.log('[Sync] Плагин загружен v7.3');
     }
+
+    // Запуск
+if (window.Lampa && Lampa.Listener) {
+    if (window.appready) init();
+    else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
+} else {
+    setTimeout(function waitLampa() {
+        if (window.Lampa && Lampa.Listener) {
+            if (window.appready) init();
+            else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
+        } else setTimeout(waitLampa, 100);
+    }, 100);
+}
 })();
