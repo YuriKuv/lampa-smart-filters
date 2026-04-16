@@ -1294,29 +1294,45 @@ function forceSyncToLampaOnStart() {
         isV3 = Lampa.Manifest && Lampa.Manifest.app_digital >= 300;
         
         const c = cfg();
-        if (!c.enabled) return;
+        
+        // ВАЖНО: Всегда добавляем кнопку в настройки, даже если плагин выключен
+        addSettingsButton();
+        
+        if (!c.enabled) {
+            console.log('[Sync] Плагин выключен в настройках');
+            return;
+        }
+        
+        console.log('[Sync] Инициализация плагина...');
         
         if (c.always_show_timeline) {
             enableAlwaysShowTimeline();
         }
         
         initPlayerHandler();
-        addSettingsButton();
         startBackgroundSync();
         
-        // ВАЖНО: Принудительно синхронизируем с Lampa при запуске
+        // Принудительно синхронизируем с Lampa при запуске
         setTimeout(() => {
-            forceSyncToLampaOnStart();
+            try {
+                forceSyncToLampaOnStart();
+            } catch(e) {
+                console.warn('[Sync] Ошибка в forceSyncToLampaOnStart:', e);
+            }
         }, 1000);
         
         // Первая синхронизация с Gist
         setTimeout(function() {
-            const c2 = cfg();
-            if (c2.enabled && c2.auto_sync) {
-                syncNow(false);
-                cleanupOldRecords();
+            try {
+                const c2 = cfg();
+                if (c2.enabled && c2.auto_sync) {
+                    syncNow(false);
+                    cleanupOldRecords();
+                }
+                forceRefreshCards();
+            } catch(e) {
+                console.warn('[Sync] Ошибка в первой синхронизации:', e);
             }
-            forceRefreshCards();
         }, 3000);
         
         console.log('[Sync] Плагин загружен v7.2');
