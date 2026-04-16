@@ -451,46 +451,94 @@
                     let hasChanges = false;
                     let updatedCount = 0;
                     let newCount = 0;
+                    let remoteNewerCount = 0;
                     
-                    // Применяем локальные изменения
+                    // Сначала применяем все удалённые записи, которых нет локально
+                    for (const key in remoteFileView) {
+                        if (!localFileView[key]) {
+                            merged[key] = remoteFileView[key];
+                        }
+                    }
+                    
+                    // Теперь обрабатываем локальные записи
                     for (const key in localFileView) {
                         const localRecord = localFileView[key];
                         const remoteRecord = remoteFileView[key];
                         
                         if (!remoteRecord) {
+                            // Новая локальная запись
                             merged[key] = localRecord;
                             hasChanges = true;
                             newCount++;
                         } else {
-                            let shouldUpdate = false;
+                            // Запись есть и локально и на сервере - нужно решить, какую оставить
+                            let shouldUseLocal = false;
+                            let shouldUseRemote = false;
                             
                             if (strategy === 'max_time') {
-                                shouldUpdate = localRecord.time > remoteRecord.time + 5;
+                                // Стратегия "по длительности" - приоритет у большего времени просмотра
+                                if (localRecord.time > remoteRecord.time + 5) {
+                                    shouldUseLocal = true;
+                                } else if (remoteRecord.time > localRecord.time + 5) {
+                                    shouldUseRemote = true;
+                                } else {
+                                    // Времена примерно равны - оставляем локальную
+                                    shouldUseLocal = true;
+                                }
                             } else {
+                                // Стратегия "по дате" (last_watch) - приоритет у более свежей записи
                                 const localUpdated = localRecord.updated || 0;
                                 const remoteUpdated = remoteRecord.updated || 0;
                                 
-                                if (localRecord.time > remoteRecord.time + 30) {
-                                    shouldUpdate = true;
-                                } else if (localRecord.percent === 100 && remoteRecord.percent < 100) {
-                                    shouldUpdate = true;
-                                } else if (localUpdated > remoteUpdated + 5000) {
-                                    shouldUpdate = true;
+                                // Проверяем, какая запись новее
+                                if (localUpdated > remoteUpdated + 5000) {
+                                    // Локальная запись значительно новее (> 5 сек)
+                                    shouldUseLocal = true;
+                                } else if (remoteUpdated > localUpdated + 5000) {
+                                    // Удалённая запись значительно новее (> 5 сек)
+                                    shouldUseRemote = true;
+                                } else {
+                                    // Даты примерно равны (разница < 5 сек)
+                                    // Сравниваем время просмотра
+                                    if (localRecord.time > remoteRecord.time) {
+                                        shouldUseLocal = true;
+                                    } else if (remoteRecord.time > localRecord.time) {
+                                        shouldUseRemote = true;
+                                    } else {
+                                        // Всё равно - оставляем локальную
+                                        shouldUseLocal = true;
+                                    }
+                                }
+                                
+                                // Особые случаи, которые переопределяют решение
+                                if (!shouldUseLocal && !shouldUseRemote) {
+                                    // Если не определились, оставляем локальную
+                                    shouldUseLocal = true;
+                                }
+                                
+                                // Если локальная запись завершена, а удалённая нет - приоритет локальной
+                                if (localRecord.percent >= 95 && remoteRecord.percent < 95) {
+                                    shouldUseLocal = true;
+                                    shouldUseRemote = false;
+                                }
+                                
+                                // Если удалённая запись завершена, а локальная нет - приоритет удалённой
+                                if (remoteRecord.percent >= 95 && localRecord.percent < 95) {
+                                    shouldUseRemote = true;
+                                    shouldUseLocal = false;
                                 }
                             }
                             
-                            if (shouldUpdate) {
-                                merged[key] = localRecord;
-                                hasChanges = true;
-                                updatedCount++;
+                            if (shouldUseLocal) {
+                                if (JSON.stringify(localRecord) !== JSON.stringify(remoteRecord)) {
+                                    merged[key] = localRecord;
+                                    hasChanges = true;
+                                    updatedCount++;
+                                }
+                            } else if (shouldUseRemote) {
+                                // Удалённая запись новее - оставляем её (она уже в merged)
+                                remoteNewerCount++;
                             }
-                        }
-                    }
-                    
-                    // Проверяем записи с сервера, которых нет локально
-                    for (const key in remoteFileView) {
-                        if (!localFileView[key]) {
-                            merged[key] = remoteFileView[key];
                         }
                     }
                     
@@ -530,10 +578,17 @@
                                 }
                                 
                                 if (showNotify) {
-                                    notify('Синхронизировано: +' + newCount + ' новых, ' + updatedCount + ' обновлено');
+                                    let msg = 'Синхронизировано';
+                                    if (newCount > 0) msg += ': +' + newCount + ' новых';
+                                    if (updatedCount > 0) msg += ', ' + updatedCount + ' обновлено';
+                                    if (remoteNewerCount > 0) msg += ', ' + remoteNewerCount + ' с сервера';
+                                    if (newCount === 0 && updatedCount === 0 && remoteNewerCount === 0) {
+                                        msg = 'Данные актуальны';
+                                    }
+                                    notify(msg);
                                 }
                                 
-                                console.log('[Sync] Синхронизация завершена: +' + newCount + ' новых, ' + updatedCount + ' обновлено');
+                                console.log('[Sync] Синхронизация завершена: +' + newCount + ' новых, ' + updatedCount + ' обновлено, ' + remoteNewerCount + ' с сервера');
                                 
                                 syncInProgress = false;
                                 if (pendingSync) {
@@ -551,11 +606,17 @@
                             }
                         });
                     } else {
-                        console.log('[Sync] Нет изменений для отправки');
-                        if (showNotify) notify('Данные актуальны');
-                        
-                        if (Lampa.Timeline && Lampa.Timeline.read) {
-                            Lampa.Timeline.read(true);
+                        // Даже если нет локальных изменений, могли быть изменения с сервера
+                        if (remoteNewerCount > 0) {
+                            // Обновляем таймлайн, так как данные изменились
+                            if (Lampa.Timeline && Lampa.Timeline.read) {
+                                Lampa.Timeline.read(true);
+                            }
+                            if (showNotify) notify('Получено с сервера: ' + remoteNewerCount + ' записей');
+                            console.log('[Sync] Получено с сервера: ' + remoteNewerCount + ' записей');
+                        } else {
+                            console.log('[Sync] Нет изменений');
+                            if (showNotify) notify('Данные актуальны');
                         }
                         
                         syncInProgress = false;
