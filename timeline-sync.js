@@ -507,6 +507,85 @@
             notify('✅ Пустых записей не найдено');
         }
     }    
+
+function forceSyncToLampaOnStart() {
+    const pluginFileView = getPluginFileView();
+    const lampaFileView = getFileView();
+    let hasChanges = false;
+    let updatedCount = 0;
+    
+    // Копируем ВСЕ данные из плагина в Lampa
+    for (const key in pluginFileView) {
+        const pluginRecord = pluginFileView[key];
+        const lampaRecord = lampaFileView[key];
+        
+        if (!lampaRecord) {
+            lampaFileView[key] = { ...pluginRecord };
+            hasChanges = true;
+            updatedCount++;
+            console.log(`[Sync] Добавлена запись в Lampa: ${key}, time=${pluginRecord.time}`);
+        } else {
+            const pluginTime = pluginRecord.time || 0;
+            const lampaTime = lampaRecord.time || 0;
+            const pluginUpdated = pluginRecord.updated || 0;
+            const lampaUpdated = lampaRecord.updated || 0;
+            
+            // Обновляем если запись в плагине новее или имеет большее время
+            if (pluginTime > lampaTime || pluginUpdated > lampaUpdated) {
+                lampaFileView[key] = { ...pluginRecord };
+                hasChanges = true;
+                updatedCount++;
+                console.log(`[Sync] Обновлена запись в Lampa: ${key}, time=${pluginRecord.time} (было ${lampaTime})`);
+            }
+        }
+    }
+    
+        // Также удаляем из Lampa записи с time=0
+        for (const key in lampaFileView) {
+            const record = lampaFileView[key];
+            if ((record.time || 0) === 0) {
+                delete lampaFileView[key];
+                hasChanges = true;
+                console.log(`[Sync] Удалена пустая запись из Lampa: ${key}`);
+            }
+        }
+        
+        if (hasChanges) {
+            setFileView(lampaFileView);
+            if (Lampa.Timeline && Lampa.Timeline.read) {
+                Lampa.Timeline.read(true);
+            }
+            console.log(`[Sync] Lampa обновлена: ${updatedCount} записей`);
+            
+            // Принудительно обновляем все карточки
+            setTimeout(() => {
+                document.querySelectorAll('.card').forEach(card => {
+                    card.classList.add('focus');
+                    setTimeout(() => card.classList.remove('focus'), 50);
+                });
+            }, 300);
+        }
+    }
+
+    function fullResetAndReload() {
+        // Очищаем Lampa
+        const lampaFileView = {};
+        setFileView(lampaFileView);
+        
+        // Копируем данные из плагина
+        const pluginFileView = getPluginFileView();
+        for (const key in pluginFileView) {
+            lampaFileView[key] = { ...pluginFileView[key] };
+        }
+        setFileView(lampaFileView);
+        
+        if (Lampa.Timeline && Lampa.Timeline.read) {
+            Lampa.Timeline.read(true);
+        }
+        
+        notify('Данные перезагружены');
+        console.log('[Sync] Полная перезагрузка выполнена');
+    }
     
     // ============ СИНХРОНИЗАЦИЯ ============
     function syncNow(showNotify, callback) {
@@ -945,6 +1024,7 @@
                 { title: 'Синхронизировать сейчас', action: 'sync_now' },
                 { title: 'Полный сброс (загрузить с сервера)', action: 'full_reset' },
                 { title: 'Очистить пустые записи', action: 'force_cleanup' },
+                { title: 'Перезагрузить таймкоды', action: 'force_reload' },
                 { title: '──────────', separator: true },
                 { title: 'Закрыть', action: 'cancel' }
             ],
@@ -967,6 +1047,12 @@
                     
                     notify('Плагин ' + (c.enabled ? 'включён' : 'выключен'));
                     showMainMenu();
+                }
+                else if (item.action === 'force_reload') {
+                    Lampa.Controller.toggle('content');
+                    forceSyncToLampaOnStart();
+                    fullResetAndReload();
+                    notify('Таймкоды перезагружены');
                 }
                 else if (item.action === 'toggle_auto_sync') {
                     c.auto_sync = !c.auto_sync;
@@ -1218,6 +1304,12 @@
         addSettingsButton();
         startBackgroundSync();
         
+        // ВАЖНО: Принудительно синхронизируем с Lampa при запуске
+        setTimeout(() => {
+            forceSyncToLampaOnStart();
+        }, 1000);
+        
+        // Первая синхронизация с Gist
         setTimeout(function() {
             const c2 = cfg();
             if (c2.enabled && c2.auto_sync) {
@@ -1227,19 +1319,6 @@
             forceRefreshCards();
         }, 3000);
         
-        console.log('[Sync] Плагин загружен v7.1');
-    }
-
-    // Запуск
-    if (window.Lampa && Lampa.Listener) {
-        if (window.appready) init();
-        else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
-    } else {
-        setTimeout(function waitLampa() {
-            if (window.Lampa && Lampa.Listener) {
-                if (window.appready) init();
-                else Lampa.Listener.follow('app', function(e) { if (e.type === 'ready') init(); });
-            } else setTimeout(waitLampa, 100);
-        }, 100);
+        console.log('[Sync] Плагин загружен v7.2');
     }
 })();
