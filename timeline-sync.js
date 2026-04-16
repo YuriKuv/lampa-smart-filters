@@ -477,6 +477,37 @@
         }
         return false;
     }
+
+        // ============ ПРИНУДИТЕЛЬНАЯ ОЧИСТКА ПУСТЫХ ЗАПИСЕЙ ============
+    function forceCleanupEmptyRecords() {
+        const pluginFileView = getPluginFileView();
+        let removed = 0;
+        
+        for (const key in pluginFileView) {
+            const record = pluginFileView[key];
+            const time = record.time || 0;
+            const percent = record.percent || 0;
+            
+            if (time === 0 && percent === 0) {
+                delete pluginFileView[key];
+                removed++;
+                console.log(`[Sync] Принудительно удалена пустая запись: ${key}`);
+            }
+        }
+        
+        if (removed > 0) {
+            setPluginFileView(pluginFileView);
+            syncPluginToLampa();
+            console.log(`[Sync] Принудительно удалено ${removed} пустых записей`);
+            notify('🗑️ Удалено ' + removed + ' пустых записей');
+            
+            // Запускаем синхронизацию чтобы удалить их и из Gist
+            setTimeout(() => syncNow(true), 500);
+        } else {
+            notify('✅ Пустых записей не найдено');
+        }
+    }    
+    
     // ============ СИНХРОНИЗАЦИЯ ============
     function syncNow(showNotify, callback) {
         if (showNotify === undefined) showNotify = true;
@@ -937,6 +968,7 @@
                 { title: '──────────', separator: true },
                 { title: 'Синхронизировать сейчас', action: 'sync_now' },
                 { title: 'Полный сброс (загрузить с сервера)', action: 'full_reset' },
+                { title: 'Очистить пустые записи', action: 'force_cleanup' },
                 { title: '──────────', separator: true },
                 { title: 'Закрыть', action: 'cancel' }
             ],
