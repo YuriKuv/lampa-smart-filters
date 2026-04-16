@@ -547,24 +547,22 @@
                     if (content) {
                         remoteData = JSON.parse(content);
                         
-                        // ФИЛЬТРУЕМ ПУСТЫЕ ЗАПИСИ С СЕРВЕРА
+                        // ФИЛЬТРУЕМ ВСЕ ЗАПИСИ С time=0
                         const filtered = {};
                         for (const key in remoteData.file_view) {
                             const record = remoteData.file_view[key];
                             const time = record.time || 0;
-                            const percent = record.percent || 0;
                             
-                            // Игнорируем записи с time=0 И percent=0
-                            if (time === 0 && percent === 0) {
+                            if (time === 0) {
                                 removedCount++;
-                                console.log(`[Sync] Пропущена пустая запись с сервера: ${key}`);
+                                console.log(`[Sync] Пропущена пустая запись с сервера: ${key} (time=0)`);
                                 continue;
                             }
                             filtered[key] = record;
                         }
                         
                         if (removedCount > 0) {
-                            console.log('[Sync] Отфильтровано пустых записей с сервера:', removedCount);
+                            console.log('[Sync] Отфильтровано записей с time=0:', removedCount);
                             remoteData.file_view = filtered;
                         }
                         
@@ -575,24 +573,23 @@
                     
                     const localFileView = getPluginFileView();
                     
-                    // ФИЛЬТРУЕМ ПУСТЫЕ ЗАПИСИ ЛОКАЛЬНО
+                    // ФИЛЬТРУЕМ ВСЕ ЗАПИСИ С time=0 ЛОКАЛЬНО
                     const localFiltered = {};
                     let localRemoved = 0;
                     for (const key in localFileView) {
                         const record = localFileView[key];
                         const time = record.time || 0;
-                        const percent = record.percent || 0;
                         
-                        if (time === 0 && percent === 0) {
+                        if (time === 0) {
                             localRemoved++;
-                            console.log(`[Sync] Пропущена пустая локальная запись: ${key}`);
+                            console.log(`[Sync] Пропущена пустая локальная запись: ${key} (time=0)`);
                             continue;
                         }
                         localFiltered[key] = record;
                     }
                     
                     if (localRemoved > 0) {
-                        console.log('[Sync] Отфильтровано пустых локальных записей:', localRemoved);
+                        console.log('[Sync] Отфильтровано локальных записей с time=0:', localRemoved);
                         setPluginFileView(localFiltered);
                     }
                     
@@ -605,16 +602,16 @@
                     let newCount = 0;
                     let remoteNewerCount = 0;
                     
-                    // Сначала добавляем удалённые записи, которых нет локально
+                    // Добавляем удалённые записи, которых нет локально
                     for (const key in remoteFileView) {
                         if (!localFiltered[key]) {
                             merged[key] = remoteFileView[key];
                             remoteNewerCount++;
-                            console.log(`[Sync] Новая запись с сервера: ${key}, time=${remoteFileView[key].time}, updated=${remoteFileView[key].updated}`);
+                            console.log(`[Sync] Новая запись с сервера: ${key}, time=${remoteFileView[key].time}`);
                         }
                     }
                     
-                    // Теперь обрабатываем локальные записи
+                    // Обрабатываем локальные записи
                     for (const key in localFiltered) {
                         const localRecord = localFiltered[key];
                         const remoteRecord = remoteFileView[key];
@@ -623,7 +620,7 @@
                             merged[key] = localRecord;
                             hasChanges = true;
                             newCount++;
-                            console.log(`[Sync] Новая локальная запись: ${key}, time=${localRecord.time}, updated=${localRecord.updated}`);
+                            console.log(`[Sync] Новая локальная запись: ${key}, time=${localRecord.time}`);
                         } else {
                             let shouldUseLocal = false;
                             
@@ -635,39 +632,27 @@
                             if (strategy === 'max_time') {
                                 if (localTime > remoteTime) {
                                     shouldUseLocal = true;
-                                    console.log(`[Sync] ${key}: локальное время ${localTime} > удалённое ${remoteTime}`);
                                 }
                             } else {
-                                // last_watch - приоритет у более свежей записи
                                 if (localUpdated > remoteUpdated) {
                                     shouldUseLocal = true;
-                                    console.log(`[Sync] ${key}: локальная дата ${localUpdated} > удалённая ${remoteUpdated}`);
-                                } else if (localUpdated === remoteUpdated) {
-                                    if (localTime > remoteTime) {
-                                        shouldUseLocal = true;
-                                        console.log(`[Sync] ${key}: даты равны, локальное время ${localTime} > удалённое ${remoteTime}`);
-                                    }
-                                } else {
-                                    console.log(`[Sync] ${key}: удалённая запись новее (${remoteUpdated} > ${localUpdated})`);
+                                } else if (localUpdated === remoteUpdated && localTime > remoteTime) {
+                                    shouldUseLocal = true;
                                 }
                             }
                             
                             if (localRecord.percent >= 95 && remoteRecord.percent < 95) {
                                 shouldUseLocal = true;
-                                console.log(`[Sync] ${key}: локальная запись завершена`);
                             }
                             
-                            if (shouldUseLocal) {
-                                if (JSON.stringify(localRecord) !== JSON.stringify(remoteRecord)) {
-                                    merged[key] = localRecord;
-                                    hasChanges = true;
-                                    updatedCount++;
-                                }
+                            if (shouldUseLocal && JSON.stringify(localRecord) !== JSON.stringify(remoteRecord)) {
+                                merged[key] = localRecord;
+                                hasChanges = true;
+                                updatedCount++;
                             }
                         }
                     }
                     
-                    // Сохраняем объединённые данные
                     setPluginFileView(merged);
                     syncPluginToLampa();
                     
@@ -702,18 +687,9 @@
                                 }
                             }),
                             success: function() {
-                                // Принудительно обновляем таймлайн Lampa
                                 if (Lampa.Timeline && Lampa.Timeline.read) {
                                     Lampa.Timeline.read(true);
                                 }
-                                
-                                // Обновляем видимые карточки
-                                setTimeout(() => {
-                                    document.querySelectorAll('.card').forEach(card => {
-                                        card.classList.add('focus');
-                                        setTimeout(() => card.classList.remove('focus'), 50);
-                                    });
-                                }, 200);
                                 
                                 let msg = '';
                                 if (newCount > 0) msg += '+ ' + newCount + ' новых';
