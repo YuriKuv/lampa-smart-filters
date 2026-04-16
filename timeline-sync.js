@@ -356,24 +356,105 @@
             }
         }
         
+        // Удаляем из Lampa записи с time=0
+        for (const key in lampaFileView) {
+            const record = lampaFileView[key];
+            if ((record.time || 0) === 0) {
+                delete lampaFileView[key];
+                hasChanges = true;
+            }
+        }
+        
         if (hasChanges) {
             setFileView(lampaFileView);
-            if (Lampa.Timeline && Lampa.Timeline.read) {
-                Lampa.Timeline.read(true);
-            }
             
-            // Обновляем видимые карточки
-            setTimeout(() => {
-                document.querySelectorAll('.card').forEach(card => {
-                    card.classList.add('focus');
-                    setTimeout(() => card.classList.remove('focus'), 50);
-                });
-            }, 100);
+            // Принудительно обновляем UI
+            setTimeout(() => forceUITimelineUpdate(), 100);
+            setTimeout(() => forceUITimelineUpdate(), 300);
             
             console.log('[Sync] Данные синхронизированы с Lampa');
         }
     }
 
+    function forceUITimelineUpdate() {
+        // 1. Принудительно обновляем Timeline Lampa
+        if (Lampa.Timeline && Lampa.Timeline.read) {
+            Lampa.Timeline.read(true);
+        }
+        
+        // 2. Отправляем событие обновления
+        if (Lampa.Listener) {
+            Lampa.Listener.send('state:changed', {
+                target: 'timeline',
+                reason: 'update',
+                data: { force: true }
+            });
+        }
+        
+        // 3. Принудительно обновляем все карточки на экране
+        const cards = document.querySelectorAll('.card');
+        
+        cards.forEach(card => {
+            // Очищаем возможный кеш карточки
+            if (card.card_data) {
+                delete card.card_data._timeline_cache;
+            }
+            
+            // Вызываем событие update на карточке
+            try {
+                card.dispatchEvent(new Event('update'));
+            } catch(e) {}
+            
+            // Принудительно вызываем watched для карточек в фокусе
+            if (card.classList.contains('focus')) {
+                card.classList.remove('focus');
+                setTimeout(() => card.classList.add('focus'), 10);
+            }
+        });
+        
+        // 4. Обновляем через Lampa.Maker если доступно
+        if (Lampa.Maker && Lampa.Maker.map) {
+            try {
+                const cardMap = Lampa.Maker.map('Card');
+                if (cardMap && cardMap.Watched) {
+                    document.querySelectorAll('.card').forEach(card => {
+                        const instance = card.instance;
+                        if (instance && instance.emit) {
+                            instance.emit('watched');
+                            instance.emit('update');
+                        }
+                    });
+                }
+            } catch(e) {}
+        }
+        
+        // 5. Сбрасываем кеш Lampa если есть
+        if (Lampa.Cache) {
+            try {
+                Lampa.Cache.clear('timeline');
+            } catch(e) {}
+        }
+        
+        console.log('[Sync] UI таймкоды принудительно обновлены');
+    }
+        
+        // 4. Обновляем через Lampa.Maker если доступно
+        if (Lampa.Maker && Lampa.Maker.map) {
+            const cardMap = Lampa.Maker.map('Card');
+            if (cardMap && cardMap.Watched) {
+                // Принудительно вызываем watched для всех активных карточек
+                document.querySelectorAll('.card').forEach(card => {
+                    const instance = card.instance;
+                    if (instance && instance.emit) {
+                        instance.emit('watched');
+                    }
+                });
+            }
+        }
+        
+        console.log('[Sync] UI таймкоды принудительно обновлены');
+    }
+    
     // ============ АВТО-ОПРЕДЕЛЕНИЕ ФИНАЛА ============
     function checkEndCredits(currentTime, duration) {
         const c = cfg();
@@ -465,9 +546,16 @@
                 ...(seriesInfo && { season: seriesInfo.season, episode: seriesInfo.episode })
             };
             
+            // Сохраняем в изолированное хранилище плагина
             pluginFileView[movieKey] = record;
             setPluginFileView(pluginFileView);
+            
+            // Синхронизируем с Lampa
             syncPluginToLampa();
+            
+            // Принудительно обновляем UI
+            setTimeout(() => forceUITimelineUpdate(), 50);
+            setTimeout(() => forceUITimelineUpdate(), 200);
             
             console.log(`[Sync] Сохранён прогресс: ${formatTime(currentTime)} (${percent}%) для ${movieKey}, updated=${record.updated}`);
             
@@ -477,7 +565,6 @@
         }
         return false;
     }
-
         // ============ ПРИНУДИТЕЛЬНАЯ ОЧИСТКА ПУСТЫХ ЗАПИСЕЙ ============
     function forceCleanupEmptyRecords() {
         const pluginFileView = getPluginFileView();
@@ -508,62 +595,53 @@
         }
     }    
 
-function forceSyncToLampaOnStart() {
-    const pluginFileView = getPluginFileView();
-    const lampaFileView = getFileView();
-    let hasChanges = false;
-    let updatedCount = 0;
-    
-    // Копируем ВСЕ данные из плагина в Lampa
-    for (const key in pluginFileView) {
-        const pluginRecord = pluginFileView[key];
-        const lampaRecord = lampaFileView[key];
+    function forceSyncToLampaOnStart() {
+        const pluginFileView = getPluginFileView();
+        const lampaFileView = getFileView();
+        let hasChanges = false;
+        let updatedCount = 0;
         
-        if (!lampaRecord) {
-            lampaFileView[key] = { ...pluginRecord };
-            hasChanges = true;
-            updatedCount++;
-            console.log(`[Sync] Добавлена запись в Lampa: ${key}, time=${pluginRecord.time}`);
-        } else {
-            const pluginTime = pluginRecord.time || 0;
-            const lampaTime = lampaRecord.time || 0;
-            const pluginUpdated = pluginRecord.updated || 0;
-            const lampaUpdated = lampaRecord.updated || 0;
+        // Копируем ВСЕ данные из плагина в Lampa
+        for (const key in pluginFileView) {
+            const pluginRecord = pluginFileView[key];
+            const lampaRecord = lampaFileView[key];
             
-            // Обновляем если запись в плагине новее или имеет большее время
-            if (pluginTime > lampaTime || pluginUpdated > lampaUpdated) {
+            if (!lampaRecord) {
                 lampaFileView[key] = { ...pluginRecord };
                 hasChanges = true;
                 updatedCount++;
-                console.log(`[Sync] Обновлена запись в Lampa: ${key}, time=${pluginRecord.time} (было ${lampaTime})`);
+            } else {
+                const pluginTime = pluginRecord.time || 0;
+                const lampaTime = lampaRecord.time || 0;
+                const pluginUpdated = pluginRecord.updated || 0;
+                const lampaUpdated = lampaRecord.updated || 0;
+                
+                if (pluginTime > lampaTime || pluginUpdated > lampaUpdated) {
+                    lampaFileView[key] = { ...pluginRecord };
+                    hasChanges = true;
+                    updatedCount++;
+                }
             }
         }
-    }
-    
-        // Также удаляем из Lampa записи с time=0
+        
+        // Удаляем из Lampa записи с time=0
         for (const key in lampaFileView) {
             const record = lampaFileView[key];
             if ((record.time || 0) === 0) {
                 delete lampaFileView[key];
                 hasChanges = true;
-                console.log(`[Sync] Удалена пустая запись из Lampa: ${key}`);
             }
         }
         
         if (hasChanges) {
             setFileView(lampaFileView);
-            if (Lampa.Timeline && Lampa.Timeline.read) {
-                Lampa.Timeline.read(true);
-            }
-            console.log(`[Sync] Lampa обновлена: ${updatedCount} записей`);
             
-            // Принудительно обновляем все карточки
-            setTimeout(() => {
-                document.querySelectorAll('.card').forEach(card => {
-                    card.classList.add('focus');
-                    setTimeout(() => card.classList.remove('focus'), 50);
-                });
-            }, 300);
+            // Множественные попытки обновления UI
+            setTimeout(() => forceUITimelineUpdate(), 100);
+            setTimeout(() => forceUITimelineUpdate(), 500);
+            setTimeout(() => forceUITimelineUpdate(), 1000);
+            
+            console.log(`[Sync] Lampa обновлена при старте: ${updatedCount} записей`);
         }
     }
 
