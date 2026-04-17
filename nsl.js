@@ -305,68 +305,35 @@
     function unlockPremiumFeatures() {
         if (!cfg().unlock_premium) return;
         
-        if (Lampa.Account) {
-            Lampa.Account.hasPremium = function() {
-                return 999;
-            };
-        }
-        
-        if (Lampa.Arrays && Lampa.Arrays.movie_more) {
-            const originalMovieMore = Lampa.Arrays.movie_more;
-            Lampa.Arrays.movie_more = function(movie) {
-                const items = originalMovieMore(movie);
-                items.forEach(item => {
-                    if (item.collect || item.marker) {
-                        delete item.noenter;
-                        delete item.ghost;
-                    }
-                });
-                return items;
-            };
-        }
-        
-        console.log('[Sync] 🔓 Премиум-функции разблокированы');
-    }
-
-    // ============ ОТКЛЮЧЕНИЕ CUB ============
-    function disableCUBSync() {
-        if (!cfg().disable_cub) return;
-        
-        Lampa.Storage.set('account_sync', false, true);
-        
-        setTimeout(() => {
-            if (Lampa.Account && Lampa.Account.Timeline) {
-                const originalTimelineUpdate = Lampa.Account.Timeline.update;
-                Lampa.Account.Timeline.update = function() {
-                    console.log('[Sync] 🛑 CUB timeline update заблокирован');
-                };
-            }
-            
-            if (Lampa.Account && Lampa.Account.Bookmarks) {
-                const originalBookmarksUpdate = Lampa.Account.Bookmarks.update;
-                let firstCall = true;
-                
-                Lampa.Account.Bookmarks.update = function(call) {
-                    if (firstCall) {
-                        firstCall = false;
-                        console.log('[Sync] 🔄 Первичная загрузка CUB bookmarks');
-                        return originalBookmarksUpdate.call(this, call);
-                    }
-                    console.log('[Sync] 🛑 CUB bookmarks update заблокирован');
-                    if (call) call();
-                };
-            }
-            
-            if (Lampa.Account && Lampa.Account.Permit) {
-                Object.defineProperty(Lampa.Account.Permit, 'sync', {
-                    get: function() { return false; },
+        try {
+            // Переопределяем через Object.defineProperty с writable: true
+            if (Lampa.Account) {
+                Object.defineProperty(Lampa.Account, 'hasPremium', {
+                    value: function() { return 999; },
+                    writable: true,
                     configurable: true
                 });
-                console.log('[Sync] Account.Permit.sync отключен');
             }
-        }, 1000);
-        
-        console.log('[Sync] 🛡️ Синхронизация CUB отключена');
+            
+            // Патчим проверку в меню
+            if (Lampa.Arrays && Lampa.Arrays.movie_more) {
+                const originalMovieMore = Lampa.Arrays.movie_more;
+                Lampa.Arrays.movie_more = function(movie) {
+                    const items = originalMovieMore(movie);
+                    items.forEach(item => {
+                        if (item.collect || item.marker) {
+                            delete item.noenter;
+                            delete item.ghost;
+                        }
+                    });
+                    return items;
+                };
+            }
+            
+            console.log('[Sync] 🔓 Премиум-функции разблокированы');
+        } catch(e) {
+            console.warn('[Sync] Не удалось разблокировать премиум:', e);
+        }
     }
 
     // ============ БЛОКИРОВКА CUB ЗАПИСИ ============
@@ -377,13 +344,15 @@
         
         const systemKeys = [
             'parental_control', 'parental_control_pin', 'parental_control_personal', 'parental_control_time',
-            'menu', 'activity', 'controller', 'account', 'account_use', 'account_user',
+            'menu', 'activity', 'controller', 'account', 'account_use', 'account_user', 'account_email',
             'profile', 'profile_id', 'settings', 'language', 'tmdb_lang', 'device_name',
             'platform', 'interface_size', 'light_version', 'pages_save_total', 'start_page', 'source',
-            'favorite', 'file_view'
+            'favorite', 'file_view', 'timeline', 'bookmarks', 'history', 'online_watched_last',
+            'search_history', 'torrents_view', 'online_view', 'recomends_list', 'timetable'
         ];
         
         Lampa.Storage.set = function(name, value, nolisten, callerror) {
+            // Пропускаем системные ключи и ключи плагина
             const isSystemKey = systemKeys.some(k => name === k || name.indexOf(k + '_') === 0);
             const isPluginKey = name.indexOf('tl_sync_') === 0;
             
@@ -391,7 +360,8 @@
                 return originalStorageSet.call(this, name, value, nolisten, callerror);
             }
             
-            if (name.indexOf('file_view_') === 0 || name === 'favorite') {
+            // Блокируем только CUB-related ключи
+            if (name.indexOf('file_view_') === 0) {
                 const stack = new Error().stack || '';
                 
                 if (stack.includes('account_') || stack.includes('Account.') || stack.includes('bookmarks')) {
@@ -1355,6 +1325,41 @@
         }
     }
 
+    function disableCUBSync() {
+        if (!cfg().disable_cub) return;
+        
+        // Отключаем синхронизацию
+        Lampa.Storage.set('account_sync', false, true);
+        
+        // НЕ ПЕРЕОПРЕДЕЛЯЕМ Permit.sync!
+        // Это ломает ParentalControl и Menu
+        
+        // Только блокируем обновления
+        if (Lampa.Account && Lampa.Account.Timeline) {
+            const originalTimelineUpdate = Lampa.Account.Timeline.update;
+            Lampa.Account.Timeline.update = function() {
+                console.log('[Sync] 🛑 CUB timeline update заблокирован');
+            };
+        }
+        
+        if (Lampa.Account && Lampa.Account.Bookmarks) {
+            const originalBookmarksUpdate = Lampa.Account.Bookmarks.update;
+            let firstCall = true;
+            
+            Lampa.Account.Bookmarks.update = function(call) {
+                if (firstCall) {
+                    firstCall = false;
+                    console.log('[Sync] 🔄 Первичная загрузка CUB bookmarks');
+                    return originalBookmarksUpdate.call(this, call);
+                }
+                console.log('[Sync] 🛑 CUB bookmarks update заблокирован');
+                if (call) call();
+            };
+        }
+        
+        console.log('[Sync] 🛡️ Синхронизация CUB отключена');
+    }
+    
     // ============ МЕНЮ ============
     function showMainMenu() {
         const c = cfg();
@@ -1714,43 +1719,72 @@
         
         console.log('[Sync] 🚀 Запуск v' + SYNC_VERSION);
         
-        // Сначала применяем некритичные настройки
-        if (c.unlock_premium) unlockPremiumFeatures();
-        if (c.always_show_timeline) enableAlwaysShowTimeline();
-        
-        protectFileView();
-        protectedData = getFileView();
-        
-        interceptFavorites();
-        interceptHistory();
-        initPlayerHandler();
-        startBackgroundSync();
-        
-        // Откладываем блокировку CUB и импорт
+        // НЕ ТРОГАЕМ НИЧЕГО ДО ПОЛНОЙ ЗАГРУЗКИ!
+        // Ждём полной инициализации Lampa
         setTimeout(() => {
-            // Импорт из CUB при первом запуске
+            console.log('[Sync] ⏳ Отложенная инициализация...');
+            
+            // 1. Сначала применяем стили (они безопасны)
+            if (c.always_show_timeline) {
+                enableAlwaysShowTimeline();
+            }
+            
+            // 2. Защита file_view
+            protectFileView();
+            protectedData = getFileView();
+            
+            // 3. Перехватчики (без блокировок)
+            interceptFavorites();
+            interceptHistory();
+            
+            // 4. Плеер и фоновая синхронизация
+            initPlayerHandler();
+            startBackgroundSync();
+            
+            // 5. Разблокировка премиум (с осторожностью)
+            if (c.unlock_premium) {
+                try {
+                    unlockPremiumFeatures();
+                } catch(e) {
+                    console.warn('[Sync] Ошибка разблокировки премиум:', e);
+                }
+            }
+            
+            // 6. Импорт из CUB (если нужно)
             if (!c.cub_import_done) {
-                importFromCUB();
+                importFromCUB().then(() => {
+                    console.log('[Sync] Импорт из CUB завершён');
+                }).catch(e => {
+                    console.warn('[Sync] Ошибка импорта из CUB:', e);
+                });
             }
             
+            // 7. Блокировка CUB (САМОЕ ПОСЛЕДНЕЕ!)
             if (c.disable_cub) {
-                disableCUBSync();
-                blockCUBStorageWrites();
+                setTimeout(() => {
+                    try {
+                        disableCUBSync();
+                        blockCUBStorageWrites();
+                        console.log('[Sync] ✅ Блокировка CUB активирована');
+                    } catch(e) {
+                        console.warn('[Sync] Ошибка блокировки CUB:', e);
+                    }
+                }, 1000);
             }
             
-            console.log('[Sync] ✅ Блокировка CUB активирована');
-        }, c.block_cub_delay || 3000);
-        
-        setTimeout(() => {
-            if (cfg().auto_sync) {
-                syncNow(false);
-                cleanupOldRecords(false);
-            }
-            forceRefreshCards();
-        }, 4000);
-        
-        console.log('[Sync] ✅ v' + SYNC_VERSION + ' загружен');
-        notify('🚀 Sync v' + SYNC_VERSION + ' загружен');
+            // 8. Автосинхронизация
+            setTimeout(() => {
+                if (cfg().auto_sync) {
+                    syncNow(false);
+                    cleanupOldRecords(false);
+                }
+                forceRefreshCards();
+            }, 2000);
+            
+            console.log('[Sync] ✅ v' + SYNC_VERSION + ' загружен');
+            notify('🚀 Sync v' + SYNC_VERSION + ' загружен');
+            
+        }, 500); // Ждём 500ms после appready
     }
 
     // Запуск
