@@ -179,6 +179,99 @@
         console.log('[Sync] 🛡️ Защита file_view активирована');
     }
 
+    // ============ ОЧИСТКА СТАРЫХ ЗАПИСЕЙ ============
+    function cleanupOldRecords(showNotify) {
+        if (showNotify === undefined) showNotify = false;
+        
+        const c = cfg();
+        const now = Date.now();
+        const fileView = getFileView();
+        let cleaned = 0;
+        let completed_cleaned = 0;
+        
+        const cutoffDate = now - (c.cleanup_days * 86400000);
+        
+        for (const key in fileView) {
+            const record = fileView[key];
+            let shouldDelete = false;
+            
+            const time = record.time || 0;
+            const percent = record.percent || 0;
+            const updated = record.updated || 0;
+            
+            // Удаляем пустые записи
+            if (time === 0 && percent === 0) {
+                shouldDelete = true;
+                cleaned++;
+            }
+            // Удаляем старые записи
+            else if (c.cleanup_days > 0 && updated < cutoffDate) {
+                shouldDelete = true;
+                cleaned++;
+            }
+            // Удаляем завершённые записи
+            else if (c.cleanup_completed && percent >= 95) {
+                shouldDelete = true;
+                completed_cleaned++;
+            }
+            
+            if (shouldDelete) {
+                console.log(`[Sync] 🗑️ Удалена запись: ${key}, time=${time}, percent=${percent}%`);
+                delete fileView[key];
+            }
+        }
+        
+        if (cleaned > 0 || completed_cleaned > 0) {
+            setFileView(fileView);
+            protectedData = { ...fileView };
+            
+            if (Lampa.Timeline && Lampa.Timeline.read) {
+                Lampa.Timeline.read(true);
+            }
+            
+            console.log(`[Sync] 🧹 Очистка: удалено ${cleaned} старых/пустых и ${completed_cleaned} завершённых`);
+            
+            if (showNotify) {
+                notify(`🧹 Удалено: ${cleaned} старых, ${completed_cleaned} завершённых`);
+            }
+        } else if (showNotify) {
+            notify('🧹 Нет записей для очистки');
+        }
+    }
+
+    function forceCleanupEmptyRecords() {
+        const fileView = getFileView();
+        let removed = 0;
+        
+        for (const key in fileView) {
+            const record = fileView[key];
+            const time = record.time || 0;
+            const percent = record.percent || 0;
+            
+            if (time === 0 && percent === 0) {
+                delete fileView[key];
+                removed++;
+                console.log(`[Sync] 🗑️ Принудительно удалена пустая запись: ${key}`);
+            }
+        }
+        
+        if (removed > 0) {
+            setFileView(fileView);
+            protectedData = { ...fileView };
+            
+            if (Lampa.Timeline && Lampa.Timeline.read) {
+                Lampa.Timeline.read(true);
+            }
+            
+            console.log(`[Sync] 🗑️ Принудительно удалено ${removed} пустых записей`);
+            notify('🗑️ Удалено ' + removed + ' пустых записей');
+            
+            setTimeout(() => syncNow(true), 500);
+        } else {
+            notify('✅ Пустых записей не найдено');
+        }
+    }
+
     // ============ ПАТЧ МОДУЛЯ WATCHED ============
     function patchWatchedModule() {
         if (modulePatched) return;
@@ -734,6 +827,7 @@
                 const currentCfg = cfg();
                 if (!syncInProgress && currentCfg.auto_sync && currentCfg.enabled && !Lampa.Player.opened()) {
                     syncNow(false);
+                    cleanupOldRecords(false);
                 }
             };
             
@@ -745,6 +839,7 @@
                 const currentCfg = cfg();
                 if (!syncInProgress && currentCfg.auto_sync && currentCfg.enabled && !Lampa.Player.opened()) {
                     syncNow(false);
+                    cleanupOldRecords(false);
                 }
             }, c.sync_interval * 1000);
         }
@@ -780,6 +875,9 @@
                 { title: 'Интервал синхр.: ' + (c.sync_interval || 30) + ' сек', action: 'set_interval' },
                 { title: 'Порог титров: ' + (c.end_credits_threshold || 180) + ' сек', action: 'set_threshold' },
                 { title: '──────────', separator: true },
+                { title: 'Очистка старше: ' + (c.cleanup_days || 0) + ' дней', action: 'set_cleanup_days' },
+                { title: (c.cleanup_completed ? '[OK]' : '[OFF]') + ' Очищать завершённые', action: 'toggle_cleanup_completed' },
+                { title: '──────────', separator: true },
                 { title: 'Устройство: ' + (c.device_name || 'Unknown'), action: 'set_device' },
                 { title: 'Профиль: ' + (c.manual_profile_id || 'авто'), action: 'set_profile' },
                 { title: '──────────', separator: true },
@@ -787,6 +885,8 @@
                 { title: 'Gist ID: ' + (c.gist_id ? c.gist_id.substring(0, 8) + '…' : 'НЕ установлен'), action: 'set_gist_id' },
                 { title: '──────────', separator: true },
                 { title: 'Синхронизировать сейчас', action: 'sync_now' },
+                { title: 'Очистить пустые записи', action: 'force_cleanup' },
+                { title: 'Очистить старые записи', action: 'cleanup_now' },
                 { title: '──────────', separator: true },
                 { title: 'Закрыть', action: 'cancel' }
             ],
@@ -895,6 +995,27 @@
                         showMainMenu();
                     });
                 }
+                else if (item.action === 'set_cleanup_days') {
+                    Lampa.Input.edit({ 
+                        title: 'Удалять записи старше (дней, 0 = откл)', 
+                        value: String(c.cleanup_days || 30), 
+                        free: true, 
+                        number: true 
+                    }, function(val) {
+                        if (val !== null && !isNaN(val) && val >= 0) {
+                            c.cleanup_days = parseInt(val);
+                            saveCfg(c);
+                            notify('Очистка: ' + (c.cleanup_days === 0 ? 'отключена' : c.cleanup_days + ' дней'));
+                        }
+                        showMainMenu();
+                    });
+                }
+                else if (item.action === 'toggle_cleanup_completed') {
+                    c.cleanup_completed = !c.cleanup_completed;
+                    saveCfg(c);
+                    notify('Очистка завершённых ' + (c.cleanup_completed ? 'включена' : 'выключена'));
+                    showMainMenu();
+                }
                 else if (item.action === 'set_device') {
                     Lampa.Input.edit({ 
                         title: 'Имя устройства', 
@@ -955,6 +1076,42 @@
                     Lampa.Controller.toggle('content');
                     syncNow(true);
                 }
+                else if (item.action === 'force_cleanup') {
+                    Lampa.Select.show({
+                        title: 'Очистить пустые записи?',
+                        items: [
+                            { title: 'Отмена', action: 'cancel' },
+                            { title: 'Да, очистить', action: 'confirm' }
+                        ],
+                        onSelect: function(subItem) {
+                            if (subItem.action === 'confirm') {
+                                Lampa.Controller.toggle('content');
+                                forceCleanupEmptyRecords();
+                            } else {
+                                showMainMenu();
+                            }
+                        },
+                        onBack: function() { showMainMenu(); }
+                    });
+                }
+                else if (item.action === 'cleanup_now') {
+                    Lampa.Select.show({
+                        title: 'Очистить старые записи?',
+                        items: [
+                            { title: 'Отмена', action: 'cancel' },
+                            { title: 'Да, очистить', action: 'confirm' }
+                        ],
+                        onSelect: function(subItem) {
+                            if (subItem.action === 'confirm') {
+                                Lampa.Controller.toggle('content');
+                                cleanupOldRecords(true);
+                            } else {
+                                showMainMenu();
+                            }
+                        },
+                        onBack: function() { showMainMenu(); }
+                    });
+                }
                 else if (item.action === 'cancel') {
                     Lampa.Controller.toggle('content');
                 }
@@ -1000,7 +1157,7 @@
             return;
         }
         
-        console.log('[Sync] Инициализация плагина v8.0...');
+        console.log('[Sync] Инициализация плагина v8.1...');
         
         if (c.always_show_timeline) {
             enableAlwaysShowTimeline();
@@ -1016,11 +1173,12 @@
             const c2 = cfg();
             if (c2.enabled && c2.auto_sync) {
                 syncNow(false);
+                cleanupOldRecords(false);
             }
             forceRefreshCards();
         }, 3000);
         
-        console.log('[Sync] Плагин загружен v8.0');
+        console.log('[Sync] Плагин загружен v8.1');
     }
 
     // Запуск
