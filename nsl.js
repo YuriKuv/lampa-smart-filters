@@ -5,8 +5,9 @@
     window.tl_sync_init = true;
 
     const CFG_KEY = 'timeline_sync_cfg';
-    const SYNC_VERSION = 10;
+    const SYNC_VERSION = 11;
     
+    // ============ СОСТОЯНИЕ ============
     let syncInProgress = false;
     let pendingSync = false;
     let currentMovieId = null;
@@ -19,10 +20,15 @@
     let isV3 = false;
     let styleInjected = false;
     let modulePatched = false;
+    let uiUpdateTimer = null;
+    let syncingFromPlugin = false;
+    let cubImportDone = false;
     
     let protectedData = {};
     let bookmarks = [];
     let bookmarksMap = {};
+    let history = [];
+    let historyMap = {};
 
     // ============ КОНФИГУРАЦИЯ ============
     function cfg() {
@@ -42,11 +48,12 @@
             end_credits_threshold: 180,
             always_show_timeline: true,
             timeline_position: 'bottom',
-            // НОВЫЕ НАСТРОЙКИ
             sync_favorites: true,
             sync_history: true,
             unlock_premium: true,
-            disable_cub: true
+            disable_cub: true,
+            block_cub_delay: 3000,
+            cub_import_done: false
         }) || {};
     }
 
@@ -107,6 +114,8 @@
 
     function setPluginHistory(data) {
         Lampa.Storage.set(getPluginStorageKey('history'), data, true);
+        history = data;
+        createHistoryMap();
         return data;
     }
 
@@ -168,7 +177,6 @@
     }
 
     function clearCard(card) {
-        // Оставляем только нужные поля для экономии места
         return {
             id: card.id,
             tmdb_id: card.tmdb_id || card.id,
@@ -183,31 +191,136 @@
         };
     }
 
+    function debounce(func, wait) {
+        clearTimeout(uiUpdateTimer);
+        uiUpdateTimer = setTimeout(func, wait);
+    }
+
+    // ============ ИМПОРТ ИЗ CUB ============
+    function importFromCUB() {
+        const c = cfg();
+        if (c.cub_import_done) return Promise.resolve();
+        if (!Lampa.Account || !Lampa.Account.Bookmarks) return Promise.resolve();
+        
+        console.log('[Sync] 📥 Начинаем импорт данных из CUB...');
+        
+        return new Promise((resolve) => {
+            let imported = { bookmarks: 0, timeline: 0, history: 0 };
+            
+            // 1. Импорт закладок
+            try {
+                const cubBookmarks = Lampa.Account.Bookmarks.all();
+                if (cubBookmarks.length) {
+                    const localBookmarks = getPluginBookmarks();
+                    const mergedBookmarks = [...localBookmarks];
+                    
+                    cubBookmarks.forEach(card => {
+                        // Определяем тип закладки
+                        let type = 'book';
+                        const status = Lampa.Favorite.check(card);
+                        if (status.like) type = 'like';
+                        else if (status.wath) type = 'wath';
+                        else if (status.history) type = 'history';
+                        
+                        const exists = mergedBookmarks.find(b => b.card_id === card.id && b.type === type);
+                        if (!exists) {
+                            mergedBookmarks.push({
+                                card_id: card.id,
+                                type: type,
+                                data: clearCard(card),
+                                time: Date.now()
+                            });
+                            imported.bookmarks++;
+                        }
+                    });
+                    
+                    setPluginBookmarks(mergedBookmarks);
+                    syncToLampaFavorites();
+                    console.log(`[Sync] 📚 Импортировано закладок: ${imported.bookmarks}`);
+                }
+            } catch(e) {
+                console.warn('[Sync] Ошибка импорта закладок:', e);
+            }
+            
+            // 2. Импорт таймкодов
+            try {
+                const fileView = getFileView();
+                const cubTimeline = Lampa.Storage.get('file_view_' + Lampa.Account.Permit.account?.profile?.id, {});
+                
+                for (const key in cubTimeline) {
+                    if (!fileView[key] || (cubTimeline[key].time || 0) > (fileView[key].time || 0)) {
+                        fileView[key] = { ...cubTimeline[key], updated: Date.now() };
+                        imported.timeline++;
+                    }
+                }
+                
+                if (imported.timeline > 0) {
+                    setFileView(fileView);
+                    console.log(`[Sync] ⏱️ Импортировано таймкодов: ${imported.timeline}`);
+                }
+            } catch(e) {
+                console.warn('[Sync] Ошибка импорта таймкодов:', e);
+            }
+            
+            // 3. Импорт истории просмотров
+            try {
+                const localHistory = getPluginHistory();
+                const cubWatched = Lampa.Storage.get('online_watched_last', {});
+                
+                for (const hash in cubWatched) {
+                    const record = cubWatched[hash];
+                    const exists = localHistory.find(h => h.hash === hash);
+                    if (!exists) {
+                        localHistory.push({
+                            hash: hash,
+                            data: record,
+                            time: Date.now(),
+                            imported: true
+                        });
+                        imported.history++;
+                    }
+                }
+                
+                if (imported.history > 0) {
+                    setPluginHistory(localHistory);
+                    console.log(`[Sync] 📜 Импортировано записей истории: ${imported.history}`);
+                }
+            } catch(e) {
+                console.warn('[Sync] Ошибка импорта истории:', e);
+            }
+            
+            // Отмечаем, что импорт выполнен
+            c.cub_import_done = true;
+            saveCfg(c);
+            cubImportDone = true;
+            
+            notify(`📦 Импорт из CUB: ${imported.bookmarks} закладок, ${imported.timeline} таймкодов, ${imported.history} истории`);
+            console.log('[Sync] ✅ Импорт из CUB завершён');
+            
+            resolve();
+        });
+    }
+
     // ============ РАЗБЛОКИРОВКА ПРЕМИУМ-СТАТУСОВ ============
     function unlockPremiumFeatures() {
         if (!cfg().unlock_premium) return;
         
-        // Переопределяем проверку премиума
         if (Lampa.Account) {
             Lampa.Account.hasPremium = function() {
                 return 999;
             };
         }
         
-        // Патчим проверку в меню
         if (Lampa.Arrays && Lampa.Arrays.movie_more) {
             const originalMovieMore = Lampa.Arrays.movie_more;
             Lampa.Arrays.movie_more = function(movie) {
                 const items = originalMovieMore(movie);
-                
-                // Убираем блокировку с премиум-статусов
                 items.forEach(item => {
                     if (item.collect || item.marker) {
                         delete item.noenter;
                         delete item.ghost;
                     }
                 });
-                
                 return items;
             };
         }
@@ -219,117 +332,70 @@
     function disableCUBSync() {
         if (!cfg().disable_cub) return;
         
-        // Отключаем синхронизацию
         Lampa.Storage.set('account_sync', false, true);
         
-        // Блокируем обновления из CUB
-        if (Lampa.Account && Lampa.Account.Timeline) {
-            Lampa.Account.Timeline.update = function() {
-                console.log('[Sync] 🛑 CUB timeline update заблокирован');
-            };
-        }
-        
-        if (Lampa.Account && Lampa.Account.Bookmarks) {
-            Lampa.Account.Bookmarks.update = function(call) {
-                console.log('[Sync] 🛑 CUB bookmarks update заблокирован');
-                if (call) call();
-            };
-        }
+        setTimeout(() => {
+            if (Lampa.Account && Lampa.Account.Timeline) {
+                const originalTimelineUpdate = Lampa.Account.Timeline.update;
+                Lampa.Account.Timeline.update = function() {
+                    console.log('[Sync] 🛑 CUB timeline update заблокирован');
+                };
+            }
+            
+            if (Lampa.Account && Lampa.Account.Bookmarks) {
+                const originalBookmarksUpdate = Lampa.Account.Bookmarks.update;
+                let firstCall = true;
+                
+                Lampa.Account.Bookmarks.update = function(call) {
+                    if (firstCall) {
+                        firstCall = false;
+                        console.log('[Sync] 🔄 Первичная загрузка CUB bookmarks');
+                        return originalBookmarksUpdate.call(this, call);
+                    }
+                    console.log('[Sync] 🛑 CUB bookmarks update заблокирован');
+                    if (call) call();
+                };
+            }
+            
+            if (Lampa.Account && Lampa.Account.Permit) {
+                Object.defineProperty(Lampa.Account.Permit, 'sync', {
+                    get: function() { return false; },
+                    configurable: true
+                });
+                console.log('[Sync] Account.Permit.sync отключен');
+            }
+        }, 1000);
         
         console.log('[Sync] 🛡️ Синхронизация CUB отключена');
     }
 
-    // ============ ПЕРЕХВАТ ИЗБРАННОГО ============
-    function createBookmarksMap() {
-        bookmarksMap = {};
-        bookmarks.forEach(bookmark => {
-            if (!bookmarksMap[bookmark.type]) bookmarksMap[bookmark.type] = {};
-            bookmarksMap[bookmark.type][bookmark.card_id] = bookmark;
-        });
-    }
-
-    function syncToLampaFavorites() {
-        // Преобразуем bookmarks в формат Lampa favorite
-        const favorites = {
-            book: [],
-            like: [],
-            wath: [],
-            history: [],
-            look: [],
-            viewed: [],
-            scheduled: [],
-            continued: [],
-            thrown: []
-        };
-        
-        bookmarks.forEach(bookmark => {
-            if (favorites[bookmark.type]) {
-                favorites[bookmark.type].push(bookmark.data);
-            }
-        });
-        
-        Lampa.Storage.set('favorite', favorites, true);
-        
-        // Отправляем событие обновления
-        Lampa.Listener.send('state:changed', {
-            target: 'favorite',
-            reason: 'sync'
-        });
-    }
-
-    function interceptFavorites() {
-        // Слушаем изменения избранного от Lampa
-        Lampa.Listener.follow('state:changed', (e) => {
-            if (e.target === 'favorite') {
-                if (e.reason === 'add' || e.reason === 'remove' || e.reason === 'update') {
-                    // Синхронизируем с нашим хранилищем
-                    const lampaFavorites = Lampa.Storage.get('favorite', {});
-                    const newBookmarks = [];
-                    
-                    for (const type in lampaFavorites) {
-                        lampaFavorites[type].forEach(card => {
-                            newBookmarks.push({
-                                card_id: card.id,
-                                type: type,
-                                data: clearCard(card),
-                                time: Date.now()
-                            });
-                        });
-                    }
-                    
-                    setPluginBookmarks(newBookmarks);
-                    syncToLampaFavorites();
-                    
-                    if (cfg().auto_sync) {
-                        setTimeout(() => syncNow(false), 1000);
-                    }
-                }
-            }
-        });
-        
-        // Загружаем сохранённые закладки при старте
-        const savedBookmarks = getPluginBookmarks();
-        if (savedBookmarks.length) {
-            bookmarks = savedBookmarks;
-            createBookmarksMap();
-            syncToLampaFavorites();
-        }
-        
-        console.log('[Sync] 📚 Перехват избранного активирован');
-    }
-
     // ============ БЛОКИРОВКА CUB ЗАПИСИ ============
     function blockCUBStorageWrites() {
+        if (!cfg().disable_cub) return;
+        
         const originalStorageSet = Lampa.Storage.set;
         
+        const systemKeys = [
+            'parental_control', 'parental_control_pin', 'parental_control_personal', 'parental_control_time',
+            'menu', 'activity', 'controller', 'account', 'account_use', 'account_user',
+            'profile', 'profile_id', 'settings', 'language', 'tmdb_lang', 'device_name',
+            'platform', 'interface_size', 'light_version', 'pages_save_total', 'start_page', 'source',
+            'favorite', 'file_view'
+        ];
+        
         Lampa.Storage.set = function(name, value, nolisten, callerror) {
+            const isSystemKey = systemKeys.some(k => name === k || name.indexOf(k + '_') === 0);
+            const isPluginKey = name.indexOf('tl_sync_') === 0;
+            
+            if (isSystemKey || isPluginKey) {
+                return originalStorageSet.call(this, name, value, nolisten, callerror);
+            }
+            
             if (name.indexOf('file_view_') === 0 || name === 'favorite') {
                 const stack = new Error().stack || '';
                 
                 if (stack.includes('account_') || stack.includes('Account.') || stack.includes('bookmarks')) {
                     console.warn('[Sync] 🛑 БЛОКИРОВАНА запись из CUB:', name);
-                    
-                    // Возвращаем без записи
                     return;
                 }
             }
@@ -337,7 +403,7 @@
             return originalStorageSet.call(this, name, value, nolisten, callerror);
         };
         
-        console.log('[Sync] 🛡️ Запись CUB заблокирована');
+        console.log('[Sync] 🛡️ Запись CUB заблокирована (с исключениями)');
     }
 
     // ============ ЗАЩИТА ОТ ПЕРЕЗАПИСИ ============
@@ -347,6 +413,12 @@
         
         localStorage.setItem = function(key, value) {
             if (key === lampaKey) {
+                const stack = new Error().stack || '';
+                
+                if (stack.includes('Storage.cache') || stack.includes('cache')) {
+                    return originalSetItem.call(this, key, value);
+                }
+                
                 try {
                     const newData = JSON.parse(value);
                     const currentData = Lampa.Storage.get(lampaKey, {});
@@ -363,8 +435,7 @@
                                 console.warn(`[Sync] 🛑 БЛОКИРОВАНА перезапись ${id}: ${newTime} -> ${protectedTime}`);
                                 newData[id] = { ...protectedData[id] };
                             }
-                        }
-                        else if ((newRecord.time || 0) === 0 && currentRecord && currentRecord.time > 0) {
+                        } else if ((newRecord.time || 0) === 0 && currentRecord && currentRecord.time > 0) {
                             newData[id] = { ...currentRecord };
                         }
                     }
@@ -408,12 +479,10 @@
             if (time === 0 && percent === 0) {
                 shouldDelete = true;
                 cleaned++;
-            }
-            else if (c.cleanup_days > 0 && updated < cutoffDate) {
+            } else if (c.cleanup_days > 0 && updated < cutoffDate) {
                 shouldDelete = true;
                 cleaned++;
-            }
-            else if (c.cleanup_completed && percent >= 95) {
+            } else if (c.cleanup_completed && percent >= 95) {
                 shouldDelete = true;
                 completed_cleaned++;
             }
@@ -573,41 +642,204 @@
 
     // ============ ПРИНУДИТЕЛЬНОЕ ОБНОВЛЕНИЕ UI ============
     function forceUITimelineUpdate() {
-        if (Lampa.Timeline && Lampa.Timeline.read) {
-            Lampa.Timeline.read(true);
-        }
-        
-        if (Lampa.Listener) {
-            Lampa.Listener.send('state:changed', {
-                target: 'timeline',
-                reason: 'update',
-                data: { force: true }
+        debounce(() => {
+            if (Lampa.Activity && !Lampa.Activity.inActivity()) return;
+            
+            if (Lampa.Timeline && Lampa.Timeline.read) {
+                Lampa.Timeline.read(true);
+            }
+            
+            if (Lampa.Listener) {
+                Lampa.Listener.send('state:changed', {
+                    target: 'timeline',
+                    reason: 'update',
+                    data: { force: true }
+                });
+            }
+            
+            const cards = document.querySelectorAll('.card');
+            cards.forEach(card => {
+                if (card.card_data) delete card.card_data._timeline_cache;
+                try { card.dispatchEvent(new Event('update')); } catch(e) {}
+                if (card.classList.contains('focus')) {
+                    card.classList.remove('focus');
+                    setTimeout(() => card.classList.add('focus'), 10);
+                }
             });
-        }
+            
+            if (Lampa.Maker && Lampa.Maker.map) {
+                try {
+                    const cardMap = Lampa.Maker.map('Card');
+                    if (cardMap && cardMap.Watched) {
+                        document.querySelectorAll('.card').forEach(card => {
+                            const instance = card.instance;
+                            if (instance && instance.emit) {
+                                instance.emit('watched');
+                                instance.emit('update');
+                            }
+                        });
+                    }
+                } catch(e) {}
+            }
+        }, 100);
+    }
+
+    // ============ СИНХРОНИЗАЦИЯ ИЗБРАННОГО ============
+    function createBookmarksMap() {
+        bookmarksMap = {};
+        bookmarks.forEach(bookmark => {
+            if (!bookmarksMap[bookmark.type]) bookmarksMap[bookmark.type] = {};
+            bookmarksMap[bookmark.type][bookmark.card_id] = bookmark;
+        });
+    }
+
+    function createHistoryMap() {
+        historyMap = {};
+        history.forEach(item => {
+            historyMap[item.hash] = item;
+        });
+    }
+
+    function syncToLampaFavorites() {
+        const favorites = {
+            book: [], like: [], wath: [], history: [],
+            look: [], viewed: [], scheduled: [], continued: [], thrown: []
+        };
         
-        const cards = document.querySelectorAll('.card');
-        cards.forEach(card => {
-            if (card.card_data) delete card.card_data._timeline_cache;
-            try { card.dispatchEvent(new Event('update')); } catch(e) {}
-            if (card.classList.contains('focus')) {
-                card.classList.remove('focus');
-                setTimeout(() => card.classList.add('focus'), 10);
+        bookmarks.forEach(bookmark => {
+            if (favorites[bookmark.type]) {
+                favorites[bookmark.type].push(bookmark.data);
             }
         });
         
-        if (Lampa.Maker && Lampa.Maker.map) {
-            try {
-                const cardMap = Lampa.Maker.map('Card');
-                if (cardMap && cardMap.Watched) {
-                    document.querySelectorAll('.card').forEach(card => {
-                        const instance = card.instance;
-                        if (instance && instance.emit) {
-                            instance.emit('watched');
-                            instance.emit('update');
-                        }
-                    });
+        Lampa.Storage.set('favorite', favorites, true);
+        
+        Lampa.Listener.send('state:changed', {
+            target: 'favorite',
+            reason: 'sync'
+        });
+    }
+
+    function interceptFavorites() {
+        Lampa.Listener.follow('state:changed', (e) => {
+            if (e.target === 'favorite') {
+                if (syncingFromPlugin) return;
+                
+                if (Lampa.ParentalControl && Lampa.ParentalControl.enabled && Lampa.ParentalControl.enabled()) {
+                    console.log('[Sync] ParentalControl активен, пропускаем синхронизацию');
+                    return;
                 }
-            } catch(e) {}
+                
+                if (e.reason === 'add' || e.reason === 'remove' || e.reason === 'update') {
+                    syncingFromPlugin = true;
+                    
+                    const lampaFavorites = Lampa.Storage.get('favorite', {});
+                    const newBookmarks = [];
+                    
+                    for (const type in lampaFavorites) {
+                        if (Array.isArray(lampaFavorites[type])) {
+                            lampaFavorites[type].forEach(card => {
+                                newBookmarks.push({
+                                    card_id: card.id,
+                                    type: type,
+                                    data: clearCard(card),
+                                    time: Date.now()
+                                });
+                            });
+                        }
+                    }
+                    
+                    setPluginBookmarks(newBookmarks);
+                    syncToLampaFavorites();
+                    
+                    if (cfg().auto_sync) {
+                        setTimeout(() => syncNow(false), 1000);
+                    }
+                    
+                    syncingFromPlugin = false;
+                }
+            }
+        });
+        
+        const savedBookmarks = getPluginBookmarks();
+        if (savedBookmarks.length) {
+            bookmarks = savedBookmarks;
+            createBookmarksMap();
+            syncToLampaFavorites();
+        }
+        
+        console.log('[Sync] 📚 Перехват избранного активирован');
+    }
+
+    // ============ СИНХРОНИЗАЦИЯ ИСТОРИИ ============
+    function interceptHistory() {
+        // Перехватываем добавление в историю
+        Lampa.Listener.follow('state:changed', (e) => {
+            if (e.target === 'favorite' && e.type === 'history' && e.reason === 'update') {
+                if (syncingFromPlugin) return;
+                
+                const card = e.card;
+                if (!card) return;
+                
+                addToHistory(card);
+            }
+        });
+        
+        // Перехватываем историю просмотра из плеера
+        const originalSet = Lampa.Storage.set;
+        Lampa.Storage.set = function(name, value, nolisten, callerror) {
+            if (name === 'online_watched_last' && !syncingFromPlugin) {
+                try {
+                    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                    const historyData = getPluginHistory();
+                    
+                    for (const hash in parsed) {
+                        const record = parsed[hash];
+                        const exists = historyData.find(h => h.hash === hash);
+                        
+                        if (!exists) {
+                            historyData.push({
+                                hash: hash,
+                                data: record,
+                                time: Date.now()
+                            });
+                        } else {
+                            exists.data = record;
+                            exists.time = Date.now();
+                        }
+                    }
+                    
+                    setPluginHistory(historyData);
+                    
+                    if (cfg().auto_sync) {
+                        setTimeout(() => syncNow(false), 1000);
+                    }
+                } catch(e) {}
+            }
+            
+            return originalSet.call(this, name, value, nolisten, callerror);
+        };
+        
+        console.log('[Sync] 📜 Перехват истории активирован');
+    }
+
+    function addToHistory(card) {
+        const historyData = getPluginHistory();
+        const hash = Lampa.Utils.hash(card.original_name ? card.original_name : card.original_title);
+        
+        const exists = historyData.find(h => h.hash === hash);
+        if (!exists) {
+            historyData.push({
+                hash: hash,
+                data: {
+                    id: card.id,
+                    title: card.title || card.name,
+                    type: card.original_name ? 'tv' : 'movie'
+                },
+                time: Date.now()
+            });
+            
+            setPluginHistory(historyData);
         }
     }
 
@@ -649,8 +881,7 @@
             protectedData[movieKey] = record;
             setFileView(fileView);
             
-            setTimeout(() => forceUITimelineUpdate(), 50);
-            setTimeout(() => forceUITimelineUpdate(), 200);
+            forceUITimelineUpdate();
             
             console.log(`[Sync] 💾 Сохранён прогресс: ${formatTime(currentTime)} (${percent}%)`);
             
@@ -707,14 +938,14 @@
         
         notify('✅ Отмечено как просмотренное');
         
-        setTimeout(() => forceUITimelineUpdate(), 100);
+        forceUITimelineUpdate();
         
         if (cfg().sync_on_stop) {
             setTimeout(() => syncNow(false), 500);
         }
     }
 
-    // ============ СИНХРОНИЗАЦИЯ ============
+    // ============ СИНХРОНИЗАЦИЯ С GIST ============
     function syncNow(showNotify, callback) {
         if (showNotify === undefined) showNotify = true;
         
@@ -746,12 +977,12 @@
             },
             success: function(response) {
                 try {
-                    const content = response.files['timeline.json']?.content;
+                    const content = response.files['lampa_sync.json']?.content;
                     let remoteData = { timeline: {}, bookmarks: [], history: [] };
                     
                     if (content) {
                         remoteData = JSON.parse(content);
-                        console.log('[Sync] Данные получены:', Object.keys(remoteData.timeline || {}).length, 'таймкодов,', remoteData.bookmarks?.length || 0, 'закладок');
+                        console.log('[Sync] Данные получены:', Object.keys(remoteData.timeline || {}).length, 'таймкодов,', remoteData.bookmarks?.length || 0, 'закладок,', remoteData.history?.length || 0, 'истории');
                     }
                     
                     // Синхронизация таймкодов
@@ -805,7 +1036,6 @@
                         const localBookmarks = getPluginBookmarks();
                         const remoteBookmarks = remoteData.bookmarks || [];
                         
-                        // Простое слияние - более новые по времени заменяют старые
                         const mergedBookmarks = [...remoteBookmarks];
                         
                         localBookmarks.forEach(local => {
@@ -821,6 +1051,27 @@
                         
                         setPluginBookmarks(mergedBookmarks);
                         syncToLampaFavorites();
+                    }
+                    
+                    // Синхронизация истории
+                    if (c.sync_history) {
+                        const localHistory = getPluginHistory();
+                        const remoteHistory = remoteData.history || [];
+                        
+                        const mergedHistory = [...remoteHistory];
+                        
+                        localHistory.forEach(local => {
+                            const existing = mergedHistory.find(r => r.hash === local.hash);
+                            if (!existing) {
+                                mergedHistory.push(local);
+                                hasChanges = true;
+                            } else if (local.time > existing.time) {
+                                Object.assign(existing, local);
+                                hasChanges = true;
+                            }
+                        });
+                        
+                        setPluginHistory(mergedHistory);
                     }
                     
                     if (hasChanges) {
@@ -845,7 +1096,7 @@
                                 'Accept': 'application/vnd.github.v3+json'
                             },
                             data: JSON.stringify({
-                                description: 'Lampa Sync v10',
+                                description: 'Lampa Sync v' + SYNC_VERSION,
                                 public: false,
                                 files: {
                                     'lampa_sync.json': {
@@ -869,7 +1120,7 @@
                                     callback(true);
                                 }
                                 
-                                setTimeout(() => forceUITimelineUpdate(), 100);
+                                forceUITimelineUpdate();
                             },
                             error: function(xhr) {
                                 console.error('[Sync] ❌ Ошибка отправки:', xhr.status);
@@ -883,7 +1134,7 @@
                         if (showNotify) notify('✅ Данные актуальны');
                         syncInProgress = false;
                         if (callback) callback(true);
-                        setTimeout(() => forceUITimelineUpdate(), 100);
+                        forceUITimelineUpdate();
                     }
                 } catch(e) {
                     console.error('[Sync] ❌ Ошибка:', e);
@@ -899,6 +1150,82 @@
                 if (callback) callback(false);
             }
         });
+    }
+
+    // ============ ЭКСПОРТ/ИМПОРТ ДАННЫХ ============
+    function exportData() {
+        const data = {
+            version: SYNC_VERSION,
+            profile_id: getCurrentProfileId(),
+            device: cfg().device_name,
+            exported: Date.now(),
+            timeline: getFileView(),
+            bookmarks: getPluginBookmarks(),
+            history: getPluginHistory()
+        };
+        
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `lampa_sync_${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        notify('📤 Данные экспортированы');
+    }
+
+    function importData(callback) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    
+                    if (data.timeline) {
+                        setFileView(data.timeline);
+                        protectedData = { ...data.timeline };
+                    }
+                    if (data.bookmarks) {
+                        setPluginBookmarks(data.bookmarks);
+                        syncToLampaFavorites();
+                    }
+                    if (data.history) {
+                        setPluginHistory(data.history);
+                    }
+                    
+                    forceUITimelineUpdate();
+                    notify('📥 Данные импортированы');
+                    
+                    if (callback) callback(true);
+                } catch(err) {
+                    console.error('[Sync] Ошибка импорта:', err);
+                    notify('❌ Ошибка импорта');
+                    if (callback) callback(false);
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    }
+
+    function getStatistics() {
+        const timeline = getFileView();
+        const bookmarks = getPluginBookmarks();
+        const history = getPluginHistory();
+        
+        const timelineCount = Object.keys(timeline).length;
+        const completedCount = Object.values(timeline).filter(r => r.percent >= 95).length;
+        const bookmarksByType = {};
+        bookmarks.forEach(b => { bookmarksByType[b.type] = (bookmarksByType[b.type] || 0) + 1; });
+        
+        return { timelineCount, completedCount, bookmarksCount: bookmarks.length, historyCount: history.length, bookmarksByType };
     }
 
     // ============ ПЛЕЕР ============
@@ -992,7 +1319,7 @@
     function startBackgroundSync() {
         const c = cfg();
         
-        if (isV3 && Lampa.Timer) {
+        if (isV3 && Lampa.Timer && Lampa.Timer.add) {
             if (timerId) Lampa.Timer.remove(timerId);
             
             timerId = function() {
@@ -1033,16 +1360,23 @@
         const c = cfg();
         const strategyName = c.sync_strategy === 'max_time' ? 'по длительности' : 'по дате';
         const positionName = c.timeline_position === 'bottom' ? 'снизу' : (c.timeline_position === 'center' ? 'по центру' : 'сверху');
+        const stats = getStatistics();
         
         Lampa.Select.show({
-            title: 'Синхронизация v10',
+            title: 'Синхронизация v' + SYNC_VERSION,
             items: [
                 { title: (c.enabled ? '[OK]' : '[OFF]') + ' Плагин: ' + (c.enabled ? 'Вкл' : 'Выкл'), action: 'toggle_enabled' },
                 { title: (c.auto_sync ? '[OK]' : '[OFF]') + ' Автосинхронизация: ' + (c.auto_sync ? 'Вкл' : 'Выкл'), action: 'toggle_auto_sync' },
                 { title: (c.auto_save ? '[OK]' : '[OFF]') + ' Автосохранение: ' + (c.auto_save ? 'Вкл' : 'Выкл'), action: 'toggle_auto_save' },
                 { title: '──────────', separator: true },
+                { title: '📊 Статистика', action: 'show_stats' },
+                { title: `   Таймкодов: ${stats.timelineCount} (завершено: ${stats.completedCount})` },
+                { title: `   Закладок: ${stats.bookmarksCount}` },
+                { title: `   История: ${stats.historyCount}` },
+                { title: '──────────', separator: true },
                 { title: (c.disable_cub ? '[OK]' : '[OFF]') + ' Отключить CUB: ' + (c.disable_cub ? 'Да' : 'Нет'), action: 'toggle_disable_cub' },
                 { title: (c.sync_favorites ? '[OK]' : '[OFF]') + ' Синхр. избранного: ' + (c.sync_favorites ? 'Да' : 'Нет'), action: 'toggle_sync_favorites' },
+                { title: (c.sync_history ? '[OK]' : '[OFF]') + ' Синхр. истории: ' + (c.sync_history ? 'Да' : 'Нет'), action: 'toggle_sync_history' },
                 { title: (c.unlock_premium ? '[OK]' : '[OFF]') + ' Разблок. премиум: ' + (c.unlock_premium ? 'Да' : 'Нет'), action: 'toggle_unlock_premium' },
                 { title: '──────────', separator: true },
                 { title: (c.always_show_timeline ? '[OK]' : '[OFF]') + ' Таймкоды всегда: ' + (c.always_show_timeline ? 'Вкл' : 'Выкл'), action: 'toggle_always_show' },
@@ -1061,6 +1395,8 @@
                 { title: '📄 Gist ID: ' + (c.gist_id ? c.gist_id.substring(0, 8) + '…' : '❌ НЕ установлен'), action: 'set_gist_id' },
                 { title: '──────────', separator: true },
                 { title: '🔄 Синхронизировать сейчас', action: 'sync_now' },
+                { title: '📤 Экспорт данных', action: 'export_data' },
+                { title: '📥 Импорт данных', action: 'import_data' },
                 { title: '🗑️ Очистить пустые записи', action: 'force_cleanup' },
                 { title: '🧹 Очистить старые записи', action: 'cleanup_now' },
                 { title: '──────────', separator: true },
@@ -1108,6 +1444,12 @@
                     c.sync_favorites = !c.sync_favorites;
                     saveCfg(c);
                     notify('Синхронизация избранного ' + (c.sync_favorites ? 'включена' : 'выключена'));
+                    showMainMenu();
+                }
+                else if (item.action === 'toggle_sync_history') {
+                    c.sync_history = !c.sync_history;
+                    saveCfg(c);
+                    notify('Синхронизация истории ' + (c.sync_history ? 'включена' : 'выключена'));
                     showMainMenu();
                 }
                 else if (item.action === 'toggle_unlock_premium') {
@@ -1270,6 +1612,25 @@
                     Lampa.Controller.toggle('content');
                     syncNow(true);
                 }
+                else if (item.action === 'export_data') {
+                    Lampa.Controller.toggle('content');
+                    exportData();
+                }
+                else if (item.action === 'import_data') {
+                    Lampa.Controller.toggle('content');
+                    importData(() => {
+                        forceUITimelineUpdate();
+                    });
+                }
+                else if (item.action === 'show_stats') {
+                    const stats = getStatistics();
+                    let bookmarksStr = '';
+                    for (const type in stats.bookmarksByType) {
+                        bookmarksStr += `\n   ${type}: ${stats.bookmarksByType[type]}`;
+                    }
+                    notify(`📊 Таймкоды: ${stats.timelineCount} (завершено: ${stats.completedCount})\n📚 Закладки: ${stats.bookmarksCount}${bookmarksStr}\n📜 История: ${stats.historyCount}`, 8000);
+                    showMainMenu();
+                }
                 else if (item.action === 'force_cleanup') {
                     Lampa.Select.show({
                         title: 'Очистить пустые записи?',
@@ -1280,7 +1641,7 @@
                         onSelect: function(subItem) {
                             if (subItem.action === 'confirm') {
                                 Lampa.Controller.toggle('content');
-                                forceCleanupEmptyRecords();
+                                cleanupOldRecords(true);
                             } else {
                                 showMainMenu();
                             }
@@ -1322,14 +1683,14 @@
         
         Lampa.SettingsApi.addComponent({
             component: 'timeline_sync',
-            name: 'Синхронизация v10',
+            name: 'Синхронизация v' + SYNC_VERSION,
             icon: '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z M12 4c4.4 0 8 3.6 8 8s-3.6 8-8 8-8-3.6-8-8 3.6-8 8-8z M11 7v5l4 2.5 1-1.5-3-2V7z"/></svg>'
         });
         
         Lampa.SettingsApi.addParam({
             component: 'timeline_sync',
             param: { name: 'open_menu', type: 'button' },
-            field: { name: 'Открыть меню v10' },
+            field: { name: 'Открыть меню v' + SYNC_VERSION },
             onChange: function() {
                 if (Lampa.Controller && Lampa.Controller.toggle) {
                     Lampa.Controller.toggle('settings');
@@ -1351,23 +1712,34 @@
             return;
         }
         
-        console.log('[Sync] 🚀 Запуск v10.0');
+        console.log('[Sync] 🚀 Запуск v' + SYNC_VERSION);
         
-        // Применяем настройки
+        // Сначала применяем некритичные настройки
         if (c.unlock_premium) unlockPremiumFeatures();
-        if (c.disable_cub) {
-            disableCUBSync();
-            blockCUBStorageWrites();
-        }
         if (c.always_show_timeline) enableAlwaysShowTimeline();
         
         protectFileView();
         protectedData = getFileView();
         
         interceptFavorites();
-        
+        interceptHistory();
         initPlayerHandler();
         startBackgroundSync();
+        
+        // Откладываем блокировку CUB и импорт
+        setTimeout(() => {
+            // Импорт из CUB при первом запуске
+            if (!c.cub_import_done) {
+                importFromCUB();
+            }
+            
+            if (c.disable_cub) {
+                disableCUBSync();
+                blockCUBStorageWrites();
+            }
+            
+            console.log('[Sync] ✅ Блокировка CUB активирована');
+        }, c.block_cub_delay || 3000);
         
         setTimeout(() => {
             if (cfg().auto_sync) {
@@ -1375,10 +1747,10 @@
                 cleanupOldRecords(false);
             }
             forceRefreshCards();
-        }, 3000);
+        }, 4000);
         
-        console.log('[Sync] ✅ v10.0 загружен');
-        notify('🚀 Sync v10.0 загружен');
+        console.log('[Sync] ✅ v' + SYNC_VERSION + ' загружен');
+        notify('🚀 Sync v' + SYNC_VERSION + ' загружен');
     }
 
     // Запуск
