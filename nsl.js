@@ -1037,25 +1037,34 @@
         Lampa.Select.show({
             title: 'Синхронизация v10',
             items: [
-                { title: (c.enabled ? '[OK]' : '[OFF]') + ' Плагин', action: 'toggle_enabled' },
-                { title: (c.auto_sync ? '[OK]' : '[OFF]') + ' Автосинхронизация', action: 'toggle_auto_sync' },
-                { title: (c.auto_save ? '[OK]' : '[OFF]') + ' Автосохранение', action: 'toggle_auto_save' },
+                { title: (c.enabled ? '[OK]' : '[OFF]') + ' Плагин: ' + (c.enabled ? 'Вкл' : 'Выкл'), action: 'toggle_enabled' },
+                { title: (c.auto_sync ? '[OK]' : '[OFF]') + ' Автосинхронизация: ' + (c.auto_sync ? 'Вкл' : 'Выкл'), action: 'toggle_auto_sync' },
+                { title: (c.auto_save ? '[OK]' : '[OFF]') + ' Автосохранение: ' + (c.auto_save ? 'Вкл' : 'Выкл'), action: 'toggle_auto_save' },
                 { title: '──────────', separator: true },
-                { title: (c.disable_cub ? '[OK]' : '[OFF]') + ' Отключить CUB', action: 'toggle_disable_cub' },
-                { title: (c.sync_favorites ? '[OK]' : '[OFF]') + ' Синхр. избранного', action: 'toggle_sync_favorites' },
-                { title: (c.unlock_premium ? '[OK]' : '[OFF]') + ' Разблок. премиум', action: 'toggle_unlock_premium' },
+                { title: (c.disable_cub ? '[OK]' : '[OFF]') + ' Отключить CUB: ' + (c.disable_cub ? 'Да' : 'Нет'), action: 'toggle_disable_cub' },
+                { title: (c.sync_favorites ? '[OK]' : '[OFF]') + ' Синхр. избранного: ' + (c.sync_favorites ? 'Да' : 'Нет'), action: 'toggle_sync_favorites' },
+                { title: (c.unlock_premium ? '[OK]' : '[OFF]') + ' Разблок. премиум: ' + (c.unlock_premium ? 'Да' : 'Нет'), action: 'toggle_unlock_premium' },
                 { title: '──────────', separator: true },
-                { title: (c.always_show_timeline ? '[OK]' : '[OFF]') + ' Таймкоды всегда', action: 'toggle_always_show' },
-                { title: 'Позиция: ' + positionName, action: 'toggle_position' },
+                { title: (c.always_show_timeline ? '[OK]' : '[OFF]') + ' Таймкоды всегда: ' + (c.always_show_timeline ? 'Вкл' : 'Выкл'), action: 'toggle_always_show' },
+                { title: 'Позиция таймкода: ' + positionName, action: 'toggle_position' },
                 { title: 'Стратегия: ' + strategyName, action: 'toggle_strategy' },
-                { title: 'Интервал: ' + c.sync_interval + 'с', action: 'set_interval' },
+                { title: 'Интервал синхр.: ' + (c.sync_interval || 30) + ' сек', action: 'set_interval' },
+                { title: 'Порог титров: ' + (c.end_credits_threshold || 180) + ' сек', action: 'set_threshold' },
                 { title: '──────────', separator: true },
-                { title: 'Очистка: ' + c.cleanup_days + 'д', action: 'set_cleanup_days' },
-                { title: (c.cleanup_completed ? '[OK]' : '[OFF]') + ' Очищать заверш.', action: 'toggle_cleanup_completed' },
+                { title: 'Очистка старше: ' + (c.cleanup_days || 0) + ' дней', action: 'set_cleanup_days' },
+                { title: (c.cleanup_completed ? '[OK]' : '[OFF]') + ' Очищать завершённые', action: 'toggle_cleanup_completed' },
                 { title: '──────────', separator: true },
-                { title: 'Gist: ' + (c.gist_id ? '✓' : '✗'), action: 'set_gist_id' },
-                { title: 'Синхронизировать', action: 'sync_now' },
-                { title: 'Закрыть', action: 'cancel' }
+                { title: 'Устройство: ' + (c.device_name || 'Unknown'), action: 'set_device' },
+                { title: 'Профиль: ' + (c.manual_profile_id || 'авто'), action: 'set_profile' },
+                { title: '──────────', separator: true },
+                { title: '🔑 Gist токен: ' + (c.gist_token ? '✓ установлен' : '❌ НЕ установлен'), action: 'set_token' },
+                { title: '📄 Gist ID: ' + (c.gist_id ? c.gist_id.substring(0, 8) + '…' : '❌ НЕ установлен'), action: 'set_gist_id' },
+                { title: '──────────', separator: true },
+                { title: '🔄 Синхронизировать сейчас', action: 'sync_now' },
+                { title: '🗑️ Очистить пустые записи', action: 'force_cleanup' },
+                { title: '🧹 Очистить старые записи', action: 'cleanup_now' },
+                { title: '──────────', separator: true },
+                { title: '❌ Закрыть', action: 'cancel' }
             ],
             onSelect: function(item) {
                 const c = cfg();
@@ -1063,27 +1072,18 @@
                 if (item.action === 'toggle_enabled') {
                     c.enabled = !c.enabled;
                     saveCfg(c);
-                    if (!c.enabled) { stopBackgroundSync(); stopPlayerHandler(); disableAlwaysShowTimeline(); }
-                    else { startBackgroundSync(); initPlayerHandler(); if (c.always_show_timeline) enableAlwaysShowTimeline(); }
+                    
+                    if (!c.enabled) {
+                        stopBackgroundSync();
+                        stopPlayerHandler();
+                        disableAlwaysShowTimeline();
+                    } else {
+                        startBackgroundSync();
+                        initPlayerHandler();
+                        if (c.always_show_timeline) enableAlwaysShowTimeline();
+                    }
+                    
                     notify('Плагин ' + (c.enabled ? 'включён' : 'выключен'));
-                    showMainMenu();
-                }
-                else if (item.action === 'toggle_disable_cub') {
-                    c.disable_cub = !c.disable_cub;
-                    saveCfg(c);
-                    notify('CUB ' + (c.disable_cub ? 'отключен' : 'включен') + '. Перезагрузите Lampa');
-                    showMainMenu();
-                }
-                else if (item.action === 'toggle_sync_favorites') {
-                    c.sync_favorites = !c.sync_favorites;
-                    saveCfg(c);
-                    notify('Синхронизация избранного ' + (c.sync_favorites ? 'включена' : 'выключена'));
-                    showMainMenu();
-                }
-                else if (item.action === 'toggle_unlock_premium') {
-                    c.unlock_premium = !c.unlock_premium;
-                    saveCfg(c);
-                    notify('Премиум ' + (c.unlock_premium ? 'разблокирован' : 'заблокирован') + '. Перезагрузите Lampa');
                     showMainMenu();
                 }
                 else if (item.action === 'toggle_auto_sync') {
@@ -1098,19 +1098,55 @@
                     notify('Автосохранение ' + (c.auto_save ? 'включено' : 'выключено'));
                     showMainMenu();
                 }
+                else if (item.action === 'toggle_disable_cub') {
+                    c.disable_cub = !c.disable_cub;
+                    saveCfg(c);
+                    notify('Отключение CUB ' + (c.disable_cub ? 'включено' : 'выключено') + '. Перезагрузите Lampa');
+                    showMainMenu();
+                }
+                else if (item.action === 'toggle_sync_favorites') {
+                    c.sync_favorites = !c.sync_favorites;
+                    saveCfg(c);
+                    notify('Синхронизация избранного ' + (c.sync_favorites ? 'включена' : 'выключена'));
+                    showMainMenu();
+                }
+                else if (item.action === 'toggle_unlock_premium') {
+                    c.unlock_premium = !c.unlock_premium;
+                    saveCfg(c);
+                    notify('Разблокировка премиум ' + (c.unlock_premium ? 'включена' : 'выключена') + '. Перезагрузите Lampa');
+                    showMainMenu();
+                }
                 else if (item.action === 'toggle_always_show') {
                     c.always_show_timeline = !c.always_show_timeline;
                     saveCfg(c);
-                    if (c.always_show_timeline) { enableAlwaysShowTimeline(); notify('Таймкоды всегда видны'); }
-                    else { disableAlwaysShowTimeline(); notify('Таймкоды только при наведении'); }
+                    if (c.always_show_timeline) {
+                        enableAlwaysShowTimeline();
+                        notify('Таймкоды всегда видны');
+                    } else {
+                        disableAlwaysShowTimeline();
+                        notify('Таймкоды только при наведении');
+                    }
                     showMainMenu();
                 }
                 else if (item.action === 'toggle_position') {
                     Lampa.Select.show({
-                        title: 'Позиция',
-                        items: [{ title: 'Снизу', action: 'bottom' }, { title: 'Центр', action: 'center' }, { title: 'Сверху', action: 'top' }],
-                        onSelect: (sub) => { if (sub.action) { c.timeline_position = sub.action; saveCfg(c); if (c.always_show_timeline) enableAlwaysShowTimeline(); } showMainMenu(); },
-                        onBack: () => showMainMenu()
+                        title: 'Позиция таймкода',
+                        items: [
+                            { title: '⬇️ Снизу', action: 'bottom' },
+                            { title: '📍 По центру', action: 'center' },
+                            { title: '⬆️ Сверху', action: 'top' }
+                        ],
+                        onSelect: function(subItem) {
+                            if (subItem.action) {
+                                c.timeline_position = subItem.action;
+                                saveCfg(c);
+                                if (c.always_show_timeline) enableAlwaysShowTimeline();
+                                const posName = subItem.action === 'bottom' ? 'снизу' : (subItem.action === 'center' ? 'по центру' : 'сверху');
+                                notify('Позиция: ' + posName);
+                            }
+                            showMainMenu();
+                        },
+                        onBack: function() { showMainMenu(); }
                     });
                 }
                 else if (item.action === 'toggle_strategy') {
@@ -1120,25 +1156,113 @@
                     showMainMenu();
                 }
                 else if (item.action === 'set_interval') {
-                    Lampa.Input.edit({ title: 'Интервал (сек)', value: String(c.sync_interval || 30), free: true, number: true }, (val) => {
-                        if (val && !isNaN(val) && val > 0) { c.sync_interval = parseInt(val); saveCfg(c); if (c.enabled) { stopBackgroundSync(); startBackgroundSync(); } }
+                    Lampa.Input.edit({ 
+                        title: 'Интервал синхронизации (сек)', 
+                        value: String(c.sync_interval || 30), 
+                        free: true, 
+                        number: true 
+                    }, function(val) {
+                        if (val !== null && !isNaN(val) && val > 0) {
+                            c.sync_interval = parseInt(val);
+                            saveCfg(c);
+                            notify('Интервал: ' + c.sync_interval + ' сек');
+                            if (c.enabled) {
+                                stopBackgroundSync();
+                                startBackgroundSync();
+                            }
+                        }
+                        showMainMenu();
+                    });
+                }
+                else if (item.action === 'set_threshold') {
+                    Lampa.Input.edit({ 
+                        title: 'Порог финальных титров (сек)', 
+                        value: String(c.end_credits_threshold || 180), 
+                        free: true, 
+                        number: true 
+                    }, function(val) {
+                        if (val !== null && !isNaN(val) && val > 0) {
+                            c.end_credits_threshold = parseInt(val);
+                            saveCfg(c);
+                            notify('Порог: ' + c.end_credits_threshold + ' сек');
+                        }
                         showMainMenu();
                     });
                 }
                 else if (item.action === 'set_cleanup_days') {
-                    Lampa.Input.edit({ title: 'Дней (0=откл)', value: String(c.cleanup_days || 30), free: true, number: true }, (val) => {
-                        if (val && !isNaN(val) && val >= 0) { c.cleanup_days = parseInt(val); saveCfg(c); }
+                    Lampa.Input.edit({ 
+                        title: 'Удалять записи старше (дней, 0 = откл)', 
+                        value: String(c.cleanup_days || 30), 
+                        free: true, 
+                        number: true 
+                    }, function(val) {
+                        if (val !== null && !isNaN(val) && val >= 0) {
+                            c.cleanup_days = parseInt(val);
+                            saveCfg(c);
+                            notify('Очистка: ' + (c.cleanup_days === 0 ? 'отключена' : c.cleanup_days + ' дней'));
+                        }
                         showMainMenu();
                     });
                 }
                 else if (item.action === 'toggle_cleanup_completed') {
                     c.cleanup_completed = !c.cleanup_completed;
                     saveCfg(c);
+                    notify('Очистка завершённых ' + (c.cleanup_completed ? 'включена' : 'выключена'));
                     showMainMenu();
                 }
+                else if (item.action === 'set_device') {
+                    Lampa.Input.edit({ 
+                        title: 'Имя устройства', 
+                        value: c.device_name || '', 
+                        free: true 
+                    }, function(val) {
+                        if (val !== null && val.trim()) {
+                            c.device_name = val.trim();
+                            saveCfg(c);
+                            notify('Имя сохранено');
+                        }
+                        showMainMenu();
+                    });
+                }
+                else if (item.action === 'set_profile') {
+                    Lampa.Input.edit({ 
+                        title: 'ID профиля (пусто = авто)', 
+                        value: c.manual_profile_id || '', 
+                        free: true 
+                    }, function(val) {
+                        if (val !== null) {
+                            c.manual_profile_id = val || '';
+                            saveCfg(c);
+                            notify('Профиль сохранён');
+                        }
+                        showMainMenu();
+                    });
+                }
+                else if (item.action === 'set_token') {
+                    Lampa.Input.edit({ 
+                        title: 'GitHub Token (начинается с ghp_)', 
+                        value: c.gist_token || '', 
+                        free: true 
+                    }, function(val) {
+                        if (val !== null) {
+                            c.gist_token = val || '';
+                            saveCfg(c);
+                            notify('✅ Токен сохранён');
+                        }
+                        showMainMenu();
+                    });
+                }
                 else if (item.action === 'set_gist_id') {
-                    Lampa.Input.edit({ title: 'Gist ID', value: c.gist_id || '', free: true }, (val) => {
-                        if (val !== null) { c.gist_id = val || ''; saveCfg(c); }
+                    Lampa.Input.edit({ 
+                        title: 'Gist ID (из URL gist.github.com/...)', 
+                        value: c.gist_id || '', 
+                        free: true 
+                    }, function(val) {
+                        if (val !== null) {
+                            c.gist_id = val || '';
+                            saveCfg(c);
+                            notify('✅ Gist ID сохранён');
+                        }
                         showMainMenu();
                     });
                 }
@@ -1146,11 +1270,49 @@
                     Lampa.Controller.toggle('content');
                     syncNow(true);
                 }
+                else if (item.action === 'force_cleanup') {
+                    Lampa.Select.show({
+                        title: 'Очистить пустые записи?',
+                        items: [
+                            { title: '❌ Отмена', action: 'cancel' },
+                            { title: '✅ Да, очистить', action: 'confirm' }
+                        ],
+                        onSelect: function(subItem) {
+                            if (subItem.action === 'confirm') {
+                                Lampa.Controller.toggle('content');
+                                forceCleanupEmptyRecords();
+                            } else {
+                                showMainMenu();
+                            }
+                        },
+                        onBack: function() { showMainMenu(); }
+                    });
+                }
+                else if (item.action === 'cleanup_now') {
+                    Lampa.Select.show({
+                        title: 'Очистить старые записи?',
+                        items: [
+                            { title: '❌ Отмена', action: 'cancel' },
+                            { title: '✅ Да, очистить', action: 'confirm' }
+                        ],
+                        onSelect: function(subItem) {
+                            if (subItem.action === 'confirm') {
+                                Lampa.Controller.toggle('content');
+                                cleanupOldRecords(true);
+                            } else {
+                                showMainMenu();
+                            }
+                        },
+                        onBack: function() { showMainMenu(); }
+                    });
+                }
                 else if (item.action === 'cancel') {
                     Lampa.Controller.toggle('content');
                 }
             },
-            onBack: () => Lampa.Controller.toggle('content')
+            onBack: function() {
+                Lampa.Controller.toggle('content');
+            }
         });
     }
 
