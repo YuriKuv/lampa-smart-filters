@@ -1574,7 +1574,6 @@
             category: function(params, oncomplite) {
                 console.log('[NSL] nsl_favorites called, params:', params);
                 
-                // Получаем данные
                 var items = [];
                 
                 if (params.folder) {
@@ -1588,7 +1587,8 @@
                     if (folder) {
                         for (var j = 0; j < favorites.length; j++) {
                             if (favorites[j].media_type === folder.mediaType) {
-                                items.push(favorites[j].data);
+                                // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: оборачиваем data в объект
+                                items.push({ data: favorites[j].data });
                             }
                         }
                     }
@@ -1596,57 +1596,29 @@
                     var category = params.category || 'favorite';
                     for (var k = 0; k < favorites.length; k++) {
                         if (favorites[k].category === category) {
-                            items.push(favorites[k].data);
+                            items.push({ data: favorites[k].data });
                         }
                     }
                 }
                 
                 if (!Array.isArray(items)) items = [];
                 
-                console.log('[NSL] nsl_favorites got', items.length, 'items');
-                console.log('[NSL] First item example:', items[0]);
+                console.log('[NSL] nsl_favorites got', items.length, 'items (wrapped)');
                 
-                // Пагинация
                 var page = params.page || 1;
                 var limit = 20;
                 var start = (page - 1) * limit;
                 var end = start + limit;
                 var paginated = items.slice(start, end);
                 
-                // Пробуем разные форматы ответа
-                // Формат 1: напрямую
-                var response1 = {
+                var response = {
                     results: paginated,
-                    total_pages: Math.ceil(items.length / limit),
+                    total_pages: Math.max(1, Math.ceil(items.length / limit)),
                     page: page
                 };
                 
-                // Формат 2: обёрнутый в data
-                var wrappedResults = [];
-                for (var i = 0; i < paginated.length; i++) {
-                    wrappedResults.push({ data: paginated[i] });
-                }
-                var response2 = {
-                    results: wrappedResults,
-                    total_pages: Math.ceil(items.length / limit),
-                    page: page
-                };
-                
-                console.log('[NSL] Trying format 1 (direct)');
-                console.log('[NSL] response1.results[0]:', response1.results[0]);
-                
-                // Перехватываем ошибку в Lampa
-                try {
-                    oncomplite(response1);
-                } catch(e) {
-                    console.error('[NSL] Format 1 failed:', e);
-                    console.log('[NSL] Trying format 2 (wrapped)');
-                    try {
-                        oncomplite(response2);
-                    } catch(e2) {
-                        console.error('[NSL] Format 2 also failed:', e2);
-                    }
-                }
+                console.log('[NSL] nsl_favorites response:', response.results.length, 'results');
+                oncomplite(response);
             }
         };
         
@@ -1658,18 +1630,20 @@
                 var items = [];
                 
                 if (filter === 'all') {
-                    items = history.slice();
-                } else {
                     for (var i = 0; i < history.length; i++) {
-                        if (history[i].media_type === filter) {
-                            items.push(history[i].data);
+                        items.push({ data: history[i].data });
+                    }
+                } else {
+                    for (var j = 0; j < history.length; j++) {
+                        if (history[j].media_type === filter) {
+                            items.push({ data: history[j].data });
                         }
                     }
                 }
                 
                 if (!Array.isArray(items)) items = [];
                 
-                items.sort(function(a, b) { return (b.watched_at || 0) - (a.watched_at || 0); });
+                items.sort(function(a, b) { return (b.data.watched_at || 0) - (a.data.watched_at || 0); });
                 
                 var page = params.page || 1;
                 var limit = 20;
@@ -1679,11 +1653,11 @@
                 
                 var response = {
                     results: paginated,
-                    total_pages: Math.ceil(items.length / limit),
+                    total_pages: Math.max(1, Math.ceil(items.length / limit)),
                     page: page
                 };
                 
-                console.log('[NSL] nsl_history response:', response.results.length, 'items');
+                console.log('[NSL] nsl_history response:', response.results.length, 'results');
                 oncomplite(response);
             }
         };
@@ -1693,15 +1667,21 @@
                 var items = getContinueWatching();
                 if (!Array.isArray(items)) items = [];
                 
+                // Оборачиваем каждый элемент
+                var wrapped = [];
+                for (var i = 0; i < items.length; i++) {
+                    wrapped.push({ data: items[i] });
+                }
+                
                 var page = params.page || 1;
                 var limit = 20;
                 var start = (page - 1) * limit;
                 var end = start + limit;
-                var paginated = items.slice(start, end);
+                var paginated = wrapped.slice(start, end);
                 
                 oncomplite({
                     results: paginated,
-                    total_pages: Math.ceil(items.length / limit),
+                    total_pages: Math.max(1, Math.ceil(wrapped.length / limit)),
                     page: page
                 });
             }
