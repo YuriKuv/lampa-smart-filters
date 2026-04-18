@@ -1479,7 +1479,15 @@
                     items.push({ 
                         title: folderIcon + ' ' + folderTitle + ' (' + cnt + ')', 
                         onSelect: function() { 
-                            Lampa.Activity.push({ url: '', title: folderTitle, component: 'category', source: 'nsl_favorites', folder: folderId, page: 1 }); 
+                            // ИЗМЕНЕНО: component: 'category_full' вместо 'category'
+                            Lampa.Activity.push({ 
+                                url: '', 
+                                title: folderTitle, 
+                                component: 'category_full',  // <-- ИЗМЕНЕНО
+                                source: 'nsl_favorites', 
+                                folder: folderId, 
+                                page: 1 
+                            }); 
                         } 
                     });
                 })(folder.id, folder.title, folder.icon, count);
@@ -1499,14 +1507,28 @@
                     items.push({ 
                         title: filterIcon + ' ' + filterTitle + ' (' + cnt + ')', 
                         onSelect: function() { 
-                            Lampa.Activity.push({ url: '', title: filterTitle, component: 'category', source: 'nsl_history', filter: filterId, page: 1 }); 
+                            // ИЗМЕНЕНО: component: 'category_full' вместо 'category'
+                            Lampa.Activity.push({ 
+                                url: '', 
+                                title: filterTitle, 
+                                component: 'category_full',  // <-- ИЗМЕНЕНО
+                                source: 'nsl_history', 
+                                filter: filterId, 
+                                page: 1 
+                            }); 
                         } 
                     });
                 })(filter.id, filter.title, filter.icon, count);
             }
             Lampa.Select.show({ title: 'История', items: items });
         } else if (action === 'continue') {
-            Lampa.Activity.push({ url: '', title: 'Продолжить просмотр', component: 'category', source: 'nsl_continue', page: 1 });
+            Lampa.Activity.push({ 
+                url: '', 
+                title: 'Продолжить просмотр', 
+                component: 'category_full',  // <-- ИЗМЕНЕНО
+                source: 'nsl_continue', 
+                page: 1 
+            });
         }
     }
 
@@ -1574,7 +1596,7 @@
             category: function(params, oncomplite) {
                 console.log('[NSL] nsl_favorites called, params:', params);
                 
-                var items = []; // это будут карточки
+                var items = [];
                 
                 if (params.folder) {
                     var folder = null;
@@ -1587,7 +1609,6 @@
                     if (folder) {
                         for (var j = 0; j < favorites.length; j++) {
                             if (favorites[j].media_type === folder.mediaType) {
-                                // ПРЯМО добавляем data, без обёртки
                                 items.push(favorites[j].data);
                             }
                         }
@@ -1603,16 +1624,12 @@
                 
                 if (!Array.isArray(items)) items = [];
                 
-                console.log('[NSL] nsl_favorites got', items.length, 'items');
-                console.log('[NSL] First item example:', items[0]);
-                
                 var page = params.page || 1;
                 var limit = 20;
                 var start = (page - 1) * limit;
                 var end = start + limit;
                 var paginated = items.slice(start, end);
                 
-                // Формируем ответ как в cub.js
                 var response = {
                     results: paginated,
                     total_pages: Math.max(1, Math.ceil(items.length / limit)),
