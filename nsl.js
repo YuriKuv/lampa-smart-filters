@@ -6,7 +6,7 @@
 
     // ============ КОНФИГУРАЦИЯ ============
     const CFG_KEY = 'nsl_sync_cfg';
-    const SYNC_VERSION = 12;
+    const SYNC_VERSION = 13;
     
     const STORAGE_KEYS = {
         sections: 'nsl_sections',
@@ -22,7 +22,6 @@
         history: 'nsl_history.json'
     };
     
-    // Категории избранного
     const FAVORITE_CATEGORIES = {
         'favorite':   { icon: '⭐', title: 'Избранное', color: '#FFD700' },
         'watching':   { icon: '👁️', title: 'Смотрю', color: '#2196F3' },
@@ -32,7 +31,6 @@
         'collection': { icon: '📦', title: 'Коллекция', color: '#FF9800' }
     };
     
-    // Папки избранного
     const FAVORITE_FOLDERS = [
         { id: 'movies', icon: '🎬', title: 'Фильмы', mediaType: 'movie' },
         { id: 'tv', icon: '📺', title: 'Сериалы', mediaType: 'tv' },
@@ -41,7 +39,6 @@
         { id: 'anime', icon: '🇯🇵', title: 'Аниме', mediaType: 'anime' }
     ];
     
-    // Категории истории
     const HISTORY_FILTERS = [
         { id: 'all', icon: '📜', title: 'Вся история' },
         { id: 'movies', icon: '🎬', title: 'Фильмы' },
@@ -64,11 +61,9 @@
     let autoSyncInterval = null;
     let uiUpdateTimer = null;
     let styleInjected = false;
-    let currentMovieTime = 0;
-    let lastSavedProgress = 0;
-    let lastPosition = 0;
     let endCreditsDetected = false;
-    let isV3 = false;
+    let lastPosition = 0;
+    let menuItemsAdded = false;
 
     // ============ УТИЛИТЫ ============
     function cfg() {
@@ -108,7 +103,11 @@
 
     function notify(text, timeout) {
         timeout = timeout || 3000;
-        Lampa.Noty.show(text, timeout);
+        if (Lampa.Noty && Lampa.Noty.show) {
+            Lampa.Noty.show(text, timeout);
+        } else {
+            console.log('[NSL] ' + text);
+        }
     }
 
     function getCurrentProfileId() {
@@ -128,14 +127,6 @@
 
     function getSource() {
         return Lampa.Storage.field('source') || 'tmdb';
-    }
-
-    function formatTime(seconds) {
-        if (!seconds || seconds < 0) return '0:00';
-        var hours = Math.floor(seconds / 3600);
-        var minutes = Math.floor((seconds % 3600) / 60);
-        if (hours > 0) return hours + ':' + minutes.toString().padStart(2, '0');
-        return minutes;
     }
 
     function clearCard(card) {
@@ -166,13 +157,18 @@
         var isTV = !!(card.name || card.first_air_date || card.original_name);
         var genres = card.genres || card.genre_ids || [];
         
-        var hasAnimation = genres.some(function(g) {
+        var hasAnimation = false;
+        for (var i = 0; i < genres.length; i++) {
+            var g = genres[i];
             var id = typeof g === 'object' ? g.id : g;
-            return id === 16;
-        });
+            if (id === 16) {
+                hasAnimation = true;
+                break;
+            }
+        }
         
-        var isJapanese = (card.original_language === 'ja') || 
-                          ((card.origin_country || []).indexOf('JP') !== -1);
+        var isJapanese = (card.original_language === 'ja') || false;
+        if (card.origin_country && card.origin_country.indexOf('JP') !== -1) isJapanese = true;
         
         if (isJapanese && hasAnimation) return 'anime';
         if (hasAnimation) return isTV ? 'cartoon_tv' : 'cartoon';
@@ -184,7 +180,6 @@
         return 'nsl_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
     }
 
-    // ИСПРАВЛЕНО: Улучшенное получение ключа для сериалов
     function getCurrentMovieKey() {
         try {
             var activity = Lampa.Activity.active();
@@ -194,37 +189,28 @@
             var tmdbId = card.tmdb_id || card.id;
             if (!tmdbId) return null;
             
-            // Получаем данные плеера
             var playerData = Lampa.Player.playdata();
             var season = null;
             var episode = null;
             
-            // Пытаемся получить сезон и серию из разных источников
-            if (playerData) {
-                // Из timeline плеера
-                if (playerData.timeline && playerData.timeline.season !== undefined) {
+            if (playerData && playerData.timeline) {
+                if (playerData.timeline.season !== undefined) {
                     season = playerData.timeline.season;
                     episode = playerData.timeline.episode;
                 }
-                // Из пути файла
-                else if (playerData.path) {
-                    var url = playerData.path;
-                    var patterns = [/[Ss](\d+)[Ee](\d+)/, /(\d+)x(\d+)/, /season[\/_](\d+)[\/_]episode[\/_](\d+)/i];
-                    for (var i = 0; i < patterns.length; i++) {
-                        var match = url.match(patterns[i]);
-                        if (match && match[1] && match[2]) {
-                            season = parseInt(match[1]);
-                            episode = parseInt(match[2]);
-                            break;
-                        }
-                    }
-                }
             }
             
-            // Из метаданных карточки
-            if (!season && card.season !== undefined) {
-                season = card.season;
-                episode = card.episode;
+            if (playerData && playerData.path && (season === null || episode === null)) {
+                var url = playerData.path;
+                var patterns = [/[Ss](\d+)[Ee](\d+)/, /(\d+)x(\d+)/];
+                for (var p = 0; p < patterns.length; p++) {
+                    var match = url.match(patterns[p]);
+                    if (match && match[1] && match[2]) {
+                        season = parseInt(match[1]);
+                        episode = parseInt(match[2]);
+                        break;
+                    }
+                }
             }
             
             if (season !== null && episode !== null) {
@@ -237,7 +223,6 @@
         }
     }
     
-    // Получение TMDB ID текущего фильма
     function getCurrentMovieTmdbId() {
         try {
             var activity = Lampa.Activity.active();
@@ -263,28 +248,13 @@
             if (key === timelineKey) {
                 try {
                     var newData = JSON.parse(value);
-                    
-                    for (var id in newData) {
-                        if (!newData.hasOwnProperty(id)) continue;
-                        var newRecord = newData[id];
-                        var protectedRecord = protectedTimeline[id];
-                        
-                        if (protectedRecord && protectedRecord.time > 0) {
-                            var newTime = newRecord.time || 0;
-                            var protectedTime = protectedRecord.time || 0;
-                            
-                            if (newTime < protectedTime) {
-                                newData[id] = { ...protectedRecord };
+                    for (var id in protectedTimeline) {
+                        if (protectedTimeline.hasOwnProperty(id) && protectedTimeline[id].time > 0) {
+                            if (!newData[id] || (newData[id].time || 0) < protectedTimeline[id].time) {
+                                newData[id] = JSON.parse(JSON.stringify(protectedTimeline[id]));
                             }
                         }
                     }
-                    
-                    for (var id2 in protectedTimeline) {
-                        if (!newData[id2] && protectedTimeline[id2].time > 0) {
-                            newData[id2] = { ...protectedTimeline[id2] };
-                        }
-                    }
-                    
                     value = JSON.stringify(newData);
                 } catch(e) {}
             }
@@ -336,9 +306,9 @@
         Lampa.Storage.set(key, timeline, true);
         protectedTimeline = JSON.parse(JSON.stringify(timeline));
         if (cfg().auto_sync) syncFile('timeline', timeline);
+        forceUITimelineUpdate();
     }
 
-    // ИСПРАВЛЕНО: Очистка старых таймкодов
     function cleanupOldRecords(showNotify) {
         showNotify = showNotify || false;
         var c = cfg();
@@ -357,18 +327,13 @@
             var percent = record.percent || 0;
             var updated = record.updated || 0;
             
-            // Удаляем пустые записи
             if (time === 0 && percent === 0) {
                 shouldDelete = true;
                 cleaned++;
-            }
-            // Удаляем старые
-            else if (c.cleanup_days > 0 && updated > 0 && updated < cutoffDate) {
+            } else if (c.cleanup_days > 0 && updated > 0 && updated < cutoffDate) {
                 shouldDelete = true;
                 cleaned++;
-            }
-            // Удаляем завершённые
-            else if (c.cleanup_completed && percent >= 95) {
+            } else if (c.cleanup_completed && percent >= 95) {
                 shouldDelete = true;
                 completedCleaned++;
             }
@@ -382,7 +347,6 @@
         if (hasChanges) {
             timeline = newTimeline;
             saveTimeline();
-            if (Lampa.Timeline) Lampa.Timeline.read(true);
             
             if (showNotify) {
                 notify('🧹 Удалено: ' + cleaned + ' старых, ' + completedCleaned + ' завершённых');
@@ -390,40 +354,6 @@
         } else if (showNotify) {
             notify('🧹 Нет записей для очистки');
         }
-        
-        return hasChanges;
-    }
-
-    // ============ АВТО-ПЕРЕМЕЩЕНИЕ В БРОШЕНО ============
-    function checkAutoMoveToDropped() {
-        var c = cfg();
-        if (!c.auto_move_dropped) return;
-        
-        var now = Date.now();
-        var cutoff = now - (c.auto_move_dropped_days * 24 * 60 * 60 * 1000);
-        var changed = false;
-        
-        for (var i = 0; i < favorites.length; i++) {
-            var item = favorites[i];
-            if ((item.category === 'watching' || item.category === 'watchlist') && item.updated < cutoff) {
-                var lastWatched = null;
-                for (var j = 0; j < history.length; j++) {
-                    if (history[j].card_id == item.card_id) {
-                        if (!lastWatched || history[j].watched_at > lastWatched.watched_at) {
-                            lastWatched = history[j];
-                        }
-                    }
-                }
-                
-                if (!lastWatched || lastWatched.watched_at < cutoff) {
-                    item.category = 'dropped';
-                    item.updated = now;
-                    changed = true;
-                }
-            }
-        }
-        
-        if (changed) saveFavorites();
     }
 
     // ============ ЗАКЛАДКИ РАЗДЕЛОВ ============
@@ -530,7 +460,7 @@
         for (var i = 0; i < maxItems; i++) {
             var item = sections[i];
             (function(section) {
-                var el = $('<li class="menu__item selector nsl-section-item"><div class="menu__ico">📌</div><div class="menu__text">' + section.name + '</div></li>');
+                var el = $('<li class="menu__item selector nsl-section-item"><div class="menu__ico">📌</div><div class="menu__text">' + escapeHtml(section.name) + '</div></li>');
                 el.on('hover:enter', function(e) { e.stopPropagation(); openSection(section); });
                 el.on('hover:long', function(e) {
                     e.stopPropagation();
@@ -555,20 +485,32 @@
         
         setTimeout(function() {
             if (c.sections_button === 'top') {
-                if (!Lampa.Head) return;
-                Lampa.Head.addIcon(
-                    '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/></svg>',
-                    addSection
-                );
+                if (Lampa.Head && Lampa.Head.addIcon) {
+                    Lampa.Head.addIcon(
+                        '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/></svg>',
+                        addSection
+                    );
+                }
             } else {
                 var menuList = $('.menu .menu__list').eq(1);
+                if (!menuList.length) menuList = $('.menu .menu__list').eq(0);
                 if (!menuList.length || $('.nsl-section-add').length) return;
                 
                 var btn = $('<li class="menu__item selector nsl-section-add"><div class="menu__ico">📌</div><div class="menu__text">Добавить закладку</div></li>');
                 btn.on('hover:enter', addSection);
-                menuList.prepend(btn);
+                menuList.append(btn);
             }
         }, 2000);
+    }
+    
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
     }
 
     // ============ ИЗБРАННОЕ ============
@@ -587,7 +529,6 @@
                 result.push(favorites[j].data);
             }
         }
-        result.sort(function(a, b) { return b.updated - a.updated; });
         return result;
     }
 
@@ -598,7 +539,6 @@
                 result.push(favorites[i].data);
             }
         }
-        result.sort(function(a, b) { return b.updated - a.updated; });
         return result;
     }
 
@@ -651,10 +591,12 @@
         }
         favorites = newFavorites;
         saveFavorites();
+        notify('🗑️ Удалено из избранного');
     }
 
     function showFavoriteMenu(card) {
         var items = [];
+        var self = this;
         
         for (var cat in FAVORITE_CATEGORIES) {
             if (!FAVORITE_CATEGORIES.hasOwnProperty(cat)) continue;
@@ -669,7 +611,6 @@
                     return function() {
                         if (added) {
                             removeFromFavorites(card.id, category);
-                            notify('Удалено из "' + info.title + '"');
                         } else {
                             addToFavorites(card, category);
                         }
@@ -728,7 +669,6 @@
     }
 
     // ============ ПРОДОЛЖИТЬ ПРОСМОТР ============
-    // ИСПРАВЛЕНО: Получение данных для продолжения просмотра
     function getContinueWatching() {
         var c = cfg();
         if (!c.continue_watching) return [];
@@ -765,7 +705,6 @@
     }
 
     // ============ ТАЙМКОДЫ ============
-    // ИСПРАВЛЕНО: CSS стили для таймкодов с правильными селекторами
     function injectTimelineStyles() {
         if (styleInjected) return;
         
@@ -784,37 +723,7 @@
         
         var style = document.createElement('style');
         style.id = 'nsl-timeline-styles';
-        style.textContent = `
-            .card .card-watched {
-                display: block !important;
-                opacity: 1 !important;
-                visibility: visible !important;
-                pointer-events: none;
-                ${posStyles}
-                left: 0.8em !important;
-                right: 0.8em !important;
-                z-index: 5 !important;
-                background-color: rgba(0, 0, 0, 0.7) !important;
-                -webkit-backdrop-filter: blur(2px);
-                backdrop-filter: blur(2px);
-                font-size: 1em;
-                padding: 0.2em 0.5em;
-                border-radius: 0.3em;
-                text-align: center;
-            }
-            .card:not(.focus) .card-watched {
-                display: block !important;
-                opacity: 0.8 !important;
-                visibility: visible !important;
-            }
-            .card-watched[style*="display: none"] {
-                display: block !important;
-            }
-            .card-watched__info {
-                color: #fff;
-                text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
-            }
-        `;
+        style.textContent = '.card .card-watched { display: block !important; opacity: 1 !important; visibility: visible !important; pointer-events: none; ' + posStyles + ' left: 0.8em !important; right: 0.8em !important; z-index: 5 !important; background-color: rgba(0, 0, 0, 0.7) !important; -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); font-size: 0.9em; padding: 0.2em 0.5em; border-radius: 0.3em; text-align: center; } .card:not(.focus) .card-watched { display: block !important; opacity: 0.8 !important; } .card-watched[style*="display: none"] { display: block !important; }';
         document.head.appendChild(style);
         styleInjected = true;
     }
@@ -856,7 +765,6 @@
                     notify('✅ Отмечено как просмотренное');
                 }
             });
-            
             return true;
         }
         
@@ -898,7 +806,6 @@
         };
         
         saveTimeline();
-        forceUITimelineUpdate();
         
         if (duration > 0) checkEndCredits(currentTime, duration);
         if (percent >= 90) {
@@ -914,6 +821,8 @@
     function initPlayerHandler() {
         var lastSyncToGist = 0;
         
+        if (playerCheckInterval) clearInterval(playerCheckInterval);
+        
         playerCheckInterval = setInterval(function() {
             var c = cfg();
             if (!c.enabled) return;
@@ -922,16 +831,12 @@
                 try {
                     var data = Lampa.Player.playdata();
                     if (data && data.timeline && data.timeline.time) {
-                        currentMovieTime = data.timeline.time;
-                        
                         if (c.auto_save) {
-                            var saved = saveCurrentProgress(currentMovieTime);
-                            if (saved) {
-                                var now = Date.now();
-                                if (c.auto_sync && (now - lastSyncToGist) >= (c.sync_interval * 1000)) {
-                                    syncAll(false);
-                                    lastSyncToGist = now;
-                                }
+                            saveCurrentProgress(data.timeline.time);
+                            var now = Date.now();
+                            if (c.auto_sync && (now - lastSyncToGist) >= (c.sync_interval * 1000)) {
+                                syncAll(false);
+                                lastSyncToGist = now;
                             }
                         }
                     }
@@ -950,7 +855,6 @@
     }
 
     // ============ СИНХРОНИЗАЦИЯ С GIST ============
-    // ИСПРАВЛЕНО: Добавлена поддержка прокси для обхода CORS
     function getGistAuth() {
         var c = cfg();
         return (c.gist_token && c.gist_id) ? { token: c.gist_token, id: c.gist_id } : null;
@@ -960,25 +864,17 @@
         var c = cfg();
         var url = 'https://api.github.com/gists/' + gistId;
         
-        if (c.use_proxy && method === 'GET') {
-            url = c.proxy_url + encodeURIComponent(url);
-        }
-        
         $.ajax({
             url: url,
             method: method,
-            headers: (c.use_proxy && method === 'GET') ? {} : {
+            headers: {
                 'Authorization': 'token ' + c.gist_token,
                 'Accept': 'application/vnd.github.v3+json'
             },
             data: data ? JSON.stringify(data) : null,
             success: callback,
             error: function(xhr) {
-                if (xhr.status === 0 && !c.use_proxy) {
-                    notify('⚠️ CORS ошибка, включите прокси в настройках Gist');
-                } else if (errorCallback) {
-                    errorCallback(xhr);
-                }
+                if (errorCallback) errorCallback(xhr);
             }
         });
     }
@@ -992,13 +888,8 @@
         files[GIST_FILES[type]] = { content: JSON.stringify(data) };
         
         makeGistRequest('PATCH', gist.id, { files: files }, 
-            function() {
-                if (showNotify) notify('✅ ' + type + ' синхронизирован');
-            },
-            function(xhr) {
-                console.error('[NSL] ' + type + ' sync error:', xhr);
-                if (showNotify) notify('❌ Ошибка синхронизации ' + type);
-            }
+            function() { if (showNotify) notify('✅ ' + type + ' синхронизирован'); },
+            function(xhr) { if (showNotify) notify('❌ Ошибка синхронизации ' + type); }
         );
     }
 
@@ -1045,13 +936,11 @@
                                         hasChanges = true;
                                     } else {
                                         var shouldUseRemote = false;
-                                        
                                         if (strategy === 'max_time') {
                                             shouldUseRemote = (remote.time || 0) > (local.time || 0);
                                         } else {
                                             shouldUseRemote = (remote.updated || 0) > (local.updated || 0);
                                         }
-                                        
                                         if (shouldUseRemote) {
                                             timeline[key] = remote;
                                             hasChanges = true;
@@ -1086,9 +975,7 @@
                                 }
                             }
                         }
-                    } catch(e) {
-                        console.warn('[NSL] Error parsing ' + type + ':', e);
-                    }
+                    } catch(e) {}
                 }
                 
                 if (hasChanges) {
@@ -1115,13 +1002,13 @@
                         }
                     },
                     function(xhr) {
-                        if (showNotify) notify('❌ Ошибка отправки: ' + xhr.status);
+                        if (showNotify) notify('❌ Ошибка отправки: ' + (xhr.status || 'unknown'));
                         syncInProgress = false;
                     }
                 );
             },
             function(xhr) {
-                if (showNotify) notify('❌ Ошибка загрузки: ' + xhr.status);
+                if (showNotify) notify('❌ Ошибка загрузки: ' + (xhr.status || 'unknown'));
                 syncInProgress = false;
             }
         );
@@ -1145,7 +1032,6 @@
         a.download = 'nsl_backup_' + new Date().toISOString().slice(0, 10) + '.json';
         a.click();
         URL.revokeObjectURL(url);
-        
         notify('📤 Данные экспортированы');
     }
 
@@ -1161,29 +1047,13 @@
             reader.onload = function(e) {
                 try {
                     var data = JSON.parse(e.target.result);
-                    
-                    if (data.timeline) {
-                        timeline = data.timeline;
-                        saveTimeline();
-                    }
-                    if (data.sections) {
-                        sections = data.sections;
-                        saveSections();
-                    }
-                    if (data.favorites) {
-                        favorites = data.favorites;
-                        saveFavorites();
-                    }
-                    if (data.history) {
-                        history = data.history;
-                        saveHistory();
-                    }
-                    
+                    if (data.timeline) { timeline = data.timeline; saveTimeline(); }
+                    if (data.sections) { sections = data.sections; saveSections(); }
+                    if (data.favorites) { favorites = data.favorites; saveFavorites(); }
+                    if (data.history) { history = data.history; saveHistory(); }
                     renderSectionsMenu();
-                    forceUITimelineUpdate();
                     notify('📥 Данные импортированы');
                 } catch(err) {
-                    console.error('[NSL] Import error:', err);
                     notify('❌ Ошибка импорта');
                 }
             };
@@ -1192,10 +1062,7 @@
         input.click();
     }
 
-    // ИСПРАВЛЕНО: Импорт из CUB с актуальной структурой
     function importFromCUB() {
-        var c = cfg();
-        
         Lampa.Select.show({
             title: 'Импорт из CUB',
             items: [
@@ -1207,108 +1074,58 @@
             onSelect: function(item) {
                 if (item.action === 'import') {
                     notify('🔄 Импорт из CUB...');
-                    
                     try {
-                        // Пробуем разные варианты хранения CUB
-                        var cubFavorites = Lampa.Storage.get('favorite', null);
-                        if (!cubFavorites) {
-                            cubFavorites = Lampa.Storage.get('cub_favorites', null);
-                        }
-                        if (!cubFavorites) {
-                            cubFavorites = Lampa.Storage.get('bookmarks', null);
-                        }
-                        
+                        var cubFavorites = Lampa.Storage.get('favorite', {});
                         var imported = 0;
                         
-                        if (cubFavorites) {
-                            // Обработка разных форматов
-                            var itemsToImport = [];
-                            if (Array.isArray(cubFavorites)) {
-                                itemsToImport = cubFavorites;
-                            } else if (cubFavorites.items && Array.isArray(cubFavorites.items)) {
-                                itemsToImport = cubFavorites.items;
-                            } else if (cubFavorites.bookmarks && Array.isArray(cubFavorites.bookmarks)) {
-                                itemsToImport = cubFavorites.bookmarks;
-                            } else if (cubFavorites.favorites && Array.isArray(cubFavorites.favorites)) {
-                                itemsToImport = cubFavorites.favorites;
-                            } else {
-                                for (var key in cubFavorites) {
-                                    if (cubFavorites.hasOwnProperty(key) && Array.isArray(cubFavorites[key])) {
-                                        itemsToImport = itemsToImport.concat(cubFavorites[key]);
-                                    }
+                        if (cubFavorites && cubFavorites.book && cubFavorites.book.length) {
+                            cubFavorites.book.forEach(function(card) {
+                                if (card && card.id && !favorites.find(function(f) { return f.card_id == card.id; })) {
+                                    favorites.push({
+                                        id: generateId(),
+                                        card_id: card.id,
+                                        tmdb_id: card.id,
+                                        media_type: detectMediaType(card),
+                                        category: 'favorite',
+                                        data: clearCard(card),
+                                        added: Date.now(),
+                                        updated: Date.now()
+                                    });
+                                    imported++;
                                 }
-                            }
-                            
-                            for (var i = 0; i < itemsToImport.length; i++) {
-                                var card = itemsToImport[i];
-                                if (card && card.id) {
-                                    var exists = false;
-                                    for (var j = 0; j < favorites.length; j++) {
-                                        if (favorites[j].card_id == card.id) {
-                                            exists = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!exists) {
-                                        favorites.push({
-                                            id: generateId(),
-                                            card_id: card.id,
-                                            tmdb_id: card.id,
-                                            media_type: detectMediaType(card),
-                                            category: 'favorite',
-                                            data: clearCard(card),
-                                            added: Date.now(),
-                                            updated: Date.now()
-                                        });
-                                        imported++;
-                                    }
-                                }
-                            }
+                            });
                         }
                         
-                        // Импорт истории просмотров
-                        var cubHistory = Lampa.Storage.get('history', null);
-                        if (cubHistory && Array.isArray(cubHistory)) {
-                            for (var k = 0; k < cubHistory.length; k++) {
-                                var histItem = cubHistory[k];
-                                if (histItem && histItem.id) {
-                                    var existsHist = false;
-                                    for (var m = 0; m < history.length; m++) {
-                                        if (history[m].card_id == histItem.id) {
-                                            existsHist = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!existsHist) {
-                                        history.push({
-                                            id: generateId(),
-                                            card_id: histItem.id,
-                                            tmdb_id: histItem.id,
-                                            media_type: detectMediaType(histItem),
-                                            data: clearCard(histItem),
-                                            watched_at: histItem.date || Date.now(),
-                                            progress: histItem.progress || {}
-                                        });
-                                    }
+                        if (cubFavorites && cubFavorites.like && cubFavorites.like.length) {
+                            cubFavorites.like.forEach(function(card) {
+                                if (card && card.id && !favorites.find(function(f) { return f.card_id == card.id && f.category === 'favorite'; })) {
+                                    favorites.push({
+                                        id: generateId(),
+                                        card_id: card.id,
+                                        tmdb_id: card.id,
+                                        media_type: detectMediaType(card),
+                                        category: 'favorite',
+                                        data: clearCard(card),
+                                        added: Date.now(),
+                                        updated: Date.now()
+                                    });
+                                    imported++;
                                 }
-                            }
+                            });
                         }
                         
                         if (imported > 0) saveFavorites();
-                        if (history.length > 0) saveHistory();
-                        
-                        notify('✅ Импортировано ' + imported + ' закладок и ' + history.length + ' записей истории');
+                        notify('✅ Импортировано ' + imported + ' закладок');
                     } catch(e) {
-                        console.warn('[NSL] Import error:', e);
-                        notify('❌ Ошибка импорта: ' + (e.message || 'неизвестная ошибка'));
+                        notify('❌ Ошибка импорта');
                     }
                     
+                    var c = cfg();
                     c.cub_import_done = true;
                     saveCfg(c);
                 }
                 Lampa.Controller.toggle('content');
-            },
-            onBack: function() { Lampa.Controller.toggle('content'); }
+            }
         });
     }
 
@@ -1319,51 +1136,15 @@
             favorites: favorites.length,
             history: history.length,
             timeline: Object.keys(timeline).length,
-            timelineCompleted: 0,
-            favoritesByFolder: {},
-            favoritesByCategory: {},
-            historyByFilter: {}
+            timelineCompleted: 0
         };
         
-        // Подсчет завершенных
         for (var key in timeline) {
             if (timeline[key].percent >= 95) stats.timelineCompleted++;
         }
-        
-        for (var f = 0; f < FAVORITE_FOLDERS.length; f++) {
-            var folder = FAVORITE_FOLDERS[f];
-            var count = 0;
-            for (var i = 0; i < favorites.length; i++) {
-                if (favorites[i].media_type === folder.mediaType) count++;
-            }
-            stats.favoritesByFolder[folder.id] = count;
-        }
-        
-        for (var cat in FAVORITE_CATEGORIES) {
-            var catCount = 0;
-            for (var j = 0; j < favorites.length; j++) {
-                if (favorites[j].category === cat) catCount++;
-            }
-            stats.favoritesByCategory[cat] = catCount;
-        }
-        
-        for (var h = 0; h < HISTORY_FILTERS.length; h++) {
-            var filter = HISTORY_FILTERS[h];
-            if (filter.id === 'all') {
-                stats.historyByFilter[filter.id] = history.length;
-            } else {
-                var filterCount = 0;
-                for (var k = 0; k < history.length; k++) {
-                    if (history[k].media_type === filter.id) filterCount++;
-                }
-                stats.historyByFilter[filter.id] = filterCount;
-            }
-        }
-        
         return stats;
     }
     
-    // ИСПРАВЛЕНО: Меню разбито на подменю для удобства
     function showMainMenu() {
         var c = cfg();
         var stats = getFullStats();
@@ -1373,9 +1154,9 @@
             { title: '──────────', separator: true },
             { title: '📌 Закладки разделов (' + stats.sections + ')', action: 'submenu_sections' },
             { title: '⭐ Избранное (' + stats.favorites + ')', action: 'submenu_favorites' },
-            { title: '📜 История просмотров (' + stats.history + ')', action: 'submenu_history' },
+            { title: '📜 История (' + stats.history + ')', action: 'submenu_history' },
             { title: '⏱️ Таймкоды (' + stats.timeline + ')', action: 'submenu_timeline' },
-            { title: '⏱️ Продолжить просмотр', action: 'submenu_continue' },
+            { title: '⏱️ Продолжить', action: 'submenu_continue' },
             { title: '☁️ GitHub Gist', action: 'submenu_gist' },
             { title: '──────────', separator: true },
             { title: '🔄 Синхронизировать сейчас', action: 'sync_now' },
@@ -1398,48 +1179,33 @@
                     } else {
                         stopPlayerHandler();
                         removeTimelineStyles();
-                        $('.nsl-section-add, .nsl-section-item, .nsl-menu-item, .nsl-split-sections, .nsl-menu-split').remove();
+                        $('.nsl-section-add, .nsl-section-item, .nsl-menu-item').remove();
                     }
                     notify('Плагин ' + (c.enabled ? 'включен' : 'выключен'));
                     showMainMenu();
-                } else if (item.action === 'submenu_sections') {
-                    showSectionsMenu();
-                } else if (item.action === 'submenu_favorites') {
-                    showFavoritesMenu(stats);
-                } else if (item.action === 'submenu_history') {
-                    showHistoryMenu(stats);
-                } else if (item.action === 'submenu_timeline') {
-                    showTimelineMenu(stats);
-                } else if (item.action === 'submenu_continue') {
-                    showContinueMenu();
-                } else if (item.action === 'submenu_gist') {
-                    showGistMenu();
-                } else if (item.action === 'sync_now') {
-                    Lampa.Controller.toggle('content'); syncAll(true);
-                } else if (item.action === 'cancel') {
-                    Lampa.Controller.toggle('content');
-                }
-            },
-            onBack: function() { Lampa.Controller.toggle('content'); }
+                } else if (item.action === 'submenu_sections') showSectionsMenu();
+                else if (item.action === 'submenu_favorites') showFavoritesMenu();
+                else if (item.action === 'submenu_history') showHistoryMenu();
+                else if (item.action === 'submenu_timeline') showTimelineMenu();
+                else if (item.action === 'submenu_continue') showContinueMenu();
+                else if (item.action === 'submenu_gist') showGistMenu();
+                else if (item.action === 'sync_now') { Lampa.Controller.toggle('content'); syncAll(true); }
+                else if (item.action === 'cancel') Lampa.Controller.toggle('content');
+            }
         });
     }
     
     function showSectionsMenu() {
         var c = cfg();
-        
-        var items = [
-            { title: '📌 Закладки разделов', disabled: true },
-            { title: '   Положение кнопки: ' + (c.sections_button === 'side' ? 'Боковое меню' : 'Верхняя панель'), action: 'sections_button' },
-            { title: '   🗑️ Очистить все', action: 'clear_sections' },
-            { title: '──────────', separator: true },
-            { title: '◀ Назад', action: 'back' }
-        ];
-        
         Lampa.Select.show({
             title: 'Закладки разделов',
-            items: items,
+            items: [
+                { title: 'Положение кнопки: ' + (c.sections_button === 'side' ? 'Боковое меню' : 'Верхняя панель'), action: 'sections_button' },
+                { title: '🗑️ Очистить все', action: 'clear_sections' },
+                { title: '──────────', separator: true },
+                { title: '◀ Назад', action: 'back' }
+            ],
             onSelect: function(item) {
-                var c = cfg();
                 if (item.action === 'sections_button') {
                     Lampa.Select.show({
                         title: 'Положение кнопки',
@@ -1447,277 +1213,213 @@
                             { title: '📱 Боковое меню', action: 'side' },
                             { title: '⬆️ Верхняя панель', action: 'top' }
                         ],
-                        onSelect: function(s) { c.sections_button = s.action; saveCfg(c); $('.nsl-section-add').remove(); addSectionButton(); showSectionsMenu(); },
-                        onBack: showSectionsMenu
+                        onSelect: function(s) { c.sections_button = s.action; saveCfg(c); $('.nsl-section-add').remove(); addSectionButton(); showSectionsMenu(); }
                     });
-                } else if (item.action === 'clear_sections') {
-                    sections = []; saveSections(); renderSectionsMenu(); notify('✅ Закладки очищены'); showSectionsMenu();
-                } else if (item.action === 'back') {
-                    showMainMenu();
-                }
-            },
-            onBack: showMainMenu
+                } else if (item.action === 'clear_sections') { sections = []; saveSections(); renderSectionsMenu(); notify('✅ Закладки очищены'); showSectionsMenu(); }
+                else if (item.action === 'back') showMainMenu();
+            }
         });
     }
     
-    function showFavoritesMenu(stats) {
+    function showFavoritesMenu() {
         var c = cfg();
-        
-        var items = [
-            { title: '⭐ Избранное', disabled: true },
-            { title: '   Всего: ' + stats.favorites, disabled: true },
-            { title: '   ─── Папки ───', separator: true }
-        ];
-        
-        for (var f = 0; f < FAVORITE_FOLDERS.length; f++) {
-            var folder = FAVORITE_FOLDERS[f];
-            items.push({ title: '   ' + folder.icon + ' ' + folder.title + ': ' + (stats.favoritesByFolder[folder.id] || 0), disabled: true });
-        }
-        
-        items.push({ title: '   ─── Категории ───', separator: true });
-        
-        for (var cat in FAVORITE_CATEGORIES) {
-            items.push({ title: '   ' + FAVORITE_CATEGORIES[cat].icon + ' ' + FAVORITE_CATEGORIES[cat].title + ': ' + (stats.favoritesByCategory[cat] || 0), disabled: true });
-        }
-        
-        items.push(
-            { title: '   ───────────────', separator: true },
-            { title: '   🔄 Авто в Брошено: ' + (c.auto_move_dropped ? 'Вкл' : 'Выкл'), action: 'toggle_auto_dropped' },
-            { title: '   📅 Дней до Брошено: ' + c.auto_move_dropped_days, action: 'set_dropped_days' },
-            { title: '   🗑️ Очистить всё', action: 'clear_favorites' },
-            { title: '──────────', separator: true },
-            { title: '◀ Назад', action: 'back' }
-        );
-        
         Lampa.Select.show({
             title: 'Избранное',
-            items: items,
+            items: [
+                { title: '🔄 Авто в Брошено: ' + (c.auto_move_dropped ? 'Вкл' : 'Выкл'), action: 'toggle_auto_dropped' },
+                { title: '📅 Дней до Брошено: ' + c.auto_move_dropped_days, action: 'set_dropped_days' },
+                { title: '🗑️ Очистить всё', action: 'clear_favorites' },
+                { title: '──────────', separator: true },
+                { title: '◀ Назад', action: 'back' }
+            ],
             onSelect: function(item) {
-                var c = cfg();
-                if (item.action === 'toggle_auto_dropped') {
-                    c.auto_move_dropped = !c.auto_move_dropped; saveCfg(c); notify('Авто в Брошено ' + (c.auto_move_dropped ? 'включено' : 'выключено')); showFavoritesMenu(getFullStats());
-                } else if (item.action === 'set_dropped_days') {
-                    Lampa.Input.edit({ title: 'Дней до Брошено', value: String(c.auto_move_dropped_days), free: true, number: true }, function(v) { if (v && !isNaN(v) && v > 0) { c.auto_move_dropped_days = parseInt(v); saveCfg(c); } showFavoritesMenu(getFullStats()); });
-                } else if (item.action === 'clear_favorites') {
-                    favorites = []; saveFavorites(); notify('✅ Избранное очищено'); showFavoritesMenu(getFullStats());
-                } else if (item.action === 'back') {
-                    showMainMenu();
-                }
-            },
-            onBack: showMainMenu
+                if (item.action === 'toggle_auto_dropped') { c.auto_move_dropped = !c.auto_move_dropped; saveCfg(c); showFavoritesMenu(); }
+                else if (item.action === 'set_dropped_days') {
+                    Lampa.Input.edit({ title: 'Дней до Брошено', value: String(c.auto_move_dropped_days), free: true, number: true }, function(v) {
+                        if (v && !isNaN(v) && v > 0) { c.auto_move_dropped_days = parseInt(v); saveCfg(c); }
+                        showFavoritesMenu();
+                    });
+                } else if (item.action === 'clear_favorites') { favorites = []; saveFavorites(); notify('✅ Избранное очищено'); showFavoritesMenu(); }
+                else if (item.action === 'back') showMainMenu();
+            }
         });
     }
     
-    function showHistoryMenu(stats) {
-        var items = [
-            { title: '📜 История просмотров', disabled: true },
-            { title: '   Всего: ' + stats.history, disabled: true }
-        ];
-        
-        for (var h = 0; h < HISTORY_FILTERS.length; h++) {
-            var filter = HISTORY_FILTERS[h];
-            items.push({ title: '   ' + filter.icon + ' ' + filter.title + ': ' + (stats.historyByFilter[filter.id] || 0), disabled: true });
-        }
-        
-        items.push(
-            { title: '   🗑️ Очистить историю', action: 'clear_history' },
-            { title: '──────────', separator: true },
-            { title: '◀ Назад', action: 'back' }
-        );
-        
+    function showHistoryMenu() {
         Lampa.Select.show({
             title: 'История',
-            items: items,
+            items: [
+                { title: '🗑️ Очистить историю', action: 'clear_history' },
+                { title: '──────────', separator: true },
+                { title: '◀ Назад', action: 'back' }
+            ],
             onSelect: function(item) {
-                if (item.action === 'clear_history') {
-                    history = []; saveHistory(); notify('✅ История очищена'); showHistoryMenu(getFullStats());
-                } else if (item.action === 'back') {
-                    showMainMenu();
-                }
-            },
-            onBack: showMainMenu
+                if (item.action === 'clear_history') { history = []; saveHistory(); notify('✅ История очищена'); showHistoryMenu(); }
+                else if (item.action === 'back') showMainMenu();
+            }
         });
     }
     
-    function showTimelineMenu(stats) {
+    function showTimelineMenu() {
         var c = cfg();
-        
-        var items = [
-            { title: '⏱️ Таймкоды', disabled: true },
-            { title: '   Всего: ' + stats.timeline + ' (завершено: ' + stats.timelineCompleted + ')', disabled: true },
-            { title: '   ' + (c.auto_save ? '[✓]' : '[ ]') + ' Автосохранение: ' + (c.auto_save ? 'Вкл' : 'Выкл'), action: 'toggle_auto_save' },
-            { title: '   ' + (c.auto_sync ? '[✓]' : '[ ]') + ' Автосинхронизация: ' + (c.auto_sync ? 'Вкл' : 'Выкл'), action: 'toggle_auto_sync' },
-            { title: '   Интервал: ' + c.sync_interval + ' сек', action: 'set_interval' },
-            { title: '   ───────────────', separator: true },
-            { title: '   ' + (c.always_show_timeline ? '[✓]' : '[ ]') + ' Таймкоды на карточках: ' + (c.always_show_timeline ? 'Вкл' : 'Выкл'), action: 'toggle_timeline' },
-            { title: '   Позиция: ' + (c.timeline_position === 'bottom' ? 'Снизу' : c.timeline_position === 'center' ? 'По центру' : 'Сверху'), action: 'timeline_position' },
-            { title: '   Стратегия: ' + (c.sync_strategy === 'max_time' ? 'По длительности' : 'По дате'), action: 'toggle_strategy' },
-            { title: '   Порог титров: ' + c.end_credits_threshold + ' сек', action: 'set_threshold' },
-            { title: '   ───────────────', separator: true },
-            { title: '   Удалять старше: ' + c.cleanup_days + ' дней', action: 'set_cleanup_days' },
-            { title: '   ' + (c.cleanup_completed ? '[✓]' : '[ ]') + ' Удалять завершённые', action: 'toggle_cleanup_completed' },
-            { title: '   🗑️ Очистить все', action: 'clear_timeline' },
-            { title: '   🧹 Очистить старые', action: 'cleanup_now' },
-            { title: '──────────', separator: true },
-            { title: '◀ Назад', action: 'back' }
-        ];
-        
         Lampa.Select.show({
             title: 'Таймкоды',
-            items: items,
+            items: [
+                { title: (c.auto_save ? '[✓]' : '[ ]') + ' Автосохранение', action: 'toggle_auto_save' },
+                { title: (c.auto_sync ? '[✓]' : '[ ]') + ' Автосинхронизация', action: 'toggle_auto_sync' },
+                { title: 'Интервал: ' + c.sync_interval + ' сек', action: 'set_interval' },
+                { title: '──────────', separator: true },
+                { title: (c.always_show_timeline ? '[✓]' : '[ ]') + ' Показывать на карточках', action: 'toggle_timeline' },
+                { title: 'Позиция: ' + (c.timeline_position === 'bottom' ? 'Снизу' : c.timeline_position === 'center' ? 'По центру' : 'Сверху'), action: 'timeline_position' },
+                { title: 'Стратегия: ' + (c.sync_strategy === 'max_time' ? 'По длительности' : 'По дате'), action: 'toggle_strategy' },
+                { title: '──────────', separator: true },
+                { title: 'Удалять старше: ' + c.cleanup_days + ' дней', action: 'set_cleanup_days' },
+                { title: (c.cleanup_completed ? '[✓]' : '[ ]') + ' Удалять завершённые', action: 'toggle_cleanup_completed' },
+                { title: '🗑️ Очистить все', action: 'clear_timeline' },
+                { title: '🧹 Очистить старые', action: 'cleanup_now' },
+                { title: '──────────', separator: true },
+                { title: '◀ Назад', action: 'back' }
+            ],
             onSelect: function(item) {
-                var c = cfg();
-                if (item.action === 'toggle_auto_save') {
-                    c.auto_save = !c.auto_save; saveCfg(c); notify('Автосохранение ' + (c.auto_save ? 'включено' : 'выключено')); showTimelineMenu(getFullStats());
-                } else if (item.action === 'toggle_auto_sync') {
-                    c.auto_sync = !c.auto_sync; saveCfg(c); notify('Автосинхронизация ' + (c.auto_sync ? 'включена' : 'выключена')); showTimelineMenu(getFullStats());
-                } else if (item.action === 'set_interval') {
-                    Lampa.Input.edit({ title: 'Интервал (сек)', value: String(c.sync_interval), free: true, number: true }, function(v) { if (v && !isNaN(v) && v >= 10) { c.sync_interval = parseInt(v); saveCfg(c); } showTimelineMenu(getFullStats()); });
+                if (item.action === 'toggle_auto_save') { c.auto_save = !c.auto_save; saveCfg(c); showTimelineMenu(); }
+                else if (item.action === 'toggle_auto_sync') { c.auto_sync = !c.auto_sync; saveCfg(c); showTimelineMenu(); }
+                else if (item.action === 'set_interval') {
+                    Lampa.Input.edit({ title: 'Интервал (сек)', value: String(c.sync_interval), free: true, number: true }, function(v) {
+                        if (v && !isNaN(v) && v >= 10) { c.sync_interval = parseInt(v); saveCfg(c); }
+                        showTimelineMenu();
+                    });
                 } else if (item.action === 'toggle_timeline') {
                     c.always_show_timeline = !c.always_show_timeline; saveCfg(c);
                     c.always_show_timeline ? injectTimelineStyles() : removeTimelineStyles();
-                    notify('Таймкоды ' + (c.always_show_timeline ? 'показываются' : 'скрыты')); showTimelineMenu(getFullStats());
+                    showTimelineMenu();
                 } else if (item.action === 'timeline_position') {
                     Lampa.Select.show({
-                        title: 'Позиция таймкода',
+                        title: 'Позиция',
                         items: [
                             { title: '⬇️ Снизу', action: 'bottom' },
                             { title: '📍 По центру', action: 'center' },
                             { title: '⬆️ Сверху', action: 'top' }
                         ],
-                        onSelect: function(s) { c.timeline_position = s.action; saveCfg(c); if (c.always_show_timeline) { removeTimelineStyles(); injectTimelineStyles(); } showTimelineMenu(getFullStats()); },
-                        onBack: function() { showTimelineMenu(getFullStats()); }
+                        onSelect: function(s) { c.timeline_position = s.action; saveCfg(c); if (c.always_show_timeline) { removeTimelineStyles(); injectTimelineStyles(); } showTimelineMenu(); }
                     });
-                } else if (item.action === 'toggle_strategy') {
-                    c.sync_strategy = c.sync_strategy === 'max_time' ? 'last_watch' : 'max_time'; saveCfg(c);
-                    notify('Стратегия: ' + (c.sync_strategy === 'max_time' ? 'По длительности' : 'По дате')); showTimelineMenu(getFullStats());
-                } else if (item.action === 'set_threshold') {
-                    Lampa.Input.edit({ title: 'Порог титров (сек)', value: String(c.end_credits_threshold), free: true, number: true }, function(v) { if (v && !isNaN(v) && v > 0) { c.end_credits_threshold = parseInt(v); saveCfg(c); } showTimelineMenu(getFullStats()); });
-                } else if (item.action === 'set_cleanup_days') {
-                    Lampa.Input.edit({ title: 'Удалять старше (дней)', value: String(c.cleanup_days), free: true, number: true }, function(v) { if (v !== null && !isNaN(v) && v >= 0) { c.cleanup_days = parseInt(v); saveCfg(c); } showTimelineMenu(getFullStats()); });
-                } else if (item.action === 'toggle_cleanup_completed') {
-                    c.cleanup_completed = !c.cleanup_completed; saveCfg(c); notify('Удаление завершённых ' + (c.cleanup_completed ? 'включено' : 'выключено')); showTimelineMenu(getFullStats());
-                } else if (item.action === 'clear_timeline') {
-                    timeline = {}; saveTimeline(); forceUITimelineUpdate(); notify('✅ Таймкоды очищены'); showTimelineMenu(getFullStats());
-                } else if (item.action === 'cleanup_now') {
-                    cleanupOldRecords(true); showTimelineMenu(getFullStats());
-                } else if (item.action === 'back') {
-                    showMainMenu();
-                }
-            },
-            onBack: showMainMenu
+                } else if (item.action === 'toggle_strategy') { c.sync_strategy = c.sync_strategy === 'max_time' ? 'last_watch' : 'max_time'; saveCfg(c); showTimelineMenu(); }
+                else if (item.action === 'set_cleanup_days') {
+                    Lampa.Input.edit({ title: 'Дней', value: String(c.cleanup_days), free: true, number: true }, function(v) {
+                        if (v !== null && !isNaN(v) && v >= 0) { c.cleanup_days = parseInt(v); saveCfg(c); }
+                        showTimelineMenu();
+                    });
+                } else if (item.action === 'toggle_cleanup_completed') { c.cleanup_completed = !c.cleanup_completed; saveCfg(c); showTimelineMenu(); }
+                else if (item.action === 'clear_timeline') { timeline = {}; saveTimeline(); notify('✅ Таймкоды очищены'); showTimelineMenu(); }
+                else if (item.action === 'cleanup_now') { cleanupOldRecords(true); showTimelineMenu(); }
+                else if (item.action === 'back') showMainMenu();
+            }
         });
     }
     
     function showContinueMenu() {
         var c = cfg();
-        
-        var items = [
-            { title: '⏱️ Продолжить просмотр', disabled: true },
-            { title: '   ' + (c.continue_watching ? '[✓]' : '[ ]') + ' Показывать: ' + (c.continue_watching ? 'Вкл' : 'Выкл'), action: 'toggle_continue' },
-            { title: '   Мин. прогресс: ' + c.continue_min_progress + '%', action: 'set_min_progress' },
-            { title: '   Макс. прогресс: ' + c.continue_max_progress + '%', action: 'set_max_progress' },
-            { title: '──────────', separator: true },
-            { title: '◀ Назад', action: 'back' }
-        ];
-        
         Lampa.Select.show({
             title: 'Продолжить просмотр',
-            items: items,
+            items: [
+                { title: (c.continue_watching ? '[✓]' : '[ ]') + ' Показывать', action: 'toggle_continue' },
+                { title: 'Мин. прогресс: ' + c.continue_min_progress + '%', action: 'set_min_progress' },
+                { title: 'Макс. прогресс: ' + c.continue_max_progress + '%', action: 'set_max_progress' },
+                { title: '──────────', separator: true },
+                { title: '◀ Назад', action: 'back' }
+            ],
             onSelect: function(item) {
-                var c = cfg();
-                if (item.action === 'toggle_continue') {
-                    c.continue_watching = !c.continue_watching; saveCfg(c); addMenuItems(); notify('Продолжить просмотр ' + (c.continue_watching ? 'включено' : 'выключено')); showContinueMenu();
-                } else if (item.action === 'set_min_progress') {
-                    Lampa.Input.edit({ title: 'Мин. прогресс %', value: String(c.continue_min_progress), free: true, number: true }, function(v) { if (v && !isNaN(v) && v >= 0) { c.continue_min_progress = parseInt(v); saveCfg(c); } showContinueMenu(); });
+                if (item.action === 'toggle_continue') { c.continue_watching = !c.continue_watching; saveCfg(c); addMenuItems(); showContinueMenu(); }
+                else if (item.action === 'set_min_progress') {
+                    Lampa.Input.edit({ title: 'Мин. прогресс %', value: String(c.continue_min_progress), free: true, number: true }, function(v) {
+                        if (v && !isNaN(v) && v >= 0) { c.continue_min_progress = parseInt(v); saveCfg(c); }
+                        showContinueMenu();
+                    });
                 } else if (item.action === 'set_max_progress') {
-                    Lampa.Input.edit({ title: 'Макс. прогресс %', value: String(c.continue_max_progress), free: true, number: true }, function(v) { if (v && !isNaN(v) && v <= 100) { c.continue_max_progress = parseInt(v); saveCfg(c); } showContinueMenu(); });
-                } else if (item.action === 'back') {
-                    showMainMenu();
-                }
-            },
-            onBack: showMainMenu
+                    Lampa.Input.edit({ title: 'Макс. прогресс %', value: String(c.continue_max_progress), free: true, number: true }, function(v) {
+                        if (v && !isNaN(v) && v <= 100) { c.continue_max_progress = parseInt(v); saveCfg(c); }
+                        showContinueMenu();
+                    });
+                } else if (item.action === 'back') showMainMenu();
+            }
         });
     }
-
+    
     function showGistMenu() {
         var c = cfg();
-        
-        var items = [
-            { title: '☁️ GitHub Gist', disabled: true },
-            { title: '   🔑 Токен: ' + (c.gist_token ? '✓ Установлен' : '❌ Не установлен'), action: 'token' },
-            { title: '   📄 Gist ID: ' + (c.gist_id ? c.gist_id.substring(0, 8) + '…' : '❌ Не установлен'), action: 'id' },
-            { title: '   🌐 Прокси (CORS): ' + (c.use_proxy ? 'Вкл' : 'Выкл'), action: 'toggle_proxy' },
-            { title: '   ───────────────', separator: true },
-            { title: '   📤 Экспорт всех данных', action: 'export' },
-            { title: '   📥 Импорт данных', action: 'import' },
-            { title: '   📥 Импорт из CUB', action: 'import_cub' },
-            { title: '──────────', separator: true },
-            { title: '◀ Назад', action: 'back' }
-        ];
-        
         Lampa.Select.show({
             title: 'GitHub Gist',
-            items: items,
+            items: [
+                { title: '🔑 Токен: ' + (c.gist_token ? '✓ Установлен' : '❌ Не установлен'), action: 'token' },
+                { title: '📄 Gist ID: ' + (c.gist_id ? c.gist_id.substring(0, 8) + '…' : '❌ Не установлен'), action: 'id' },
+                { title: '──────────', separator: true },
+                { title: '📤 Экспорт данных', action: 'export' },
+                { title: '📥 Импорт данных', action: 'import' },
+                { title: '📥 Импорт из CUB', action: 'import_cub' },
+                { title: '──────────', separator: true },
+                { title: '◀ Назад', action: 'back' }
+            ],
             onSelect: function(item) {
-                var c = cfg();
-                
                 if (item.action === 'token') {
                     Lampa.Input.edit({ title: 'GitHub Token', value: c.gist_token, free: true }, function(v) { if (v !== null) { c.gist_token = v || ''; saveCfg(c); } showGistMenu(); });
                 } else if (item.action === 'id') {
                     Lampa.Input.edit({ title: 'Gist ID', value: c.gist_id, free: true }, function(v) { if (v !== null) { c.gist_id = v || ''; saveCfg(c); } showGistMenu(); });
-                } else if (item.action === 'toggle_proxy') {
-                    c.use_proxy = !c.use_proxy; saveCfg(c); notify('Прокси для Gist ' + (c.use_proxy ? 'включен' : 'выключен')); showGistMenu();
-                } else if (item.action === 'export') {
-                    exportData(); showGistMenu();
-                } else if (item.action === 'import') {
-                    importData(); setTimeout(showGistMenu, 500);
-                } else if (item.action === 'import_cub') {
-                    importFromCUB();
-                } else if (item.action === 'back') {
-                    showMainMenu();
-                }
-            },
-            onBack: function() { showMainMenu(); }
+                } else if (item.action === 'export') { exportData(); showGistMenu(); }
+                else if (item.action === 'import') { importData(); setTimeout(showGistMenu, 500); }
+                else if (item.action === 'import_cub') { importFromCUB(); }
+                else if (item.action === 'back') showMainMenu();
+            }
         });
     }
 
     // ============ БОКОВОЕ МЕНЮ ============
     function addMenuItems() {
+        if (menuItemsAdded) return;
+        
         setTimeout(function() {
-            $('.nsl-menu-item, .nsl-menu-split').remove();
+            $('.nsl-menu-item').remove();
             if (!cfg().enabled) return;
-
+            
             var menuList = $('.menu .menu__list').eq(0);
             if (!menuList.length) {
+                setTimeout(arguments.callee, 1000);
                 return;
             }
-
-            menuList.append('<li class="menu__split nsl-menu-split"></li>');
-
-            var items = [
-                { action: 'sections', icon: '📌', title: 'Мои закладки', enabled: cfg().sections_enabled },
-                { action: 'favorites', icon: '⭐', title: 'Моё избранное', enabled: cfg().favorites_enabled },
-                { action: 'history', icon: '📜', title: 'Моя история', enabled: cfg().history_enabled },
-                { action: 'collection', icon: '📦', title: 'Коллекция', enabled: cfg().favorites_enabled },
-                { action: 'continue', icon: '⏱️', title: 'Продолжить', enabled: cfg().continue_watching }
-            ];
-
-            for (var i = 0; i < items.length; i++) {
-                var item = items[i];
-                if (!item.enabled) continue;
-                (function(action, icon, title) {
-                    var el = $('<li class="menu__item selector nsl-menu-item" data-nsl="' + action + '"><div class="menu__ico">' + icon + '</div><div class="menu__text">' + title + '</div></li>');
-                    el.on('hover:enter', function(e) { e.stopPropagation(); handleMenuAction(action); });
-                    menuList.append(el);
-                })(item.action, item.icon, item.title);
+            
+            var itemsToAdd = [];
+            
+            if (cfg().sections_enabled && sections.length) {
+                itemsToAdd.push({ action: 'sections', icon: '📌', title: 'Мои закладки' });
             }
-        }, 2000);
+            if (cfg().favorites_enabled) {
+                itemsToAdd.push({ action: 'favorites', icon: '⭐', title: 'Избранное' });
+            }
+            if (cfg().history_enabled) {
+                itemsToAdd.push({ action: 'history', icon: '📜', title: 'История' });
+            }
+            if (cfg().continue_watching) {
+                itemsToAdd.push({ action: 'continue', icon: '⏱️', title: 'Продолжить' });
+            }
+            
+            if (!itemsToAdd.length) return;
+            
+            menuList.append('<li class="menu__split nsl-menu-split"></li>');
+            
+            for (var i = 0; i < itemsToAdd.length; i++) {
+                var item = itemsToAdd[i];
+                var el = $('<li class="menu__item selector nsl-menu-item"><div class="menu__ico">' + item.icon + '</div><div class="menu__text">' + item.title + '</div></li>');
+                el.on('hover:enter', (function(action) {
+                    return function(e) { e.stopPropagation(); handleMenuAction(action); };
+                })(item.action));
+                menuList.append(el);
+            }
+            
+            menuItemsAdded = true;
+        }, 1500);
     }
 
     function handleMenuAction(action) {
         if (action === 'sections') {
-            if (sections.length === 0) { notify('📌 Нет сохранённых закладок'); return; }
+            if (!sections.length) { notify('📌 Нет сохранённых закладок'); return; }
             if (sections.length === 1) { openSection(sections[0]); return; }
             var items = [];
             for (var i = 0; i < sections.length; i++) {
@@ -1725,7 +1427,7 @@
                     items.push({ title: s.name, onSelect: function() { openSection(s); } });
                 })(sections[i]);
             }
-            Lampa.Select.show({ title: 'Мои закладки', items: items, onBack: function() { Lampa.Controller.toggle('content'); } });
+            Lampa.Select.show({ title: 'Мои закладки', items: items });
         } else if (action === 'favorites') {
             var items = [];
             for (var f = 0; f < FAVORITE_FOLDERS.length; f++) {
@@ -1734,16 +1436,16 @@
                 for (var i = 0; i < favorites.length; i++) {
                     if (favorites[i].media_type === folder.mediaType) count++;
                 }
-                (function(folderId, folderTitle, folderIcon) {
+                (function(folderId, folderTitle, folderIcon, cnt) {
                     items.push({ 
-                        title: folderIcon + ' ' + folderTitle + ' (' + count + ')', 
+                        title: folderIcon + ' ' + folderTitle + ' (' + cnt + ')', 
                         onSelect: function() { 
                             Lampa.Activity.push({ url: '', title: folderTitle, component: 'category', source: 'nsl_favorites', folder: folderId, page: 1 }); 
                         } 
                     });
-                })(folder.id, folder.title, folder.icon);
+                })(folder.id, folder.title, folder.icon, count);
             }
-            Lampa.Select.show({ title: 'Моё избранное', items: items, onBack: function() { Lampa.Controller.toggle('content'); } });
+            Lampa.Select.show({ title: 'Избранное', items: items });
         } else if (action === 'history') {
             var items = [];
             for (var h = 0; h < HISTORY_FILTERS.length; h++) {
@@ -1754,39 +1456,32 @@
                         if (history[i].media_type === filter.id) count++;
                     }
                 }
-                (function(filterId, filterTitle, filterIcon) {
+                (function(filterId, filterTitle, filterIcon, cnt) {
                     items.push({ 
-                        title: filterIcon + ' ' + filterTitle + ' (' + count + ')', 
+                        title: filterIcon + ' ' + filterTitle + ' (' + cnt + ')', 
                         onSelect: function() { 
                             Lampa.Activity.push({ url: '', title: filterTitle, component: 'category', source: 'nsl_history', filter: filterId, page: 1 }); 
                         } 
                     });
-                })(filter.id, filter.title, filter.icon);
+                })(filter.id, filter.title, filter.icon, count);
             }
-            Lampa.Select.show({ title: 'Моя история', items: items, onBack: function() { Lampa.Controller.toggle('content'); } });
-        } else if (action === 'collection') {
-            Lampa.Activity.push({ url: '', title: 'Коллекция', component: 'category', source: 'nsl_favorites', category: 'collection', page: 1 });
+            Lampa.Select.show({ title: 'История', items: items });
         } else if (action === 'continue') {
             Lampa.Activity.push({ url: '', title: 'Продолжить просмотр', component: 'category', source: 'nsl_continue', page: 1 });
         }
     }
 
-    // ИСПРАВЛЕНО: Кнопка на карточке без дублирования
+    // ============ КНОПКА НА КАРТОЧКЕ ============
     function addCardButton() {
         Lampa.Listener.follow('full', function(e) {
             if (e.type !== 'complite' || !cfg().favorites_enabled) return;
-
+            
             var container = $(e.body).find('.full-start-new__buttons');
-            if (!container.length) {
-                container = $(e.body).find('.full-start__buttons');
-            }
             if (!container.length) return;
-            
             if (container.find('.nsl-fav-btn').length) return;
-
-            var btn = $('<div class="full-start__button selector nsl-fav-btn"><div class="full-start__button-icon">⭐</div><div class="full-start__button-text">Добавить</div></div>');
-            btn.on('hover:enter', function() { showFavoriteMenu(e.data.movie); });
             
+            var btn = $('<div class="full-start__button selector nsl-fav-btn"><div class="full-start__button-icon">⭐</div><div class="full-start__button-text">В избранное</div></div>');
+            btn.on('hover:enter', function() { showFavoriteMenu(e.data.movie); });
             container.prepend(btn);
         });
     }
@@ -1798,8 +1493,7 @@
                 var data = params.folder ? getFavoritesByFolder(params.folder) : getFavoritesByCategory(params.category || 'favorite');
                 var page = params.page || 1;
                 oncomplite({ results: data.slice((page-1)*20, page*20), total_pages: Math.ceil(data.length/20), page: page });
-            },
-            full: function(params, oncomplite) { Lampa.Api.sources.tmdb.full(params, oncomplite, function() {}); }
+            }
         };
         
         Lampa.Api.sources.nsl_history = {
@@ -1807,8 +1501,7 @@
                 var data = getHistoryByFilter(params.filter || 'all');
                 var page = params.page || 1;
                 oncomplite({ results: data.slice((page-1)*20, page*20), total_pages: Math.ceil(data.length/20), page: page });
-            },
-            full: function(params, oncomplite) { Lampa.Api.sources.tmdb.full(params, oncomplite, function() {}); }
+            }
         };
         
         Lampa.Api.sources.nsl_continue = {
@@ -1816,19 +1509,18 @@
                 var data = getContinueWatching();
                 var page = params.page || 1;
                 oncomplite({ results: data.slice((page-1)*20, page*20), total_pages: Math.ceil(data.length/20), page: page });
-            },
-            full: function(params, oncomplite) { Lampa.Api.sources.tmdb.full(params, oncomplite, function() {}); }
+            }
         };
     }
 
     // ============ ФОНОВЫЕ ЗАДАЧИ ============
     function startBackgroundTasks() {
         var c = cfg();
+        if (autoSyncInterval) clearInterval(autoSyncInterval);
         
         autoSyncInterval = setInterval(function() {
             if (!syncInProgress && c.auto_sync && c.enabled && !Lampa.Player.opened()) {
                 syncAll(false);
-                checkAutoMoveToDropped();
                 cleanupOldRecords(false);
             }
         }, c.sync_interval * 1000);
@@ -1857,8 +1549,6 @@
 
     // ============ ИНИЦИАЛИЗАЦИЯ ============
     function init() {
-        isV3 = Lampa.Manifest && Lampa.Manifest.app_digital >= 300;
-        
         protectFileView();
         loadSections();
         loadFavorites();
@@ -1886,9 +1576,9 @@
             startBackgroundTasks();
             
             if (c.auto_sync) setTimeout(function() { syncAll(false); }, 3000);
-            if (!c.cub_import_done && c.gist_token) setTimeout(importFromCUB, 2000);
+            if (!c.cub_import_done) setTimeout(importFromCUB, 2000);
             
-            console.log('[NSL] ✅ v' + SYNC_VERSION + ' загружен');
+            console.log('[NSL] ✅ Загружен');
             notify('🚀 NSL Sync v' + SYNC_VERSION + ' загружен');
         }, 500);
     }
