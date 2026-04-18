@@ -1679,6 +1679,54 @@
         });
     }
 
+    // ВРЕМЕННЫЕ ОТЛАДОЧНЫЕ ФУНКЦИИ (добавьте перед init())
+    window.nslTest = {
+        getFavoritesByFolder: function(folderId) {
+            var folder = null;
+            for (var i = 0; i < FAVORITE_FOLDERS.length; i++) {
+                if (FAVORITE_FOLDERS[i].id === folderId) {
+                    folder = FAVORITE_FOLDERS[i];
+                    break;
+                }
+            }
+            if (!folder) return [];
+            
+            var result = [];
+            for (var j = 0; j < favorites.length; j++) {
+                if (favorites[j].media_type === folder.mediaType) {
+                    result.push(favorites[j].data);
+                }
+            }
+            return result;
+        },
+        getFavoritesByCategory: function(category) {
+            var result = [];
+            for (var i = 0; i < favorites.length; i++) {
+                if (favorites[i].category === category) {
+                    result.push(favorites[i].data);
+                }
+            }
+            return result;
+        },
+        testSource: function() {
+            console.log('=== ТЕСТ ИСТОЧНИКА ===');
+            var data = this.getFavoritesByCategory('favorite');
+            console.log('data:', data);
+            console.log('isArray:', Array.isArray(data));
+            console.log('length:', data.length);
+            
+            // Имитируем ответ источника
+            var result = {
+                results: data,
+                total_pages: 1,
+                page: 1
+            };
+            console.log('result:', result);
+            console.log('result.results isArray:', Array.isArray(result.results));
+            return result;
+        }
+    };
+    
     // ============ ИНИЦИАЛИЗАЦИЯ ============
     function init() {
         protectFileView();
