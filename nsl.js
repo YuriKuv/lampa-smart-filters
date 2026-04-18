@@ -1601,11 +1601,7 @@
                     }
                 }
                 
-                // КРИТИЧНО: убеждаемся, что items - это МАССИВ
-                if (!Array.isArray(items)) {
-                    console.error('[NSL] items is not array!', items);
-                    items = [];
-                }
+                if (!Array.isArray(items)) items = [];
                 
                 console.log('[NSL] nsl_favorites got', items.length, 'items');
                 
@@ -1616,19 +1612,26 @@
                 var end = start + limit;
                 var paginated = items.slice(start, end);
                 
-                // ВАЖНО: результат должен быть объектом с полем results (массив)
+                // КРИТИЧЕСКИ ВАЖНО: Lampa ожидает, что results - это массив объектов с полем 'data'?
+                // Попробуем обернуть каждый элемент
+                var wrappedResults = [];
+                for (var i = 0; i < paginated.length; i++) {
+                    wrappedResults.push({
+                        data: paginated[i]
+                    });
+                }
+                
                 var response = {
-                    results: paginated,
+                    results: wrappedResults,  // <-- Оборачиваем в {data: ...}
                     total_pages: Math.ceil(items.length / limit),
                     page: page
                 };
                 
-                console.log('[NSL] nsl_favorites response:', response.results.length, 'results');
+                console.log('[NSL] nsl_favorites response:', response.results.length, 'results (wrapped)');
                 oncomplite(response);
             }
         };
         
-        // Аналогично для history
         Lampa.Api.sources.nsl_history = {
             category: function(params, oncomplite) {
                 console.log('[NSL] nsl_history called, params:', params);
@@ -1654,14 +1657,23 @@
                 var limit = 20;
                 var start = (page - 1) * limit;
                 var end = start + limit;
+                var paginated = items.slice(start, end);
+                
+                // Оборачиваем каждый элемент
+                var wrappedResults = [];
+                for (var i = 0; i < paginated.length; i++) {
+                    wrappedResults.push({
+                        data: paginated[i]
+                    });
+                }
                 
                 var response = {
-                    results: items.slice(start, end),
+                    results: wrappedResults,
                     total_pages: Math.ceil(items.length / limit),
                     page: page
                 };
                 
-                console.log('[NSL] nsl_history response:', response.results.length, 'results');
+                console.log('[NSL] nsl_history response:', response.results.length, 'results (wrapped)');
                 oncomplite(response);
             }
         };
@@ -1675,9 +1687,17 @@
                 var limit = 20;
                 var start = (page - 1) * limit;
                 var end = start + limit;
+                var paginated = items.slice(start, end);
+                
+                var wrappedResults = [];
+                for (var i = 0; i < paginated.length; i++) {
+                    wrappedResults.push({
+                        data: paginated[i]
+                    });
+                }
                 
                 oncomplite({
-                    results: items.slice(start, end),
+                    results: wrappedResults,
                     total_pages: Math.ceil(items.length / limit),
                     page: page
                 });
