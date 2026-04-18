@@ -1,6 +1,14 @@
 (function () {
     'use strict';
 
+    // Временная отладка
+    window.nslDebug = {
+        getFavorites: function() { return favorites; },
+        getHistory: function() { return history; },
+        getSections: function() { return sections; },
+        getTimeline: function() { return timeline; }
+    };
+    
     if (window.nsl_sync_init) return;
     window.nsl_sync_init = true;
 
@@ -263,39 +271,46 @@
 
     // ============ ЗАГРУЗКА ДАННЫХ ============
     function loadSections() {
-        sections = Lampa.Storage.get(getStorageKey(STORAGE_KEYS.sections), []);
+        var stored = Lampa.Storage.get(getStorageKey(STORAGE_KEYS.sections), []);
+        sections = Array.isArray(stored) ? stored : [];
         return sections;
     }
 
     function saveSections() {
+        if (!Array.isArray(sections)) sections = [];
         Lampa.Storage.set(getStorageKey(STORAGE_KEYS.sections), sections, true);
         renderSectionsMenu();
         if (cfg().auto_sync) syncFile('sections', sections);
     }
 
     function loadFavorites() {
-        favorites = Lampa.Storage.get(getStorageKey(STORAGE_KEYS.favorites), []);
+        var stored = Lampa.Storage.get(getStorageKey(STORAGE_KEYS.favorites), []);
+        favorites = Array.isArray(stored) ? stored : [];
         return favorites;
     }
 
     function saveFavorites() {
+        if (!Array.isArray(favorites)) favorites = [];
         Lampa.Storage.set(getStorageKey(STORAGE_KEYS.favorites), favorites, true);
         if (cfg().auto_sync) syncFile('favorites', favorites);
     }
 
     function loadHistory() {
-        history = Lampa.Storage.get(getStorageKey(STORAGE_KEYS.history), []);
+        var stored = Lampa.Storage.get(getStorageKey(STORAGE_KEYS.history), []);
+        history = Array.isArray(stored) ? stored : [];
         return history;
     }
 
     function saveHistory() {
+        if (!Array.isArray(history)) history = [];
         Lampa.Storage.set(getStorageKey(STORAGE_KEYS.history), history, true);
         if (cfg().auto_sync) syncFile('history', history);
     }
 
     function loadTimeline() {
         var key = getStorageKey(STORAGE_KEYS.timeline);
-        timeline = Lampa.Storage.get(key, {});
+        var stored = Lampa.Storage.get(key, {});
+        timeline = (stored && typeof stored === 'object') ? stored : {};
         protectedTimeline = JSON.parse(JSON.stringify(timeline));
         return timeline;
     }
