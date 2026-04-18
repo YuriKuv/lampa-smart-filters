@@ -6,7 +6,7 @@
 
     // ============ КОНФИГУРАЦИЯ ============
     const CFG_KEY = 'nsl_sync_cfg';
-    const SYNC_VERSION = 13;
+    const SYNC_VERSION = 14;
     
     const STORAGE_KEYS = {
         sections: 'nsl_sections',
@@ -64,6 +64,7 @@
     let endCreditsDetected = false;
     let lastPosition = 0;
     let menuItemsAdded = false;
+    let cardButtonObserver = null;
 
     // ============ УТИЛИТЫ ============
     function cfg() {
@@ -91,9 +92,7 @@
             gist_id: '',
             device_name: Lampa.Platform ? Lampa.Platform.get() : 'Unknown',
             manual_profile_id: '',
-            cub_import_done: false,
-            use_proxy: false,
-            proxy_url: 'https://api.allorigins.win/raw?url='
+            cub_import_done: false
         }) || {};
     }
 
@@ -105,8 +104,6 @@
         timeout = timeout || 3000;
         if (Lampa.Noty && Lampa.Noty.show) {
             Lampa.Noty.show(text, timeout);
-        } else {
-            console.log('[NSL] ' + text);
         }
     }
 
@@ -347,10 +344,7 @@
         if (hasChanges) {
             timeline = newTimeline;
             saveTimeline();
-            
-            if (showNotify) {
-                notify('🧹 Удалено: ' + cleaned + ' старых, ' + completedCleaned + ' завершённых');
-            }
+            if (showNotify) notify('🧹 Удалено: ' + cleaned + ' старых, ' + completedCleaned + ' завершённых');
         } else if (showNotify) {
             notify('🧹 Нет записей для очистки');
         }
@@ -431,6 +425,7 @@
         sections = newSections;
         saveSections();
         notify('🗑️ Закладка удалена');
+        renderSectionsMenu();
     }
 
     function openSection(item) {
@@ -596,7 +591,6 @@
 
     function showFavoriteMenu(card) {
         var items = [];
-        var self = this;
         
         for (var cat in FAVORITE_CATEGORIES) {
             if (!FAVORITE_CATEGORIES.hasOwnProperty(cat)) continue;
@@ -723,7 +717,7 @@
         
         var style = document.createElement('style');
         style.id = 'nsl-timeline-styles';
-        style.textContent = '.card .card-watched { display: block !important; opacity: 1 !important; visibility: visible !important; pointer-events: none; ' + posStyles + ' left: 0.8em !important; right: 0.8em !important; z-index: 5 !important; background-color: rgba(0, 0, 0, 0.7) !important; -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); font-size: 0.9em; padding: 0.2em 0.5em; border-radius: 0.3em; text-align: center; } .card:not(.focus) .card-watched { display: block !important; opacity: 0.8 !important; } .card-watched[style*="display: none"] { display: block !important; }';
+        style.textContent = '.card .card-watched { display: block !important; opacity: 1 !important; visibility: visible !important; pointer-events: none; ' + posStyles + ' left: 0.8em !important; right: 0.8em !important; z-index: 5 !important; background-color: rgba(0, 0, 0, 0.7) !important; -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); font-size: 0.9em; padding: 0.2em 0.5em; border-radius: 0.3em; text-align: center; } .card:not(.focus) .card-watched { display: block !important; opacity: 0.8 !important; }';
         document.head.appendChild(style);
         styleInjected = true;
     }
@@ -1048,10 +1042,9 @@
                 try {
                     var data = JSON.parse(e.target.result);
                     if (data.timeline) { timeline = data.timeline; saveTimeline(); }
-                    if (data.sections) { sections = data.sections; saveSections(); }
+                    if (data.sections) { sections = data.sections; saveSections(); renderSectionsMenu(); }
                     if (data.favorites) { favorites = data.favorites; saveFavorites(); }
                     if (data.history) { history = data.history; saveHistory(); }
-                    renderSectionsMenu();
                     notify('📥 Данные импортированы');
                 } catch(err) {
                     notify('❌ Ошибка импорта');
@@ -1176,10 +1169,12 @@
                         renderSectionsMenu();
                         addMenuItems();
                         startBackgroundTasks();
+                        startCardButtonObserver();
                     } else {
                         stopPlayerHandler();
                         removeTimelineStyles();
-                        $('.nsl-section-add, .nsl-section-item, .nsl-menu-item').remove();
+                        stopCardButtonObserver();
+                        $('.nsl-section-add, .nsl-section-item, .nsl-menu-item, .nsl-fav-btn').remove();
                     }
                     notify('Плагин ' + (c.enabled ? 'включен' : 'выключен'));
                     showMainMenu();
@@ -1376,7 +1371,7 @@
         if (menuItemsAdded) return;
         
         setTimeout(function() {
-            $('.nsl-menu-item').remove();
+            $('.nsl-menu-item, .nsl-menu-split').remove();
             if (!cfg().enabled) return;
             
             var menuList = $('.menu .menu__list').eq(0);
@@ -1471,19 +1466,56 @@
         }
     }
 
-    // ============ КНОПКА НА КАРТОЧКЕ ============
-    function addCardButton() {
-        Lampa.Listener.follow('full', function(e) {
-            if (e.type !== 'complite' || !cfg().favorites_enabled) return;
-            
-            var container = $(e.body).find('.full-start-new__buttons');
-            if (!container.length) return;
-            if (container.find('.nsl-fav-btn').length) return;
-            
-            var btn = $('<div class="full-start__button selector nsl-fav-btn"><div class="full-start__button-icon">⭐</div><div class="full-start__button-text">В избранное</div></div>');
-            btn.on('hover:enter', function() { showFavoriteMenu(e.data.movie); });
-            container.prepend(btn);
+    // ============ КНОПКА НА КАРТОЧКЕ — НОВАЯ ВЕРСИЯ С MUTATION OBSERVER ============
+    function addCardButtonToContainer(container, movie) {
+        if (!container || container.querySelector('.nsl-fav-btn')) return false;
+        
+        var btn = document.createElement('div');
+        btn.className = 'full-start__button selector nsl-fav-btn';
+        btn.innerHTML = '<div class="full-start__button-icon">⭐</div><div class="full-start__button-text">В избранное</div>';
+        
+        $(btn).on('hover:enter', function() { showFavoriteMenu(movie); });
+        
+        container.insertBefore(btn, container.firstChild);
+        console.log('[NSL] Кнопка добавлена в карточку');
+        return true;
+    }
+    
+    function startCardButtonObserver() {
+        if (cardButtonObserver) cardButtonObserver.disconnect();
+        
+        // Наблюдаем за появлением контейнера с кнопками
+        cardButtonObserver = new MutationObserver(function(mutations) {
+            var container = document.querySelector('.full-start-new__buttons');
+            if (container && !container.querySelector('.nsl-fav-btn')) {
+                var activity = Lampa.Activity.active();
+                var movie = activity && activity.movie;
+                if (movie) {
+                    addCardButtonToContainer(container, movie);
+                }
+            }
         });
+        
+        cardButtonObserver.observe(document.body, { childList: true, subtree: true });
+        
+        // Также слушаем событие full
+        Lampa.Listener.follow('full', function(e) {
+            if (e.type === 'complite' && cfg().favorites_enabled) {
+                setTimeout(function() {
+                    var container = document.querySelector('.full-start-new__buttons');
+                    if (container && !container.querySelector('.nsl-fav-btn') && e.data && e.data.movie) {
+                        addCardButtonToContainer(container, e.data.movie);
+                    }
+                }, 100);
+            }
+        });
+    }
+    
+    function stopCardButtonObserver() {
+        if (cardButtonObserver) {
+            cardButtonObserver.disconnect();
+            cardButtonObserver = null;
+        }
     }
 
     // ============ РЕГИСТРАЦИЯ ИСТОЧНИКОВ ============
@@ -1572,7 +1604,7 @@
             addSectionButton();
             renderSectionsMenu();
             addMenuItems();
-            addCardButton();
+            startCardButtonObserver();
             startBackgroundTasks();
             
             if (c.auto_sync) setTimeout(function() { syncAll(false); }, 3000);
