@@ -81,10 +81,10 @@
             end_credits_threshold: 180,
             sections_enabled: true,
             sections_button: 'side',
-            favorites_enabled: true,
+            favorites_enabled: true,      // <-- ДОБАВЛЕНО
             auto_move_dropped: false,
             auto_move_dropped_days: 30,
-            history_enabled: true,
+            history_enabled: true,         // <-- ДОБАВЛЕНО
             continue_watching: true,
             continue_min_progress: 5,
             continue_max_progress: 95,
@@ -92,7 +92,9 @@
             gist_id: '',
             device_name: Lampa.Platform ? Lampa.Platform.get() : 'Unknown',
             manual_profile_id: '',
-            cub_import_done: false
+            cub_import_done: false,
+            use_proxy: false,
+            proxy_url: 'https://api.allorigins.win/raw?url='
         }) || {};
     }
 
@@ -1149,7 +1151,7 @@
             { title: '⭐ Избранное (' + stats.favorites + ')', action: 'submenu_favorites' },
             { title: '📜 История (' + stats.history + ')', action: 'submenu_history' },
             { title: '⏱️ Таймкоды (' + stats.timeline + ')', action: 'submenu_timeline' },
-            { title: '⏱️ Продолжить', action: 'submenu_continue' },
+            { title: '⏱️ Продолжить просмотр', action: 'submenu_continue' },
             { title: '☁️ GitHub Gist', action: 'submenu_gist' },
             { title: '──────────', separator: true },
             { title: '🔄 Синхронизировать сейчас', action: 'sync_now' },
@@ -1160,6 +1162,8 @@
             title: 'NSL Sync v' + SYNC_VERSION,
             items: items,
             onSelect: function(item) {
+                var c = cfg();
+                
                 if (item.action === 'toggle_enabled') {
                     c.enabled = !c.enabled; saveCfg(c);
                     if (c.enabled) {
@@ -1186,7 +1190,8 @@
                 else if (item.action === 'submenu_gist') showGistMenu();
                 else if (item.action === 'sync_now') { Lampa.Controller.toggle('content'); syncAll(true); }
                 else if (item.action === 'cancel') Lampa.Controller.toggle('content');
-            }
+            },
+            onBack: function() { Lampa.Controller.toggle('content'); }
         });
     }
     
@@ -1221,21 +1226,41 @@
         Lampa.Select.show({
             title: 'Избранное',
             items: [
+                { title: '⭐ Показывать в меню: ' + (c.favorites_enabled ? 'Вкл' : 'Выкл'), action: 'toggle_favorites_menu' },
                 { title: '🔄 Авто в Брошено: ' + (c.auto_move_dropped ? 'Вкл' : 'Выкл'), action: 'toggle_auto_dropped' },
                 { title: '📅 Дней до Брошено: ' + c.auto_move_dropped_days, action: 'set_dropped_days' },
-                { title: '🗑️ Очистить всё', action: 'clear_favorites' },
+                { title: '🗑️ Очистить всё (' + favorites.length + ')', action: 'clear_favorites' },
                 { title: '──────────', separator: true },
                 { title: '◀ Назад', action: 'back' }
             ],
             onSelect: function(item) {
-                if (item.action === 'toggle_auto_dropped') { c.auto_move_dropped = !c.auto_move_dropped; saveCfg(c); showFavoritesMenu(); }
-                else if (item.action === 'set_dropped_days') {
+                var c = cfg();
+                if (item.action === 'toggle_favorites_menu') {
+                    c.favorites_enabled = !c.favorites_enabled; 
+                    saveCfg(c);
+                    menuItemsAdded = false;
+                    addMenuItems();
+                    showFavoritesMenu();
+                } else if (item.action === 'toggle_auto_dropped') { 
+                    c.auto_move_dropped = !c.auto_move_dropped; 
+                    saveCfg(c); 
+                    showFavoritesMenu(); 
+                } else if (item.action === 'set_dropped_days') {
                     Lampa.Input.edit({ title: 'Дней до Брошено', value: String(c.auto_move_dropped_days), free: true, number: true }, function(v) {
-                        if (v && !isNaN(v) && v > 0) { c.auto_move_dropped_days = parseInt(v); saveCfg(c); }
+                        if (v && !isNaN(v) && v > 0) { 
+                            c.auto_move_dropped_days = parseInt(v); 
+                            saveCfg(c); 
+                        }
                         showFavoritesMenu();
                     });
-                } else if (item.action === 'clear_favorites') { favorites = []; saveFavorites(); notify('✅ Избранное очищено'); showFavoritesMenu(); }
-                else if (item.action === 'back') showMainMenu();
+                } else if (item.action === 'clear_favorites') { 
+                    favorites = []; 
+                    saveFavorites(); 
+                    notify('✅ Избранное очищено'); 
+                    showFavoritesMenu(); 
+                } else if (item.action === 'back') {
+                    showMainMenu();
+                }
             }
         });
     }
@@ -1367,7 +1392,7 @@
     }
 
     // ============ БОКОВОЕ МЕНЮ ============
-    function addMenuItems() {
+        function addMenuItems() {
         if (menuItemsAdded) return;
         
         setTimeout(function() {
@@ -1382,16 +1407,17 @@
             
             var itemsToAdd = [];
             
-            if (cfg().sections_enabled && sections.length) {
-                itemsToAdd.push({ action: 'sections', icon: '📌', title: 'Мои закладки' });
+            // Проверяем наличие данных
+            if (sections.length) {
+                itemsToAdd.push({ action: 'sections', icon: '📌', title: 'Мои закладки (' + sections.length + ')' });
             }
-            if (cfg().favorites_enabled) {
-                itemsToAdd.push({ action: 'favorites', icon: '⭐', title: 'Избранное' });
-            }
-            if (cfg().history_enabled) {
-                itemsToAdd.push({ action: 'history', icon: '📜', title: 'История' });
-            }
-            if (cfg().continue_watching) {
+            
+            // Всегда показываем избранное и историю, если есть настройка
+            var c = cfg();
+            itemsToAdd.push({ action: 'favorites', icon: '⭐', title: 'Избранное (' + favorites.length + ')' });
+            itemsToAdd.push({ action: 'history', icon: '📜', title: 'История (' + history.length + ')' });
+            
+            if (c.continue_watching) {
                 itemsToAdd.push({ action: 'continue', icon: '⏱️', title: 'Продолжить' });
             }
             
@@ -1409,6 +1435,7 @@
             }
             
             menuItemsAdded = true;
+            console.log('[NSL] Пункты меню добавлены:', itemsToAdd.length);
         }, 1500);
     }
 
@@ -1482,31 +1509,37 @@
     }
     
     function startCardButtonObserver() {
-        if (cardButtonObserver) cardButtonObserver.disconnect();
-        
-        // Наблюдаем за появлением контейнера с кнопками
-        cardButtonObserver = new MutationObserver(function(mutations) {
-            var container = document.querySelector('.full-start-new__buttons');
-            if (container && !container.querySelector('.nsl-fav-btn')) {
-                var activity = Lampa.Activity.active();
-                var movie = activity && activity.movie;
-                if (movie) {
-                    addCardButtonToContainer(container, movie);
-                }
-            }
-        });
-        
-        cardButtonObserver.observe(document.body, { childList: true, subtree: true });
-        
-        // Также слушаем событие full
+        // Слушаем событие full
         Lampa.Listener.follow('full', function(e) {
-            if (e.type === 'complite' && cfg().favorites_enabled) {
+            if (e.type === 'complite' && cfg().enabled) {
+                // Даем время на рендер DOM
                 setTimeout(function() {
                     var container = document.querySelector('.full-start-new__buttons');
-                    if (container && !container.querySelector('.nsl-fav-btn') && e.data && e.data.movie) {
-                        addCardButtonToContainer(container, e.data.movie);
+                    if (container && !container.querySelector('.nsl-fav-btn')) {
+                        // Получаем фильм из act.card (правильное место!)
+                        var act = Lampa.Activity.active();
+                        var movie = act && act.card;
+                        
+                        if (movie) {
+                            var btn = document.createElement('div');
+                            btn.className = 'full-start__button selector nsl-fav-btn';
+                            btn.innerHTML = '<div class="full-start__button-icon">⭐</div><div class="full-start__button-text">В избранное</div>';
+                            
+                            // Сохраняем movie в замыкании
+                            (function(m) {
+                                $(btn).on('hover:enter', function() { 
+                                    console.log('[NSL] Кнопка нажата, фильм:', m.title || m.name);
+                                    showFavoriteMenu(m); 
+                                });
+                            })(movie);
+                            
+                            container.insertBefore(btn, container.firstChild);
+                            console.log('[NSL] Кнопка добавлена в карточку для:', movie.title || movie.name);
+                        } else {
+                            console.log('[NSL] Не удалось получить фильм из Activity');
+                        }
                     }
-                }, 100);
+                }, 300);
             }
         });
     }
