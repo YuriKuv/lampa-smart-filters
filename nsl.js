@@ -73,6 +73,7 @@
     let lastPosition = 0;
     let menuItemsAdded = false;
     let cardButtonObserver = null;
+    let lock = false;
 
     // ============ УТИЛИТЫ ============
     function cfg() {
@@ -368,17 +369,30 @@
     }
 
     // ============ ЗАКЛАДКИ РАЗДЕЛОВ ============
-    function isSectionAllowed() {
-        var act = Lampa.Activity.active();
-        if (!act) return false;
-        if (act.component === 'actor' || act.component === 'person') return true;
-        if (!act.url) return false;
-        if (act.url === 'movie' || act.url === 'tv' || act.url === 'anime' || act.url === 'catalog') {
-            return !!(act.genres || act.params || act.filter);
-        }
-        return !!(act.params || act.genres || act.sort || act.filter) || 
-               (act.url.indexOf('discover') !== -1 && act.url.indexOf('?') !== -1);
+// ============ ЗАКЛАДКИ РАЗДЕЛОВ (РАБОЧАЯ ВЕРСИЯ) ============
+
+function isSectionAllowed() {
+    var act = Lampa.Activity.active();
+    if (!act) return false;
+    
+    // Персоны
+    if (act.component === 'actor' || act.component === 'person') return true;
+    
+    if (!act.url) return false;
+    
+    // Базовые разделы — нельзя
+    if (act.url === 'movie' || act.url === 'tv' || act.url === 'anime' || act.url === 'catalog') {
+        return false;
     }
+    
+    // Фильтры и категории
+    if (act.params || act.genres || act.sort || act.filter) return true;
+    
+    // Discover
+    if (act.url.indexOf('discover') !== -1 && act.url.indexOf('?') !== -1) return true;
+    
+    return false;
+}
 
     function makeSectionKey(act) {
         return [
@@ -386,11 +400,12 @@
             act.component || '',
             act.source || '',
             act.id || '',
+            act.job || '',
             JSON.stringify(act.genres || ''),
             JSON.stringify(act.params || '')
         ].join('|');
     }
-
+    
     function sectionExists(act) {
         var key = makeSectionKey(act);
         for (var i = 0; i < sections.length; i++) {
@@ -398,24 +413,36 @@
         }
         return false;
     }
-
+    
     function addSection() {
+        if (lock) return;
+        lock = true;
+        
         var act = Lampa.Activity.active();
+        
         if (!isSectionAllowed()) {
             notify('⚠️ Здесь нельзя создать закладку');
+            lock = false;
             return;
         }
+        
         if (sectionExists(act)) {
             notify('📌 Уже есть в закладках');
+            lock = false;
             return;
         }
+        
         Lampa.Input.edit({
             title: 'Название закладки',
             value: act.title || act.name || 'Закладка'
         }, function(val) {
-            if (!val) return;
+            if (!val) {
+                lock = false;
+                return;
+            }
+            
             sections.unshift({
-                id: generateId(),
+                id: Date.now(),
                 key: makeSectionKey(act),
                 name: val.trim(),
                 url: act.url,
@@ -428,12 +455,16 @@
                 page: act.page || 1,
                 created: Date.now()
             });
+            
             if (sections.length > 50) sections = sections.slice(0, 50);
             saveSections();
             notify('✅ Закладка сохранена');
+            lock = false;
+        }, function() {
+            lock = false;
         });
     }
-
+    
     function removeSection(item) {
         var newSections = [];
         for (var i = 0; i < sections.length; i++) {
@@ -442,9 +473,8 @@
         sections = newSections;
         saveSections();
         notify('🗑️ Закладка удалена');
-        renderSectionsMenu();
     }
-
+    
     function openSection(item) {
         Lampa.Activity.push({
             url: item.url,
@@ -458,7 +488,7 @@
             page: item.page
         });
     }
-
+    
     function renderSectionsMenu() {
         $('.nsl-section-item, .nsl-split-sections').remove();
         if (!cfg().sections_enabled || !sections.length) return;
@@ -489,40 +519,31 @@
             })(item);
         }
     }
-
+    
     function addSectionButton() {
         if (!cfg().sections_enabled) return;
+        if ($('[data-nsl-section]').length) return;
         
         var c = cfg();
         
         setTimeout(function() {
             if (c.sections_button === 'top') {
-                if (Lampa.Head && Lampa.Head.addIcon) {
-                    Lampa.Head.addIcon(
-                        '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/></svg>',
-                        addSection
-                    );
-                }
+                var head = $('.head__actions, .head__buttons').first();
+                if (!head.length) return;
+                
+                var btn = $('<div class="head__action selector" data-nsl-section><div class="head__action-ico">📌</div></div>');
+                btn.on('hover:enter', function(e) { e.stopPropagation(); addSection(); });
+                head.prepend(btn);
             } else {
                 var menuList = $('.menu .menu__list').eq(1);
                 if (!menuList.length) menuList = $('.menu .menu__list').eq(0);
-                if (!menuList.length || $('.nsl-section-add').length) return;
+                if (!menuList.length) return;
                 
-                var btn = $('<li class="menu__item selector nsl-section-add"><div class="menu__ico">📌</div><div class="menu__text">Добавить закладку</div></li>');
-                btn.on('hover:enter', addSection);
-                menuList.append(btn);
+                var btn = $('<li class="menu__item selector" data-nsl-section><div class="menu__ico">📌</div><div class="menu__text">Добавить закладку</div></li>');
+                btn.on('hover:enter', function(e) { e.stopPropagation(); addSection(); });
+                menuList.prepend(btn);
             }
-        }, 2000);
-    }
-    
-    function escapeHtml(str) {
-        if (!str) return '';
-        return str.replace(/[&<>]/g, function(m) {
-            if (m === '&') return '&amp;';
-            if (m === '<') return '&lt;';
-            if (m === '>') return '&gt;';
-            return m;
-        });
+        }, 1000);
     }
 
     // ============ ИЗБРАННОЕ ============
