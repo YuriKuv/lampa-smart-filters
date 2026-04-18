@@ -470,7 +470,8 @@
         $('.nsl-section-item, .nsl-split-sections').remove();
         if (!cfg().sections_enabled || !sections.length) return;
         
-        const menuList = $('.menu__list').eq(0);
+        // Ищем основной список меню. В Lampa он обычно один с классом 'menu__list' внутри контейнера '.menu'
+        const menuList = $('.menu .menu__list').eq(0);
         if (!menuList.length) return;
         
         menuList.append('<li class="menu__split nsl-split-sections"></li>');
@@ -498,22 +499,24 @@
         
         const c = cfg();
         
-        if (c.sections_button === 'top') {
-            if (!Lampa.Head) return;
-            Lampa.Head.addIcon(
-                '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/></svg>',
-                addSection
-            );
-        } else {
-            setTimeout(() => {
-                const menuList = $('.menu__list').eq(1);
+        // Ждем, пока Lampa.Head будет полностью инициализирован
+        setTimeout(() => {
+            if (c.sections_button === 'top') {
+                if (!Lampa.Head) return;
+                Lampa.Head.addIcon(
+                    '<svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/></svg>',
+                    addSection
+                );
+            } else {
+                // Ищем контейнер для кнопки в боковом меню
+                const menuList = $('.menu .menu__list').eq(1); // Второй список - это часто нижнее меню
                 if (!menuList.length || $('.nsl-section-add').length) return;
                 
                 const btn = $(`<li class="menu__item selector nsl-section-add"><div class="menu__ico">📌</div><div class="menu__text">Добавить закладку</div></li>`);
                 btn.on('hover:enter', addSection);
                 menuList.prepend(btn);
-            }, 500);
-        }
+            }
+        }, 2000);
     }
 
     // ============ ИЗБРАННОЕ ============
@@ -1163,7 +1166,7 @@
             { title: '──────────', separator: true },
             { title: '🔄 Синхронизировать сейчас', action: 'sync_now' },
             { title: '❌ Закрыть', action: 'cancel' }
-        );
+        ];
         
         Lampa.Select.show({
             title: 'NSL Sync v' + SYNC_VERSION,
@@ -1352,15 +1355,22 @@
 
     // ============ БОКОВОЕ МЕНЮ ============
     function addMenuItems() {
+        // Ждем 2 секунды, чтобы DOM точно был готов
         setTimeout(() => {
             $('.nsl-menu-item, .nsl-menu-split').remove();
             if (!cfg().enabled) return;
-            
-            const menuList = $('.menu__list').eq(0);
-            if (!menuList.length) return;
-            
+
+            // Ищем основной список меню. 
+            // В Lampa он обычно один с классом 'menu__list' внутри контейнера '.menu'
+            const menuList = $('.menu .menu__list').eq(0);
+            if (!menuList.length) {
+                console.warn('[NSL] Menu list not found');
+                return;
+            }
+
+            // Добавляем разделитель
             menuList.append('<li class="menu__split nsl-menu-split"></li>');
-            
+
             const items = [
                 { action: 'sections', icon: '📌', title: 'Мои закладки', enabled: cfg().sections_enabled },
                 { action: 'favorites', icon: '⭐', title: 'Моё избранное', enabled: cfg().favorites_enabled },
@@ -1368,14 +1378,14 @@
                 { action: 'collection', icon: '📦', title: 'Коллекция', enabled: cfg().favorites_enabled },
                 { action: 'continue', icon: '⏱️', title: 'Продолжить', enabled: cfg().continue_watching }
             ];
-            
+
             items.forEach(item => {
                 if (!item.enabled) return;
                 const el = $(`<li class="menu__item selector nsl-menu-item" data-nsl="${item.action}"><div class="menu__ico">${item.icon}</div><div class="menu__text">${item.title}</div></li>`);
                 el.on('hover:enter', (e) => { e.stopPropagation(); handleMenuAction(item.action); });
                 menuList.append(el);
             });
-        }, 500);
+        }, 2000);
     }
 
     function handleMenuAction(action) {
@@ -1409,15 +1419,15 @@
     function addCardButton() {
         Lampa.Listener.follow('full', (e) => {
             if (e.type !== 'complite' || !cfg().favorites_enabled) return;
-            
-            const start = e.link.items?.find(i => i.constructor.name === 'Start');
-            if (!start) return;
-            
-            const container = start.html.find('.full-start-new__buttons');
+
+            // Более надежный поиск контейнера для кнопок
+            const container = $(e.body).find('.full-start-new__buttons');
             if (!container.length || container.find('.nsl-fav-btn').length) return;
-            
+
             const btn = $(`<div class="full-start__button selector nsl-fav-btn"><div class="full-start__button-icon">⭐</div><div class="full-start__button-text">Добавить</div></div>`);
             btn.on('hover:enter', () => showFavoriteMenu(e.data.movie));
+            
+            // Вставляем кнопку в начало контейнера
             container.prepend(btn);
         });
     }
