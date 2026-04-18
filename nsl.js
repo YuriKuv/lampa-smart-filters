@@ -1574,7 +1574,7 @@
             category: function(params, oncomplite) {
                 console.log('[NSL] nsl_favorites called, params:', params);
                 
-                var items = [];
+                var items = []; // это будут карточки
                 
                 if (params.folder) {
                     var folder = null;
@@ -1587,8 +1587,8 @@
                     if (folder) {
                         for (var j = 0; j < favorites.length; j++) {
                             if (favorites[j].media_type === folder.mediaType) {
-                                // КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: оборачиваем data в объект
-                                items.push({ data: favorites[j].data });
+                                // ПРЯМО добавляем data, без обёртки
+                                items.push(favorites[j].data);
                             }
                         }
                     }
@@ -1596,14 +1596,15 @@
                     var category = params.category || 'favorite';
                     for (var k = 0; k < favorites.length; k++) {
                         if (favorites[k].category === category) {
-                            items.push({ data: favorites[k].data });
+                            items.push(favorites[k].data);
                         }
                     }
                 }
                 
                 if (!Array.isArray(items)) items = [];
                 
-                console.log('[NSL] nsl_favorites got', items.length, 'items (wrapped)');
+                console.log('[NSL] nsl_favorites got', items.length, 'items');
+                console.log('[NSL] First item example:', items[0]);
                 
                 var page = params.page || 1;
                 var limit = 20;
@@ -1611,6 +1612,7 @@
                 var end = start + limit;
                 var paginated = items.slice(start, end);
                 
+                // Формируем ответ как в cub.js
                 var response = {
                     results: paginated,
                     total_pages: Math.max(1, Math.ceil(items.length / limit)),
@@ -1631,19 +1633,21 @@
                 
                 if (filter === 'all') {
                     for (var i = 0; i < history.length; i++) {
-                        items.push({ data: history[i].data });
+                        items.push(history[i].data);
                     }
                 } else {
                     for (var j = 0; j < history.length; j++) {
                         if (history[j].media_type === filter) {
-                            items.push({ data: history[j].data });
+                            items.push(history[j].data);
                         }
                     }
                 }
                 
                 if (!Array.isArray(items)) items = [];
                 
-                items.sort(function(a, b) { return (b.data.watched_at || 0) - (a.data.watched_at || 0); });
+                items.sort(function(a, b) { 
+                    return (b.watched_at || 0) - (a.watched_at || 0); 
+                });
                 
                 var page = params.page || 1;
                 var limit = 20;
@@ -1667,21 +1671,15 @@
                 var items = getContinueWatching();
                 if (!Array.isArray(items)) items = [];
                 
-                // Оборачиваем каждый элемент
-                var wrapped = [];
-                for (var i = 0; i < items.length; i++) {
-                    wrapped.push({ data: items[i] });
-                }
-                
                 var page = params.page || 1;
                 var limit = 20;
                 var start = (page - 1) * limit;
                 var end = start + limit;
-                var paginated = wrapped.slice(start, end);
+                var paginated = items.slice(start, end);
                 
                 oncomplite({
                     results: paginated,
-                    total_pages: Math.max(1, Math.ceil(wrapped.length / limit)),
+                    total_pages: Math.max(1, Math.ceil(items.length / limit)),
                     page: page
                 });
             }
