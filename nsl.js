@@ -63,7 +63,6 @@
     let styleInjected = false;
     let endCreditsDetected = false;
     let lastPosition = 0;
-    let menuItemsAdded = false;
 
     // ============ УТИЛИТЫ ============
     function cfg() {
@@ -512,6 +511,7 @@
         
         setTimeout(doAdd, 1000);
         setTimeout(doAdd, 3000);
+        setTimeout(doAdd, 5000);
     }
     
     function escapeHtml(str) {
@@ -1241,41 +1241,22 @@
         Lampa.Select.show({
             title: 'Избранное',
             items: [
-                { title: '⭐ Показывать в меню: ' + (c.favorites_enabled ? 'Вкл' : 'Выкл'), action: 'toggle_favorites_menu' },
                 { title: '🔄 Авто в Брошено: ' + (c.auto_move_dropped ? 'Вкл' : 'Выкл'), action: 'toggle_auto_dropped' },
                 { title: '📅 Дней до Брошено: ' + c.auto_move_dropped_days, action: 'set_dropped_days' },
-                { title: '🗑️ Очистить всё (' + favorites.length + ')', action: 'clear_favorites' },
+                { title: '🗑️ Очистить всё', action: 'clear_favorites' },
                 { title: '──────────', separator: true },
                 { title: '◀ Назад', action: 'back' }
             ],
             onSelect: function(item) {
                 var c = cfg();
-                if (item.action === 'toggle_favorites_menu') {
-                    c.favorites_enabled = !c.favorites_enabled; 
-                    saveCfg(c);
-                    menuItemsAdded = false;
-                    addMenuItems();
-                    showFavoritesMenu();
-                } else if (item.action === 'toggle_auto_dropped') { 
-                    c.auto_move_dropped = !c.auto_move_dropped; 
-                    saveCfg(c); 
-                    showFavoritesMenu(); 
-                } else if (item.action === 'set_dropped_days') {
+                if (item.action === 'toggle_auto_dropped') { c.auto_move_dropped = !c.auto_move_dropped; saveCfg(c); showFavoritesMenu(); }
+                else if (item.action === 'set_dropped_days') {
                     Lampa.Input.edit({ title: 'Дней до Брошено', value: String(c.auto_move_dropped_days), free: true, number: true }, function(v) {
-                        if (v && !isNaN(v) && v > 0) { 
-                            c.auto_move_dropped_days = parseInt(v); 
-                            saveCfg(c); 
-                        }
+                        if (v && !isNaN(v) && v > 0) { c.auto_move_dropped_days = parseInt(v); saveCfg(c); }
                         showFavoritesMenu();
                     });
-                } else if (item.action === 'clear_favorites') { 
-                    favorites = []; 
-                    saveFavorites(); 
-                    notify('✅ Избранное очищено'); 
-                    showFavoritesMenu(); 
-                } else if (item.action === 'back') {
-                    showMainMenu();
-                }
+                } else if (item.action === 'clear_favorites') { favorites = []; saveFavorites(); notify('✅ Избранное очищено'); showFavoritesMenu(); }
+                else if (item.action === 'back') showMainMenu();
             }
         });
     }
@@ -1284,7 +1265,7 @@
         Lampa.Select.show({
             title: 'История',
             items: [
-                { title: '🗑️ Очистить историю (' + history.length + ')', action: 'clear_history' },
+                { title: '🗑️ Очистить историю', action: 'clear_history' },
                 { title: '──────────', separator: true },
                 { title: '◀ Назад', action: 'back' }
             ],
@@ -1411,15 +1392,9 @@
 
     // ============ БОКОВОЕ МЕНЮ ============
     function addMenuItems() {
-        if (menuItemsAdded) return;
-        
         var doAdd = function() {
-            if (menuItemsAdded) return;
-            
             $('.nsl-menu-item, .nsl-menu-split').remove();
-            
-            var c = cfg();
-            if (!c.enabled) return;
+            if (!cfg().enabled) return;
             
             var menuLists = $('.menu .menu__list');
             if (!menuLists.length) {
@@ -1432,16 +1407,16 @@
             
             var itemsToAdd = [];
             
-            if (c.sections_enabled && sections.length) {
+            if (cfg().sections_enabled && sections.length) {
                 itemsToAdd.push({ action: 'sections', icon: '📌', title: 'Мои закладки (' + sections.length + ')' });
             }
-            if (c.favorites_enabled) {
+            if (cfg().favorites_enabled) {
                 itemsToAdd.push({ action: 'favorites', icon: '⭐', title: 'Избранное (' + favorites.length + ')' });
             }
-            if (c.history_enabled) {
+            if (cfg().history_enabled) {
                 itemsToAdd.push({ action: 'history', icon: '📜', title: 'История (' + history.length + ')' });
             }
-            if (c.continue_watching) {
+            if (cfg().continue_watching) {
                 itemsToAdd.push({ action: 'continue', icon: '⏱️', title: 'Продолжить' });
             }
             
@@ -1462,8 +1437,6 @@
                 })(item.action));
                 menuList.append(el);
             }
-            
-            menuItemsAdded = true;
         };
         
         setTimeout(doAdd, 1000);
