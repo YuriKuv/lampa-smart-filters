@@ -520,13 +520,14 @@
             }
         }
         if (!folder) return [];
+        
         var result = [];
         for (var j = 0; j < favorites.length; j++) {
             if (favorites[j].media_type === folder.mediaType) {
                 result.push(favorites[j].data);
             }
         }
-        return result;
+        return result; // Всегда возвращаем массив
     }
 
     function getFavoritesByCategory(category) {
@@ -536,7 +537,7 @@
                 result.push(favorites[i].data);
             }
         }
-        return result;
+        return result; // Всегда возвращаем массив
     }
 
     function isInFavorites(cardId, category) {
@@ -657,11 +658,12 @@
         }
         
         filtered.sort(function(a, b) { return b.watched_at - a.watched_at; });
+        
         var result = [];
         for (var j = 0; j < filtered.length; j++) {
             result.push(filtered[j].data);
         }
-        return result;
+        return result; // Всегда возвращаем массив
     }
 
     // ============ ПРОДОЛЖИТЬ ПРОСМОТР ============
@@ -1555,29 +1557,79 @@
     function registerSources() {
         Lampa.Api.sources.nsl_favorites = {
             category: function(params, oncomplite) {
-                var data = params.folder ? getFavoritesByFolder(params.folder) : getFavoritesByCategory(params.category || 'favorite');
+                var data = [];
+                
+                if (params.folder) {
+                    data = getFavoritesByFolder(params.folder);
+                } else if (params.category) {
+                    data = getFavoritesByCategory(params.category);
+                } else {
+                    data = getFavoritesByCategory('favorite');
+                }
+                
+                // Убеждаемся, что data - это массив
+                if (!Array.isArray(data)) {
+                    console.warn('[NSL] nsl_favorites: data is not array', data);
+                    data = [];
+                }
+                
                 var page = params.page || 1;
-                oncomplite({ results: data.slice((page-1)*20, page*20), total_pages: Math.ceil(data.length/20), page: page });
+                var start = (page - 1) * 20;
+                var end = start + 20;
+                var paginated = data.slice(start, end);
+                
+                oncomplite({
+                    results: paginated,
+                    total_pages: Math.ceil(data.length / 20),
+                    page: page
+                });
             }
         };
         
         Lampa.Api.sources.nsl_history = {
             category: function(params, oncomplite) {
                 var data = getHistoryByFilter(params.filter || 'all');
+                
+                // Убеждаемся, что data - это массив
+                if (!Array.isArray(data)) {
+                    console.warn('[NSL] nsl_history: data is not array', data);
+                    data = [];
+                }
+                
                 var page = params.page || 1;
-                oncomplite({ results: data.slice((page-1)*20, page*20), total_pages: Math.ceil(data.length/20), page: page });
+                var start = (page - 1) * 20;
+                var end = start + 20;
+                var paginated = data.slice(start, end);
+                
+                oncomplite({
+                    results: paginated,
+                    total_pages: Math.ceil(data.length / 20),
+                    page: page
+                });
             }
         };
         
         Lampa.Api.sources.nsl_continue = {
             category: function(params, oncomplite) {
                 var data = getContinueWatching();
+                
+                if (!Array.isArray(data)) {
+                    data = [];
+                }
+                
                 var page = params.page || 1;
-                oncomplite({ results: data.slice((page-1)*20, page*20), total_pages: Math.ceil(data.length/20), page: page });
+                var start = (page - 1) * 20;
+                var end = start + 20;
+                var paginated = data.slice(start, end);
+                
+                oncomplite({
+                    results: paginated,
+                    total_pages: Math.ceil(data.length / 20),
+                    page: page
+                });
             }
         };
     }
-
     // ============ ФОНОВЫЕ ЗАДАЧИ ============
     function startBackgroundTasks() {
         var c = cfg();
