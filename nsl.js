@@ -735,51 +735,31 @@ function addFavoriteButtonToCard() {
     console.log('[NSL] addFavoriteButtonToCard вызван');
     
     Lampa.Listener.follow('full', (e) => {
-        console.log('[NSL] full событие:', e.type);
-        
         if (e.type === 'complite') {
-            console.log('[NSL] complite, пробуем добавить кнопку');
-            
             setTimeout(() => {
                 try {
-                    const activity = e.object;
                     const movie = e.data.movie;
                     console.log('[NSL] movie:', movie?.id, movie?.title);
                     
-                    if (!movie || !movie.id) {
-                        console.log('[NSL] нет movie');
+                    if (!movie || !movie.id) return;
+                    
+                    // Ищем контейнер с кнопками в DOM
+                    // После события complite карточка уже отрендерена
+                    const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').first();
+                    
+                    if (!buttonsContainer.length) {
+                        console.log('[NSL] контейнер не найден');
                         return;
                     }
                     
-                    // Ищем разные возможные контейнеры
-                    const html = activity.render();
-                    console.log('[NSL] html найден');
+                    console.log('[NSL] контейнер найден');
                     
-                    const selectors = [
-                        '.full-start-new__buttons',
-                        '.full-start__buttons',
-                        '.full-start .full-start__buttons',
-                        '.full-start__info .full-start__buttons'
-                    ];
-                    
-                    let buttonsContainer = null;
-                    for (const sel of selectors) {
-                        buttonsContainer = html.find(sel);
-                        if (buttonsContainer.length) {
-                            console.log('[NSL] найден контейнер по селектору:', sel);
-                            break;
-                        }
-                    }
-                    
-                    if (!buttonsContainer || !buttonsContainer.length) {
-                        console.log('[NSL] контейнер не найден, ищу все кнопки...');
-                        const allButtons = html.find('.full-start__button');
-                        console.log('[NSL] найдено кнопок:', allButtons.length);
+                    if (buttonsContainer.find('.nsl-favorite-button').length) {
+                        console.log('[NSL] кнопка уже есть');
                         return;
                     }
                     
                     const isFavorite = isInFavorites(movie, 'favorite');
-                    console.log('[NSL] isFavorite:', isFavorite);
                     
                     const button = $(`
                         <div class="full-start__button selector nsl-favorite-button">
@@ -838,9 +818,9 @@ function addFavoriteButtonToCard() {
                     }
                     
                 } catch (err) {
-                    console.error('[NSL] ошибка при добавлении кнопки:', err);
+                    console.error('[NSL] ошибка:', err);
                 }
-            }, 1000);
+            }, 500);
         }
     });
 }
