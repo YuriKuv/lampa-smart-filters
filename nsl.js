@@ -1604,6 +1604,7 @@
                 if (!Array.isArray(items)) items = [];
                 
                 console.log('[NSL] nsl_favorites got', items.length, 'items');
+                console.log('[NSL] First item example:', items[0]);
                 
                 // Пагинация
                 var page = params.page || 1;
@@ -1612,23 +1613,40 @@
                 var end = start + limit;
                 var paginated = items.slice(start, end);
                 
-                // КРИТИЧЕСКИ ВАЖНО: Lampa ожидает, что results - это массив объектов с полем 'data'?
-                // Попробуем обернуть каждый элемент
-                var wrappedResults = [];
-                for (var i = 0; i < paginated.length; i++) {
-                    wrappedResults.push({
-                        data: paginated[i]
-                    });
-                }
-                
-                var response = {
-                    results: wrappedResults,  // <-- Оборачиваем в {data: ...}
+                // Пробуем разные форматы ответа
+                // Формат 1: напрямую
+                var response1 = {
+                    results: paginated,
                     total_pages: Math.ceil(items.length / limit),
                     page: page
                 };
                 
-                console.log('[NSL] nsl_favorites response:', response.results.length, 'results (wrapped)');
-                oncomplite(response);
+                // Формат 2: обёрнутый в data
+                var wrappedResults = [];
+                for (var i = 0; i < paginated.length; i++) {
+                    wrappedResults.push({ data: paginated[i] });
+                }
+                var response2 = {
+                    results: wrappedResults,
+                    total_pages: Math.ceil(items.length / limit),
+                    page: page
+                };
+                
+                console.log('[NSL] Trying format 1 (direct)');
+                console.log('[NSL] response1.results[0]:', response1.results[0]);
+                
+                // Перехватываем ошибку в Lampa
+                try {
+                    oncomplite(response1);
+                } catch(e) {
+                    console.error('[NSL] Format 1 failed:', e);
+                    console.log('[NSL] Trying format 2 (wrapped)');
+                    try {
+                        oncomplite(response2);
+                    } catch(e2) {
+                        console.error('[NSL] Format 2 also failed:', e2);
+                    }
+                }
             }
         };
         
@@ -1659,21 +1677,13 @@
                 var end = start + limit;
                 var paginated = items.slice(start, end);
                 
-                // Оборачиваем каждый элемент
-                var wrappedResults = [];
-                for (var i = 0; i < paginated.length; i++) {
-                    wrappedResults.push({
-                        data: paginated[i]
-                    });
-                }
-                
                 var response = {
-                    results: wrappedResults,
+                    results: paginated,
                     total_pages: Math.ceil(items.length / limit),
                     page: page
                 };
                 
-                console.log('[NSL] nsl_history response:', response.results.length, 'results (wrapped)');
+                console.log('[NSL] nsl_history response:', response.results.length, 'items');
                 oncomplite(response);
             }
         };
@@ -1689,15 +1699,8 @@
                 var end = start + limit;
                 var paginated = items.slice(start, end);
                 
-                var wrappedResults = [];
-                for (var i = 0; i < paginated.length; i++) {
-                    wrappedResults.push({
-                        data: paginated[i]
-                    });
-                }
-                
                 oncomplite({
-                    results: wrappedResults,
+                    results: paginated,
                     total_pages: Math.ceil(items.length / limit),
                     page: page
                 });
