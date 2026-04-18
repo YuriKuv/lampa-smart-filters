@@ -6,7 +6,7 @@
 
     // ============ КОНФИГУРАЦИЯ ============
     const CFG_KEY = 'nsl_sync_cfg';
-    const SYNC_VERSION = 15;
+    const SYNC_VERSION = 16;
     
     const STORAGE_KEYS = {
         sections: 'nsl_sections',
@@ -486,7 +486,7 @@
         
         var c = cfg();
         
-        setTimeout(function() {
+        var doAdd = function() {
             if (c.sections_button === 'top') {
                 if (Lampa.Head && Lampa.Head.addIcon) {
                     Lampa.Head.addIcon(
@@ -495,15 +495,23 @@
                     );
                 }
             } else {
-                var menuList = $('.menu .menu__list').eq(1);
-                if (!menuList.length) menuList = $('.menu .menu__list').eq(0);
-                if (!menuList.length || $('.nsl-section-add').length) return;
+                var menuLists = $('.menu .menu__list');
+                if (!menuLists.length) {
+                    setTimeout(doAdd, 500);
+                    return;
+                }
+                var menuList = menuLists.eq(1);
+                if (!menuList.length) menuList = menuLists.eq(0);
+                if (!menuList.length || menuList.find('.nsl-section-add').length) return;
                 
                 var btn = $('<li class="menu__item selector nsl-section-add"><div class="menu__ico">📌</div><div class="menu__text">Добавить закладку</div></li>');
                 btn.on('hover:enter', addSection);
                 menuList.append(btn);
             }
-        }, 2000);
+        };
+        
+        setTimeout(doAdd, 1000);
+        setTimeout(doAdd, 3000);
     }
     
     function escapeHtml(str) {
@@ -1405,69 +1413,64 @@
     function addMenuItems() {
         if (menuItemsAdded) return;
         
-        setTimeout(function() {
-            $('.nsl-menu-item, .nsl-menu-split').remove();
-            if (!cfg().enabled) return;
+        var doAdd = function() {
+            if (menuItemsAdded) return;
             
-            var menuList = $('.menu .menu__list').eq(0);
-            if (!menuList.length) {
-                setTimeout(arguments.callee, 1000);
+            $('.nsl-menu-item, .nsl-menu-split').remove();
+            
+            var c = cfg();
+            if (!c.enabled) return;
+            
+            var menuLists = $('.menu .menu__list');
+            if (!menuLists.length) {
+                setTimeout(doAdd, 500);
                 return;
             }
             
+            var menuList = menuLists.eq(0);
+            if (!menuList.length) return;
+            
             var itemsToAdd = [];
             
-            if (cfg().sections_enabled && sections.length) {
-                itemsToAdd.push({ action: 'sections', icon: '📌', title: 'Мои закладки' });
+            if (c.sections_enabled && sections.length) {
+                itemsToAdd.push({ action: 'sections', icon: '📌', title: 'Мои закладки (' + sections.length + ')' });
             }
-            if (cfg().favorites_enabled) {
-                itemsToAdd.push({ action: 'favorites', icon: '⭐', title: 'Избранное' });
+            if (c.favorites_enabled) {
+                itemsToAdd.push({ action: 'favorites', icon: '⭐', title: 'Избранное (' + favorites.length + ')' });
             }
-            if (cfg().history_enabled) {
-                itemsToAdd.push({ action: 'history', icon: '📜', title: 'История' });
+            if (c.history_enabled) {
+                itemsToAdd.push({ action: 'history', icon: '📜', title: 'История (' + history.length + ')' });
             }
-            if (cfg().continue_watching) {
+            if (c.continue_watching) {
                 itemsToAdd.push({ action: 'continue', icon: '⏱️', title: 'Продолжить' });
             }
             
             if (!itemsToAdd.length) return;
             
-            menuList.append('<li class="menu__split nsl-menu-split"></li>');
+            if (menuList.find('.nsl-menu-split').length === 0) {
+                menuList.append('<li class="menu__split nsl-menu-split"></li>');
+            }
             
             for (var i = 0; i < itemsToAdd.length; i++) {
                 var item = itemsToAdd[i];
                 var el = $('<li class="menu__item selector nsl-menu-item"><div class="menu__ico">' + item.icon + '</div><div class="menu__text">' + item.title + '</div></li>');
                 el.on('hover:enter', (function(action) {
-                    return function(e) { e.stopPropagation(); handleMenuAction(action); };
+                    return function(e) { 
+                        e.stopPropagation(); 
+                        handleMenuAction(action); 
+                    };
                 })(item.action));
                 menuList.append(el);
             }
             
             menuItemsAdded = true;
-            console.log('[NSL] Пункты меню добавлены');
-        }, 1500);
+        };
+        
+        setTimeout(doAdd, 1000);
+        setTimeout(doAdd, 3000);
+        setTimeout(doAdd, 5000);
     }
 
-    // НОВАЯ ФУНКЦИЯ: открытие страницы избранного как в родной Lampa
-    function openFavoritesPage() {
-        Lampa.Activity.push({
-            url: '',
-            title: 'Избранное',
-            component: 'nsl_favorites_page',
-            page: 1
-        });
-    }
-    
-    // НОВАЯ ФУНКЦИЯ: открытие страницы истории
-    function openHistoryPage() {
-        Lampa.Activity.push({
-            url: '',
-            title: 'История',
-            component: 'nsl_history_page',
-            page: 1
-        });
-    }
-    
     function handleMenuAction(action) {
         if (action === 'sections') {
             if (!sections.length) { notify('📌 Нет сохранённых закладок'); return; }
@@ -1478,241 +1481,48 @@
                     items.push({ title: s.name, onSelect: function() { openSection(s); } });
                 })(sections[i]);
             }
-            Lampa.Select.show({ title: 'Мои закладки', items: items });
+            Lampa.Select.show({ title: 'Мои закладки', items: items, onBack: function() { Lampa.Controller.toggle('content'); } });
         } else if (action === 'favorites') {
-            openFavoritesPage();
-        } else if (action === 'history') {
-            openHistoryPage();
-        } else if (action === 'continue') {
-            Lampa.Activity.push({ 
-                url: '', 
-                title: 'Продолжить просмотр', 
-                component: 'category_full', 
-                source: 'nsl_continue', 
-                page: 1 
-            });
-        }
-    }
-
-    // ============ КОМПОНЕНТ СТРАНИЦЫ ИЗБРАННОГО ============
-    function FavoritesPageComponent(object) {
-        var self = this;
-        this.object = object;
-        this.page = object.page || 1;
-        
-        this.create = function() {
-            this.activity.loader(true);
-            
-            // Создаём строки для каждой папки
-            var lines = [];
-            
+            var items = [];
             for (var f = 0; f < FAVORITE_FOLDERS.length; f++) {
                 var folder = FAVORITE_FOLDERS[f];
-                var items = getFavoritesByFolder(folder.id);
-                
-                if (items.length > 0) {
-                    lines.push({
-                        title: folder.icon + ' ' + folder.title + ' (' + items.length + ')',
-                        results: items.slice(0, 20),
-                        total_pages: Math.ceil(items.length / 20),
-                        params: {
-                            module: 1, // LineModule.MASK.base
-                            emit: {
-                                onMore: (function(folderId, folderTitle) {
-                                    return function() {
-                                        Lampa.Activity.push({
-                                            url: '',
-                                            title: folderTitle,
-                                            component: 'category_full',
-                                            source: 'nsl_favorites',
-                                            folder: folderId,
-                                            page: 1
-                                        });
-                                    };
-                                })(folder.id, folder.title)
-                            }
-                        }
+                var count = 0;
+                for (var i = 0; i < favorites.length; i++) {
+                    if (favorites[i].media_type === folder.mediaType) count++;
+                }
+                (function(folderId, folderTitle, folderIcon, cnt) {
+                    items.push({ 
+                        title: folderIcon + ' ' + folderTitle + ' (' + cnt + ')', 
+                        onSelect: function() { 
+                            Lampa.Activity.push({ url: '', title: folderTitle, component: 'category_full', source: 'nsl_favorites', folder: folderId, page: 1 }); 
+                        } 
                     });
-                }
+                })(folder.id, folder.title, folder.icon, count);
             }
-            
-            if (lines.length === 0) {
-                this.empty();
-            } else {
-                this.build(lines);
-            }
-            
-            this.activity.loader(false);
-            this.activity.toggle();
-        };
-        
-        this.build = function(lines) {
-            var html = $('<div class="main"></div>');
-            var body = $('<div class="main__body"></div>');
-            
-            for (var i = 0; i < lines.length; i++) {
-                var line = lines[i];
-                var lineHtml = $('<div class="items-line layer--visible layer--render"><div class="items-line__head"><div class="items-line__title">' + line.title + '</div></div><div class="items-line__body"><div class="scroll scroll--horizontal"><div class="scroll__content"><div class="scroll__body mapping--grid cols--6"></div></div></div></div></div>');
-                var gridBody = lineHtml.find('.scroll__body');
-                
-                for (var j = 0; j < line.results.length; j++) {
-                    var card = line.results[j];
-                    var cardHtml = $('<div class="card selector"><div class="card__poster"><img class="card__img" src="' + (card.poster_path ? 'https://image.tmdb.org/t/p/w200' + card.poster_path : './img/img_broken.svg') + '"></div><div class="card__title">' + (card.title || card.name) + '</div></div>');
-                    cardHtml.on('hover:enter', (function(c) {
-                        return function() {
-                            Lampa.Activity.push({
-                                url: '',
-                                component: 'full',
-                                id: c.id,
-                                method: c.name ? 'tv' : 'movie',
-                                card: c,
-                                source: c.source || 'tmdb'
-                            });
-                        };
-                    })(card));
-                    gridBody.append(cardHtml);
-                }
-                
-                body.append(lineHtml);
-            }
-            
-            html.append(body);
-            this.html = html;
-        };
-        
-        this.empty = function() {
-            var emptyHtml = $('<div class="empty"><div class="empty__icon">⭐</div><div class="empty__title">Нет избранного</div><div class="empty__text">Добавляйте фильмы и сериалы в избранное из карточки</div></div>');
-            this.html = emptyHtml;
-        };
-        
-        this.start = function() {
-            var controller = {
-                link: this,
-                toggle: function() {
-                    Controller.collectionSet(this.html);
-                }.bind(this),
-                back: function() {
-                    Activity.backward();
-                }
-            };
-            Controller.add('content', controller);
-            Controller.toggle('content');
-        };
-        
-        this.render = function(js) {
-            return js ? this.html[0] : this.html;
-        };
-        
-        this.destroy = function() {
-            if (this.html) this.html.remove();
-        };
-    }
-    
-    // ============ КОМПОНЕНТ СТРАНИЦЫ ИСТОРИИ ============
-    function HistoryPageComponent(object) {
-        var self = this;
-        this.object = object;
-        this.page = object.page || 1;
-        
-        this.create = function() {
-            this.activity.loader(true);
-            
-            var items = getHistoryByFilter('all');
-            var lines = [];
-            
-            if (items.length > 0) {
-                lines.push({
-                    title: '📜 Вся история (' + items.length + ')',
-                    results: items.slice(0, 20),
-                    total_pages: Math.ceil(items.length / 20),
-                    params: {
-                        module: 1,
-                        emit: {
-                            onMore: function() {
-                                Lampa.Activity.push({
-                                    url: '',
-                                    title: 'История',
-                                    component: 'category_full',
-                                    source: 'nsl_history',
-                                    filter: 'all',
-                                    page: 1
-                                });
-                            }
-                        }
+            Lampa.Select.show({ title: 'Избранное', items: items, onBack: function() { Lampa.Controller.toggle('content'); } });
+        } else if (action === 'history') {
+            var items = [];
+            for (var h = 0; h < HISTORY_FILTERS.length; h++) {
+                var filter = HISTORY_FILTERS[h];
+                var count = filter.id === 'all' ? history.length : 0;
+                if (filter.id !== 'all') {
+                    for (var i = 0; i < history.length; i++) {
+                        if (history[i].media_type === filter.id) count++;
                     }
-                });
-            }
-            
-            if (lines.length === 0) {
-                this.empty();
-            } else {
-                this.build(lines);
-            }
-            
-            this.activity.loader(false);
-            this.activity.toggle();
-        };
-        
-        this.build = function(lines) {
-            var html = $('<div class="main"></div>');
-            var body = $('<div class="main__body"></div>');
-            
-            for (var i = 0; i < lines.length; i++) {
-                var line = lines[i];
-                var lineHtml = $('<div class="items-line layer--visible layer--render"><div class="items-line__head"><div class="items-line__title">' + line.title + '</div></div><div class="items-line__body"><div class="scroll scroll--horizontal"><div class="scroll__content"><div class="scroll__body mapping--grid cols--6"></div></div></div></div></div>');
-                var gridBody = lineHtml.find('.scroll__body');
-                
-                for (var j = 0; j < line.results.length; j++) {
-                    var card = line.results[j];
-                    var cardHtml = $('<div class="card selector"><div class="card__poster"><img class="card__img" src="' + (card.poster_path ? 'https://image.tmdb.org/t/p/w200' + card.poster_path : './img/img_broken.svg') + '"></div><div class="card__title">' + (card.title || card.name) + '</div></div>');
-                    cardHtml.on('hover:enter', (function(c) {
-                        return function() {
-                            Lampa.Activity.push({
-                                url: '',
-                                component: 'full',
-                                id: c.id,
-                                method: c.name ? 'tv' : 'movie',
-                                card: c,
-                                source: c.source || 'tmdb'
-                            });
-                        };
-                    })(card));
-                    gridBody.append(cardHtml);
                 }
-                
-                body.append(lineHtml);
+                (function(filterId, filterTitle, filterIcon, cnt) {
+                    items.push({ 
+                        title: filterIcon + ' ' + filterTitle + ' (' + cnt + ')', 
+                        onSelect: function() { 
+                            Lampa.Activity.push({ url: '', title: filterTitle, component: 'category_full', source: 'nsl_history', filter: filterId, page: 1 }); 
+                        } 
+                    });
+                })(filter.id, filter.title, filter.icon, count);
             }
-            
-            html.append(body);
-            this.html = html;
-        };
-        
-        this.empty = function() {
-            var emptyHtml = $('<div class="empty"><div class="empty__icon">📜</div><div class="empty__title">Нет истории</div><div class="empty__text">Просматривайте фильмы и сериалы, они появятся здесь</div></div>');
-            this.html = emptyHtml;
-        };
-        
-        this.start = function() {
-            var controller = {
-                link: this,
-                toggle: function() {
-                    Controller.collectionSet(this.html);
-                }.bind(this),
-                back: function() {
-                    Activity.backward();
-                }
-            };
-            Controller.add('content', controller);
-            Controller.toggle('content');
-        };
-        
-        this.render = function(js) {
-            return js ? this.html[0] : this.html;
-        };
-        
-        this.destroy = function() {
-            if (this.html) this.html.remove();
-        };
+            Lampa.Select.show({ title: 'История', items: items, onBack: function() { Lampa.Controller.toggle('content'); } });
+        } else if (action === 'continue') {
+            Lampa.Activity.push({ url: '', title: 'Продолжить просмотр', component: 'category_full', source: 'nsl_continue', page: 1 });
+        }
     }
 
     // ============ КНОПКА НА КАРТОЧКЕ ============
@@ -1735,7 +1545,6 @@
                             })(movie);
                             
                             container.insertBefore(btn, container.firstChild);
-                            console.log('[NSL] Кнопка добавлена для:', movie.title || movie.name);
                         }
                     }
                 }, 300);
@@ -1750,7 +1559,6 @@
         Lampa.Api.sources.nsl_favorites = {
             category: function(params, oncomplite) {
                 var items = getFavoritesByFolder(params.folder || 'movies');
-                
                 if (!Array.isArray(items)) items = [];
                 
                 var page = params.page || 1;
@@ -1771,7 +1579,6 @@
             category: function(params, oncomplite) {
                 var filter = params.filter || 'all';
                 var items = getHistoryByFilter(filter);
-                
                 if (!Array.isArray(items)) items = [];
                 
                 var page = params.page || 1;
@@ -1806,14 +1613,6 @@
                 });
             }
         };
-    }
-    
-    // Регистрация компонентов страниц
-    function registerComponents() {
-        if (Lampa.Component) {
-            Lampa.Component.add('nsl_favorites_page', FavoritesPageComponent);
-            Lampa.Component.add('nsl_history_page', HistoryPageComponent);
-        }
     }
 
     // ============ ФОНОВЫЕ ЗАДАЧИ ============
@@ -1859,7 +1658,6 @@
         loadTimeline();
         
         registerSources();
-        registerComponents();
         addSettings();
         
         var c = cfg();
