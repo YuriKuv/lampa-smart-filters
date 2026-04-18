@@ -731,43 +731,74 @@
     // 7. КНОПКА НА КАРТОЧКЕ (ИСПРАВЛЕНО)
     // ======================
     
-    function addFavoriteButtonToCard() {
-        Lampa.Listener.follow('full', (e) => {
-            if (e.type === 'complite') {
-                setTimeout(() => {
+function addFavoriteButtonToCard() {
+    console.log('[NSL] addFavoriteButtonToCard вызван');
+    
+    Lampa.Listener.follow('full', (e) => {
+        console.log('[NSL] full событие:', e.type);
+        
+        if (e.type === 'complite') {
+            console.log('[NSL] complite, пробуем добавить кнопку');
+            
+            setTimeout(() => {
+                try {
                     const activity = e.object;
                     const movie = e.data.movie;
-                    if (!movie || !movie.id) return;
+                    console.log('[NSL] movie:', movie?.id, movie?.title);
                     
-                    // Ищем правильный контейнер с кнопками
-                    const buttonsContainer = activity.render().find('.full-start-new__buttons, .full-start__buttons');
-                    if (!buttonsContainer.length) return;
-                    if (buttonsContainer.find('.nsl-favorite-button').length) return;
+                    if (!movie || !movie.id) {
+                        console.log('[NSL] нет movie');
+                        return;
+                    }
+                    
+                    // Ищем разные возможные контейнеры
+                    const html = activity.render();
+                    console.log('[NSL] html найден');
+                    
+                    const selectors = [
+                        '.full-start-new__buttons',
+                        '.full-start__buttons',
+                        '.full-start .full-start__buttons',
+                        '.full-start__info .full-start__buttons'
+                    ];
+                    
+                    let buttonsContainer = null;
+                    for (const sel of selectors) {
+                        buttonsContainer = html.find(sel);
+                        if (buttonsContainer.length) {
+                            console.log('[NSL] найден контейнер по селектору:', sel);
+                            break;
+                        }
+                    }
+                    
+                    if (!buttonsContainer || !buttonsContainer.length) {
+                        console.log('[NSL] контейнер не найден, ищу все кнопки...');
+                        const allButtons = html.find('.full-start__button');
+                        console.log('[NSL] найдено кнопок:', allButtons.length);
+                        return;
+                    }
                     
                     const isFavorite = isInFavorites(movie, 'favorite');
+                    console.log('[NSL] isFavorite:', isFavorite);
                     
-                    // Создаём кнопку как в Lampa
                     const button = $(`
                         <div class="full-start__button selector nsl-favorite-button">
-                            ${ICON_STAR}
+                            <svg viewBox="0 0 24 24" width="20" height="20">
+                                <path fill="${isFavorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" 
+                                      d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
+                            </svg>
                             <span>В избранное</span>
                         </div>
                     `);
                     
-                    // Добавляем класс активности если уже в избранном
-                    if (isFavorite) {
-                        button.addClass('active');
-                        button.find('path').attr('fill', 'currentColor');
-                    }
-                    
                     button.on('hover:enter', () => {
                         const categories = [
-                            { id: 'favorite', name: '⭐ Избранное', checked: isInFavorites(movie, 'favorite') },
-                            { id: 'watching', name: '👁️ Смотрю', checked: isInFavorites(movie, 'watching') },
-                            { id: 'planned', name: '📋 Буду смотреть', checked: isInFavorites(movie, 'planned') },
-                            { id: 'watched', name: '✅ Просмотрено', checked: isInFavorites(movie, 'watched') },
-                            { id: 'abandoned', name: '❌ Брошено', checked: isInFavorites(movie, 'abandoned') },
-                            { id: 'collection', name: '📦 Коллекция', checked: isInFavorites(movie, 'collection') }
+                            { id: 'favorite', name: 'Избранное', checked: isInFavorites(movie, 'favorite') },
+                            { id: 'watching', name: 'Смотрю', checked: isInFavorites(movie, 'watching') },
+                            { id: 'planned', name: 'Буду смотреть', checked: isInFavorites(movie, 'planned') },
+                            { id: 'watched', name: 'Просмотрено', checked: isInFavorites(movie, 'watched') },
+                            { id: 'abandoned', name: 'Брошено', checked: isInFavorites(movie, 'abandoned') },
+                            { id: 'collection', name: 'Коллекция', checked: isInFavorites(movie, 'collection') }
                         ];
                         
                         const items = categories.map(cat => ({
@@ -785,42 +816,34 @@
                             items: items,
                             onCheck: (item) => {
                                 toggleFavorite(movie, item.category);
-                                const isAnyFavorite = categories.some(c => 
-                                    c.id !== 'collection' && isInFavorites(movie, c.id)
-                                );
-                                if (isAnyFavorite) {
-                                    button.addClass('active');
-                                } else {
-                                    button.removeClass('active');
-                                }
+                                const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
+                                button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
                             },
                             onSelect: (item) => {
                                 if (item.action === 'close') return;
                                 toggleFavorite(movie, item.category);
-                                const isAnyFavorite = categories.some(c => 
-                                    c.id !== 'collection' && isInFavorites(movie, c.id)
-                                );
-                                if (isAnyFavorite) {
-                                    button.addClass('active');
-                                } else {
-                                    button.removeClass('active');
-                                }
+                                const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
+                                button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
                             }
                         });
                     });
                     
-                    // Вставляем после кнопки "Смотреть" или в начало
                     const playButton = buttonsContainer.find('.button--play');
                     if (playButton.length) {
                         playButton.after(button);
+                        console.log('[NSL] кнопка добавлена после play');
                     } else {
                         buttonsContainer.prepend(button);
+                        console.log('[NSL] кнопка добавлена в начало');
                     }
                     
-                }, 500);
-            }
-        });
-    }
+                } catch (err) {
+                    console.error('[NSL] ошибка при добавлении кнопки:', err);
+                }
+            }, 1000);
+        }
+    });
+}
 
     // ======================
     // 8. МЕНЮ
