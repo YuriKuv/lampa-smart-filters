@@ -1572,74 +1572,113 @@
     function registerSources() {
         Lampa.Api.sources.nsl_favorites = {
             category: function(params, oncomplite) {
-                var data = [];
+                console.log('[NSL] nsl_favorites called, params:', params);
+                
+                // Получаем данные
+                var items = [];
                 
                 if (params.folder) {
-                    data = getFavoritesByFolder(params.folder);
-                } else if (params.category) {
-                    data = getFavoritesByCategory(params.category);
+                    var folder = null;
+                    for (var i = 0; i < FAVORITE_FOLDERS.length; i++) {
+                        if (FAVORITE_FOLDERS[i].id === params.folder) {
+                            folder = FAVORITE_FOLDERS[i];
+                            break;
+                        }
+                    }
+                    if (folder) {
+                        for (var j = 0; j < favorites.length; j++) {
+                            if (favorites[j].media_type === folder.mediaType) {
+                                items.push(favorites[j].data);
+                            }
+                        }
+                    }
                 } else {
-                    data = getFavoritesByCategory('favorite');
+                    var category = params.category || 'favorite';
+                    for (var k = 0; k < favorites.length; k++) {
+                        if (favorites[k].category === category) {
+                            items.push(favorites[k].data);
+                        }
+                    }
                 }
                 
-                // Убеждаемся, что data - это массив
-                if (!Array.isArray(data)) {
-                    console.warn('[NSL] nsl_favorites: data is not array', data);
-                    data = [];
+                // КРИТИЧНО: убеждаемся, что items - это МАССИВ
+                if (!Array.isArray(items)) {
+                    console.error('[NSL] items is not array!', items);
+                    items = [];
                 }
                 
+                console.log('[NSL] nsl_favorites got', items.length, 'items');
+                
+                // Пагинация
                 var page = params.page || 1;
-                var start = (page - 1) * 20;
-                var end = start + 20;
-                var paginated = data.slice(start, end);
+                var limit = 20;
+                var start = (page - 1) * limit;
+                var end = start + limit;
+                var paginated = items.slice(start, end);
                 
-                oncomplite({
+                // ВАЖНО: результат должен быть объектом с полем results (массив)
+                var response = {
                     results: paginated,
-                    total_pages: Math.ceil(data.length / 20),
+                    total_pages: Math.ceil(items.length / limit),
                     page: page
-                });
+                };
+                
+                console.log('[NSL] nsl_favorites response:', response.results.length, 'results');
+                oncomplite(response);
             }
         };
         
+        // Аналогично для history
         Lampa.Api.sources.nsl_history = {
             category: function(params, oncomplite) {
-                var data = getHistoryByFilter(params.filter || 'all');
+                console.log('[NSL] nsl_history called, params:', params);
                 
-                // Убеждаемся, что data - это массив
-                if (!Array.isArray(data)) {
-                    console.warn('[NSL] nsl_history: data is not array', data);
-                    data = [];
+                var filter = params.filter || 'all';
+                var items = [];
+                
+                if (filter === 'all') {
+                    items = history.slice();
+                } else {
+                    for (var i = 0; i < history.length; i++) {
+                        if (history[i].media_type === filter) {
+                            items.push(history[i].data);
+                        }
+                    }
                 }
                 
-                var page = params.page || 1;
-                var start = (page - 1) * 20;
-                var end = start + 20;
-                var paginated = data.slice(start, end);
+                if (!Array.isArray(items)) items = [];
                 
-                oncomplite({
-                    results: paginated,
-                    total_pages: Math.ceil(data.length / 20),
+                items.sort(function(a, b) { return (b.watched_at || 0) - (a.watched_at || 0); });
+                
+                var page = params.page || 1;
+                var limit = 20;
+                var start = (page - 1) * limit;
+                var end = start + limit;
+                
+                var response = {
+                    results: items.slice(start, end),
+                    total_pages: Math.ceil(items.length / limit),
                     page: page
-                });
+                };
+                
+                console.log('[NSL] nsl_history response:', response.results.length, 'results');
+                oncomplite(response);
             }
         };
         
         Lampa.Api.sources.nsl_continue = {
             category: function(params, oncomplite) {
-                var data = getContinueWatching();
-                
-                if (!Array.isArray(data)) {
-                    data = [];
-                }
+                var items = getContinueWatching();
+                if (!Array.isArray(items)) items = [];
                 
                 var page = params.page || 1;
-                var start = (page - 1) * 20;
-                var end = start + 20;
-                var paginated = data.slice(start, end);
+                var limit = 20;
+                var start = (page - 1) * limit;
+                var end = start + limit;
                 
                 oncomplite({
-                    results: paginated,
-                    total_pages: Math.ceil(data.length / 20),
+                    results: items.slice(start, end),
+                    total_pages: Math.ceil(items.length / limit),
                     page: page
                 });
             }
