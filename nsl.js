@@ -433,22 +433,45 @@
         if (!cfg().sections_enabled) return;
         
         const c = cfg();
-        const menu = $('.menu .menu__list');
-        if (!menu.length) return;
         
-        const btn = $(`
-            <li class="menu__item selector" data-nsl-section-add>
-                <div class="menu__ico">${ICONS.add}</div>
-                <div class="menu__text">📌 В закладки</div>
-            </li>
-        `);
-        
-        btn.on('hover:enter', (e) => {
-            e.stopPropagation();
-            addSection();
-        });
-        
-        menu.eq(1).prepend(btn);
+        setTimeout(() => {
+            if (c.sections_button === 'top') {
+                // В верхней панели
+                const head = $('.head__actions, .head__buttons').first();
+                if (!head.length) return;
+                
+                const btn = $(`
+                    <div class="head__action selector" data-nsl-section-add>
+                        <div class="head__action-ico">📌</div>
+                    </div>
+                `);
+                
+                btn.on('hover:enter', (e) => {
+                    e.stopPropagation();
+                    addSection();
+                });
+                
+                head.prepend(btn);
+            } else {
+                // В боковом меню
+                const menu = $('.menu .menu__list').eq(1); // Второй список (после основных)
+                if (!menu.length) return;
+                
+                const btn = $(`
+                    <li class="menu__item selector" data-nsl-section-add>
+                        <div class="menu__ico">📌</div>
+                        <div class="menu__text">Добавить закладку</div>
+                    </li>
+                `);
+                
+                btn.on('hover:enter', (e) => {
+                    e.stopPropagation();
+                    addSection();
+                });
+                
+                menu.prepend(btn);
+            }
+        }, 1000);
     }
 
     // ============ ИЗБРАННОЕ ============
@@ -540,16 +563,53 @@
         });
     }
 
-    function showFavoritesScreen(folder) {
-        const folderInfo = FAVORITE_FOLDERS[folder];
-        if (!folderInfo) return;
+    function showFavoritesScreen() {
+        // Сначала показываем папки (как в стандартном избранном Lampa)
+        const items = [];
         
+        for (const key in FAVORITE_FOLDERS) {
+            const info = FAVORITE_FOLDERS[key];
+            const count = favorites.filter(f => f.media_type === info.mediaType).length;
+            
+            if (count > 0 || true) { // Показываем даже пустые
+                items.push({
+                    title: `${info.icon} ${info.title}`,
+                    count: count,
+                    folder: key,
+                    onSelect: () => {
+                        Lampa.Activity.push({
+                            url: '',
+                            title: info.title,
+                            component: 'category',
+                            source: 'nsl_favorites',
+                            folder: key,
+                            page: 1
+                        });
+                    }
+                });
+            }
+        }
+        
+        // Если нет папок, показываем сообщение
+        if (items.length === 0) {
+            Lampa.Activity.push({
+                url: '',
+                title: 'Моё избранное',
+                component: 'category',
+                source: 'nsl_favorites',
+                folder: 'empty',
+                page: 1
+            });
+            return;
+        }
+        
+        // Используем стандартный компонент избранного Lampa
         Lampa.Activity.push({
             url: '',
-            title: folderInfo.title,
-            component: 'category',
+            title: 'Моё избранное',
+            component: 'favorite', // Стандартный компонент!
             source: 'nsl_favorites',
-            folder: folder,
+            folder: 'folders',
             page: 1
         });
     }
@@ -611,21 +671,25 @@
         if (!c.continue_watching) return [];
         
         const result = [];
-        const viewed = new Set();
+        const added = new Set();
         
         // Из таймлайна
         for (const key in timeline) {
             const record = timeline[key];
-            const percent = record.percent || 0;
+            const percent = record.p || record.percent || 0;
             
             if (percent >= c.continue_min_progress && percent <= c.continue_max_progress) {
                 // Ищем карточку в избранном или истории
                 const tmdbId = record.tmdb_id || key.split('_')[0];
-                const favItem = favorites.find(f => f.tmdb_id === tmdbId);
+                const favItem = favorites.find(f => String(f.tmdb_id) === String(tmdbId));
                 
-                if (favItem && !viewed.has(favItem.card_id)) {
-                    result.push({ ...favItem.data, progress: percent });
-                    viewed.add(favItem.card_id);
+                if (favItem && !added.has(favItem.card_id)) {
+                    result.push({
+                        ...favItem.data,
+                        progress: percent,
+                        continue_time: record.t || record.time || 0
+                    });
+                    added.add(favItem.card_id);
                 }
             }
         }
@@ -639,14 +703,18 @@
         });
         
         for (const cardId in lastWatched) {
-            if (viewed.has(cardId)) continue;
+            if (added.has(cardId)) continue;
             
             const h = lastWatched[cardId];
-            const percent = h.progress?.percent || 0;
+            const percent = h.progress?.percent || h.progress?.p || 0;
             
             if (percent >= c.continue_min_progress && percent <= c.continue_max_progress) {
-                result.push({ ...h.data, progress: percent });
-                viewed.add(cardId);
+                result.push({
+                    ...h.data,
+                    progress: percent,
+                    continue_time: h.progress?.time || h.progress?.t || 0
+                });
+                added.add(cardId);
             }
         }
         
@@ -1053,55 +1121,85 @@
     }
 
     // ============ РЕГИСТРАЦИЯ ИСТОЧНИКОВ ДАННЫХ ============
+// Регистрация источников - ИСПРАВЛЕНО
     function registerSources() {
         // Избранное
         Lampa.Api.sources.nsl_favorites = {
-            category: function(params, oncomplite) {
-                const data = getFavoritesByFolder(params.folder);
+            category: function(params, oncomplite, onerror) {
+                const folder = params.folder || 'movies';
+                let data = [];
+                
+                if (folder === 'folders') {
+                    // Возвращаем папки (как в bookmarks.js)
+                    const folders = [];
+                    for (const key in FAVORITE_FOLDERS) {
+                        const info = FAVORITE_FOLDERS[key];
+                        const count = favorites.filter(f => f.media_type === info.mediaType).length;
+                        if (count > 0) {
+                            folders.push({
+                                id: key,
+                                title: info.title,
+                                count: count,
+                                media: info.mediaType
+                            });
+                        }
+                    }
+                    data = folders;
+                } else {
+                    // Возвращаем карточки из папки
+                    data = getFavoritesByFolder(folder);
+                }
+                
                 const page = params.page || 1;
+                const perPage = 20;
                 
                 oncomplite({
-                    results: data.slice((page - 1) * 20, page * 20),
-                    total_pages: Math.ceil(data.length / 20),
+                    results: data.slice((page - 1) * perPage, page * perPage),
+                    total_pages: Math.ceil(data.length / perPage),
                     page: page
                 });
             },
-            full: function(params, oncomplite) {
-                Lampa.Api.sources.tmdb.full(params, oncomplite, () => {});
+            full: function(params, oncomplite, onerror) {
+                Lampa.Api.sources.tmdb.full(params, oncomplite, onerror);
             }
         };
         
         // История
         Lampa.Api.sources.nsl_history = {
-            category: function(params, oncomplite) {
-                const data = getHistoryByFilter(params.filter || 'all');
+            category: function(params, oncomplite, onerror) {
+                const filter = params.filter || 'all';
+                const data = getHistoryByFilter(filter);
+                
                 const page = params.page || 1;
+                const perPage = 20;
                 
                 oncomplite({
-                    results: data.slice((page - 1) * 20, page * 20),
-                    total_pages: Math.ceil(data.length / 20),
+                    results: data.slice((page - 1) * perPage, page * perPage),
+                    total_pages: Math.ceil(data.length / perPage),
                     page: page
                 });
             },
-            full: function(params, oncomplite) {
-                Lampa.Api.sources.tmdb.full(params, oncomplite, () => {});
+            full: function(params, oncomplite, onerror) {
+                Lampa.Api.sources.tmdb.full(params, oncomplite, onerror);
             }
         };
         
         // Продолжить просмотр
         Lampa.Api.sources.nsl_continue = {
-            category: function(params, oncomplite) {
+            category: function(params, oncomplite, onerror) {
                 const data = getContinueWatching();
+                
                 const page = params.page || 1;
+                const perPage = 20;
                 
                 oncomplite({
-                    results: data.slice((page - 1) * 20, page * 20),
-                    total_pages: Math.ceil(data.length / 20),
+                    results: data.slice((page - 1) * perPage, page * perPage),
+                    total_pages: Math.ceil(data.length / perPage),
                     page: page
                 });
             },
-            full: function(params, oncomplite) {
-                Lampa.Api.sources.tmdb.full(params, oncomplite, () => {});
+            full: function(params, oncomplite, onerror) {
+                Lampa.Api.sources.tmdb.full(params, oncomplite, onerror);
             }
         };
     }
@@ -1109,77 +1207,101 @@
     // ============ БОКОВОЕ МЕНЮ ============
     function addMenuItems() {
         const c = cfg();
-        const menuList = $('.menu .menu__list').eq(0);
-        if (!menuList.length) return;
         
-        // Удаляем старые пункты
-        $('.nsl-menu-item, .nsl-menu-split-main').remove();
-        
-        menuList.append('<li class="menu__split nsl-menu-split-main"></li>');
-        
-        // Мои закладки (если есть)
-        if (c.sections_enabled && sections.length > 0) {
-            menuList.append(`
-                <li class="menu__item selector nsl-menu-item" data-nsl="sections">
-                    <div class="menu__ico">${ICONS.sections}</div>
-                    <div class="menu__text">Мои закладки</div>
-                </li>
-            `);
-        }
-        
-        // Моё избранное
-        if (c.favorites_enabled) {
-            menuList.append(`
-                <li class="menu__item selector nsl-menu-item" data-nsl="favorites">
-                    <div class="menu__ico">${ICONS.favorite}</div>
-                    <div class="menu__text">Моё избранное</div>
-                </li>
-            `);
-        }
-        
-        // Моя история
-        if (c.history_enabled) {
-            menuList.append(`
-                <li class="menu__item selector nsl-menu-item" data-nsl="history">
-                    <div class="menu__ico">${ICONS.history}</div>
-                    <div class="menu__text">Моя история</div>
-                </li>
-            `);
-        }
-        
-        // Коллекция
-        if (c.favorites_enabled) {
-            menuList.append(`
-                <li class="menu__item selector nsl-menu-item" data-nsl="collection">
-                    <div class="menu__ico">${ICONS.collection}</div>
-                    <div class="menu__text">Коллекция</div>
-                </li>
-            `);
-        }
-        
-        // Продолжить просмотр
-        if (c.continue_watching) {
-            menuList.append(`
-                <li class="menu__item selector nsl-menu-item" data-nsl="continue">
-                    <div class="menu__ico">${ICONS.continue}</div>
-                    <div class="menu__text">Продолжить просмотр</div>
-                </li>
-            `);
-        }
-        
-        // Обработчики
-        $('[data-nsl="sections"]').on('hover:enter', () => {
-            if (sections.length === 1) {
-                openSection(sections[0]);
-            } else {
-                showSectionsList();
+        // Ждём пока меню полностью отрисуется
+        setTimeout(() => {
+            const menuList = $('.menu .menu__list').eq(0);
+            if (!menuList.length) return;
+            
+            // Удаляем старые пункты
+            $('.nsl-menu-item, .nsl-menu-split').remove();
+            
+            // Добавляем разделитель
+            menuList.append('<li class="menu__split nsl-menu-split"></li>');
+            
+            // Мои закладки (если есть)
+            if (c.sections_enabled) {
+                menuList.append(`
+                    <li class="menu__item selector nsl-menu-item" data-nsl="sections">
+                        <div class="menu__ico">📌</div>
+                        <div class="menu__text">Мои закладки</div>
+                    </li>
+                `);
             }
-        });
-        
-        $('[data-nsl="favorites"]').on('hover:enter', () => showFoldersMenu('favorites'));
-        $('[data-nsl="history"]').on('hover:enter', () => showFoldersMenu('history'));
-        $('[data-nsl="collection"]').on('hover:enter', () => showFavoritesScreen('collection'));
-        $('[data-nsl="continue"]').on('hover:enter', showContinueWatching);
+            
+            // Моё избранное
+            if (c.favorites_enabled) {
+                menuList.append(`
+                    <li class="menu__item selector nsl-menu-item" data-nsl="favorites">
+                        <div class="menu__ico">⭐</div>
+                        <div class="menu__text">Моё избранное</div>
+                    </li>
+                `);
+            }
+            
+            // Моя история
+            if (c.history_enabled) {
+                menuList.append(`
+                    <li class="menu__item selector nsl-menu-item" data-nsl="history">
+                        <div class="menu__ico">📜</div>
+                        <div class="menu__text">Моя история</div>
+                    </li>
+                `);
+            }
+            
+            // Коллекция
+            if (c.favorites_enabled) {
+                menuList.append(`
+                    <li class="menu__item selector nsl-menu-item" data-nsl="collection">
+                        <div class="menu__ico">📦</div>
+                        <div class="menu__text">Коллекция</div>
+                    </li>
+                `);
+            }
+            
+            // Продолжить просмотр
+            if (c.continue_watching) {
+                menuList.append(`
+                    <li class="menu__item selector nsl-menu-item" data-nsl="continue">
+                        <div class="menu__ico">⏱️</div>
+                        <div class="menu__text">Продолжить</div>
+                    </li>
+                `);
+            }
+            
+            // Обработчики
+            $('[data-nsl="sections"]').off('hover:enter').on('hover:enter', function(e) {
+                e.stopPropagation();
+                if (sections.length === 1) {
+                    openSection(sections[0]);
+                } else if (sections.length > 1) {
+                    showSectionsList();
+                } else {
+                    notify('📌 Нет сохранённых закладок');
+                }
+            });
+            
+            $('[data-nsl="favorites"]').off('hover:enter').on('hover:enter', function(e) {
+                e.stopPropagation();
+                showFavoritesScreen();
+            });
+            
+            $('[data-nsl="history"]').off('hover:enter').on('hover:enter', function(e) {
+                e.stopPropagation();
+                showHistoryScreen('all');
+            });
+            
+            $('[data-nsl="collection"]').off('hover:enter').on('hover:enter', function(e) {
+                e.stopPropagation();
+                showCollectionScreen();
+            });
+            
+            $('[data-nsl="continue"]').off('hover:enter').on('hover:enter', function(e) {
+                e.stopPropagation();
+                showContinueWatching();
+            });
+            
+        }, 1000);
     }
 
     function showSectionsList() {
