@@ -18,12 +18,12 @@
     // Категории избранного
     const FAVORITE_CATEGORIES = ['favorite', 'watching', 'planned', 'watched', 'abandoned', 'collection'];
     const FAVORITE_CATEGORY_NAMES = {
-        favorite: '⭐ Избранное',
-        watching: '👁️ Смотрю',
-        planned: '📋 Буду смотреть',
-        watched: '✅ Просмотрено',
-        abandoned: '❌ Брошено',
-        collection: '📦 Коллекция'
+        favorite: 'Избранное',
+        watching: 'Смотрю',
+        planned: 'Буду смотреть',
+        watched: 'Просмотрено',
+        abandoned: 'Брошено',
+        collection: 'Коллекция'
     };
 
     // Типы контента
@@ -35,11 +35,17 @@
         anime: { name: 'Аниме', icon: '🇯🇵', filter: (item) => item.anime }
     };
 
+    // Иконки как в Lampa (используем спрайты)
+    const ICON_STAR = '<svg><use xlink:href="#sprite-star"></use></svg>';
+    const ICON_BOOKMARK = '<svg viewBox="0 0 21 32" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M2 1.5H19C19.2761 1.5 19.5 1.72386 19.5 2V27.9618C19.5 28.3756 19.0261 28.6103 18.697 28.3595L12.6212 23.7303C11.3682 22.7757 9.63183 22.7757 8.37885 23.7303L2.30302 28.3595C1.9739 28.6103 1.5 28.3756 1.5 27.9618V2C1.5 1.72386 1.72386 1.5 2 1.5Z" stroke="currentColor" stroke-width="2.5" fill="none"></path></svg>';
+    const ICON_FLAG = '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/></svg>';
+    const ICON_ADD = '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M11 5h2v14h-2zM5 11h14v2H5z"/></svg>';
+
     // ========= CONFIG =========
     function cfg() {
         return Lampa.Storage.get(CFG, {
             enabled: true,
-            button_position: 'side', // side / top
+            button_position: 'side',
             gist_token: '',
             gist_id: '',
             sync_on_start: true,
@@ -149,21 +155,9 @@
     }
 
     // ======================
-    // 2. ЗАКЛАДКИ РАЗДЕЛОВ (из ybt.js)
+    // 2. ЗАКЛАДКИ РАЗДЕЛОВ
     // ======================
     
-    const ICON_FLAG = `
-        <svg viewBox="0 0 24 24" width="24" height="24">
-            <path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/>
-        </svg>
-    `;
-    
-    const ICON_ADD = `
-        <svg viewBox="0 0 24 24" width="24" height="24">
-            <path fill="currentColor" d="M11 5h2v14h-2zM5 11h14v2H5z"/>
-        </svg>
-    `;
-
     function makeKey(a) {
         return [
             a.url || '',
@@ -328,7 +322,6 @@
         
         const c = cfg();
         
-        // Кнопка в боковом меню
         if (c.button_position === 'side') {
             const menuList = $('.menu__list').eq(1);
             if (menuList.length) {
@@ -344,10 +337,7 @@
                 });
                 menuList.prepend(btn);
             }
-        }
-        
-        // Кнопка в верхней панели
-        else if (c.button_position === 'top') {
+        } else if (c.button_position === 'top') {
             const head = $('.head__actions, .head__buttons').first();
             if (head.length) {
                 const btn = $(`
@@ -434,10 +424,6 @@
         return getFavorites().filter(f => f.category === category);
     }
     
-    function getFavoritesByMediaType(category, mediaType) {
-        return getFavorites().filter(f => f.category === category && f.media_type === mediaType);
-    }
-    
     function checkAutoAbandoned() {
         const c = cfg();
         if (!c.auto_abandoned) return;
@@ -481,7 +467,7 @@
     }
 
     // ======================
-    // 4. ИСТОРИЯ
+    // 4. ИСТОРИЯ (исправлено - не очищает при нажатии)
     // ======================
     
     function addToHistory(card, progress) {
@@ -517,8 +503,19 @@
     }
     
     function clearHistory() {
-        saveHistory([]);
-        notify('🗑️ История очищена');
+        Lampa.Select.show({
+            title: '⚠️ Очистить всю историю?',
+            items: [
+                { title: '✅ Да, очистить', action: 'clear' },
+                { title: '❌ Отмена', action: 'cancel' }
+            ],
+            onSelect: (opt) => {
+                if (opt.action === 'clear') {
+                    saveHistory([]);
+                    notify('🗑️ История очищена');
+                }
+            }
+        });
     }
     
     function getHistoryByMediaType(mediaType) {
@@ -682,8 +679,19 @@
     }
     
     function clearAllTimeline() {
-        saveTimeline({});
-        notify('🗑️ Таймкоды очищены');
+        Lampa.Select.show({
+            title: '⚠️ Очистить все таймкоды?',
+            items: [
+                { title: '✅ Да, очистить', action: 'clear' },
+                { title: '❌ Отмена', action: 'cancel' }
+            ],
+            onSelect: (opt) => {
+                if (opt.action === 'clear') {
+                    saveTimeline({});
+                    notify('🗑️ Таймкоды очищены');
+                }
+            }
+        });
     }
 
     // ======================
@@ -720,7 +728,7 @@
     }
 
     // ======================
-    // 7. КНОПКА НА КАРТОЧКЕ
+    // 7. КНОПКА НА КАРТОЧКЕ (ИСПРАВЛЕНО)
     // ======================
     
     function addFavoriteButtonToCard() {
@@ -731,21 +739,26 @@
                     const movie = e.data.movie;
                     if (!movie || !movie.id) return;
                     
-                    const buttonsContainer = activity.render().find('.full-start__buttons');
+                    // Ищем правильный контейнер с кнопками
+                    const buttonsContainer = activity.render().find('.full-start-new__buttons, .full-start__buttons');
                     if (!buttonsContainer.length) return;
                     if (buttonsContainer.find('.nsl-favorite-button').length) return;
                     
                     const isFavorite = isInFavorites(movie, 'favorite');
                     
+                    // Создаём кнопку как в Lampa
                     const button = $(`
-                        <div class="full-start__button selector nsl-favorite-button" style="order: -1;">
-                            <svg viewBox="0 0 24 24" width="24" height="24">
-                                <path fill="${isFavorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" 
-                                      d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
-                            </svg>
+                        <div class="full-start__button selector nsl-favorite-button">
+                            ${ICON_STAR}
                             <span>В избранное</span>
                         </div>
                     `);
+                    
+                    // Добавляем класс активности если уже в избранном
+                    if (isFavorite) {
+                        button.addClass('active');
+                        button.find('path').attr('fill', 'currentColor');
+                    }
                     
                     button.on('hover:enter', () => {
                         const categories = [
@@ -768,16 +781,17 @@
                         items.push({ title: '❌ Закрыть', action: 'close' });
                         
                         Lampa.Select.show({
-                            title: '⭐ Добавить в избранное',
+                            title: 'Добавить в избранное',
                             items: items,
                             onCheck: (item) => {
                                 toggleFavorite(movie, item.category);
                                 const isAnyFavorite = categories.some(c => 
                                     c.id !== 'collection' && isInFavorites(movie, c.id)
                                 );
-                                const starPath = button.find('path');
-                                if (starPath.length) {
-                                    starPath.attr('fill', isAnyFavorite ? 'currentColor' : 'none');
+                                if (isAnyFavorite) {
+                                    button.addClass('active');
+                                } else {
+                                    button.removeClass('active');
                                 }
                             },
                             onSelect: (item) => {
@@ -786,22 +800,30 @@
                                 const isAnyFavorite = categories.some(c => 
                                     c.id !== 'collection' && isInFavorites(movie, c.id)
                                 );
-                                const starPath = button.find('path');
-                                if (starPath.length) {
-                                    starPath.attr('fill', isAnyFavorite ? 'currentColor' : 'none');
+                                if (isAnyFavorite) {
+                                    button.addClass('active');
+                                } else {
+                                    button.removeClass('active');
                                 }
                             }
                         });
                     });
                     
-                    buttonsContainer.prepend(button);
+                    // Вставляем после кнопки "Смотреть" или в начало
+                    const playButton = buttonsContainer.find('.button--play');
+                    if (playButton.length) {
+                        playButton.after(button);
+                    } else {
+                        buttonsContainer.prepend(button);
+                    }
+                    
                 }, 500);
             }
         });
     }
 
     // ======================
-    // 8. МЕНЮ (избранное, история, продолжать)
+    // 8. МЕНЮ
     // ======================
     
     function addFavoritesToMenu() {
@@ -904,7 +926,6 @@
             return;
         }
         
-        // Группировка по типам
         const grouped = {};
         for (const type in MEDIA_TYPES) {
             grouped[type] = items.filter(item => item.media_type === type);
@@ -1142,7 +1163,6 @@
                     const remote = JSON.parse(content);
                     const strategy = cfg().sync_strategy;
                     
-                    // Синхронизация таймкодов
                     if (remote.timeline) {
                         const localTimeline = getTimeline();
                         let changed = false;
@@ -1170,7 +1190,6 @@
                         if (changed) saveTimeline(localTimeline);
                     }
                     
-                    // Синхронизация избранного
                     if (remote.favorites && Array.isArray(remote.favorites)) {
                         const localFavs = getFavorites();
                         const remoteMap = new Map();
@@ -1188,7 +1207,6 @@
                         if (changed) saveFavorites(localFavs);
                     }
                     
-                    // Синхронизация закладок разделов
                     if (remote.bookmarks && Array.isArray(remote.bookmarks)) {
                         const localBookmarks = getBookmarks();
                         const remoteMap = new Map();
@@ -1206,7 +1224,6 @@
                         if (changed) saveBookmarks(localBookmarks);
                     }
                     
-                    // Синхронизация истории
                     if (remote.history && Array.isArray(remote.history)) {
                         const localHistory = getHistory();
                         const remoteMap = new Map();
@@ -1261,7 +1278,7 @@
     }
 
     // ======================
-    // 10. НАСТРОЙКИ (без лишнего шага)
+    // 10. НАСТРОЙКИ
     // ======================
 
     function showGistSetup() {
@@ -1575,7 +1592,7 @@
             onSelect: (item) => {
                 if (item.action === 'sections') showSectionsSettings();
                 else if (item.action === 'favorites') showFavoritesSettings();
-                else if (item.action === 'history') clearHistory();
+                else if (item.action === 'history') showHistoryMenu();
                 else if (item.action === 'timeline') showTimelineSettings();
                 else if (item.action === 'continue') showContinueSettings();
                 else if (item.action === 'gist') showGistSetup();
