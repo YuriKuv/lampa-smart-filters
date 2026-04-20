@@ -5,15 +5,41 @@
     window.nsl_sync_init = true;
 
     // ======================
+    // 0. ПОЛУЧЕНИЕ ID ПРОФИЛЯ
+    // ======================
+    
+    function getProfileId() {
+        try {
+            // Пробуем получить профиль из аккаунта CUB
+            const account = Lampa.Storage.get('account', {});
+            const profile = account.profile || {};
+            const profileId = profile.id;
+            
+            if (profileId) {
+                console.log('[NSL Sync] Profile ID from CUB:', profileId);
+                return String(profileId);
+            }
+        } catch (e) {
+            console.warn('[NSL Sync] Error getting profile:', e);
+        }
+        
+        // Если профиль не найден, используем 'default'
+        console.log('[NSL Sync] Using default profile');
+        return 'default';
+    }
+
+    const PROFILE_ID = getProfileId();
+
+    // ======================
     // 1. КОНФИГУРАЦИЯ
     // ======================
     
-    const STORE_BOOKMARKS = 'nsl_bookmarks_v1';
-    const STORE_FAVORITES = 'nsl_favorites_v1';
-    const STORE_HISTORY = 'nsl_history_v1';
-    const STORE_TIMELINE = 'nsl_timeline_v1';
-    const CFG = 'nsl_cfg_v1';
-    const GIST_CACHE = 'nsl_gist_cache';
+    const STORE_BOOKMARKS = `nsl_bookmarks_${PROFILE_ID}_v2`;
+    const STORE_FAVORITES = `nsl_favorites_${PROFILE_ID}_v2`;
+    const STORE_HISTORY = `nsl_history_${PROFILE_ID}_v2`;
+    const STORE_TIMELINE = `nsl_timeline_${PROFILE_ID}_v2`;
+    const CFG = `nsl_cfg_${PROFILE_ID}_v2`;
+    const GIST_CACHE = `nsl_gist_cache_${PROFILE_ID}`;
 
     window.NSL = {};
 
@@ -70,7 +96,6 @@
     function getFavorites() { return Lampa.Storage.get(STORE_FAVORITES, []) || []; }
     function saveFavorites(l) { 
         Lampa.Storage.set(STORE_FAVORITES, l, true); 
-        // Не обновляем UI синхронно, чтобы не блокировать
         setTimeout(() => {
             Lampa.Listener.send('state:changed', { target: 'nsl_favorites', reason: 'update' });
         }, 100);
@@ -83,7 +108,6 @@
     function saveTimeline(t) { Lampa.Storage.set(STORE_TIMELINE, t, true); }
 
     function notify(text) { 
-        // На Android нотификации могут вызывать задержку, делаем через setTimeout
         setTimeout(() => Lampa.Noty.show(text), 50);
     }
 
@@ -321,7 +345,7 @@
     }
 
     // ======================
-    // 3. ИЗБРАННОЕ (с асинхронным сохранением)
+    // 3. ИЗБРАННОЕ
     // ======================
     
     function addToFavorites(card, category) {
@@ -349,7 +373,6 @@
             favorites.push(favoriteItem);
         }
         
-        // Асинхронное сохранение, чтобы не блокировать UI на Android
         setTimeout(() => {
             saveFavorites(favorites);
             checkAutoAbandoned();
@@ -485,7 +508,7 @@
     }
 
     // ======================
-    // 5. ТАЙМКОДЫ
+    // 5. ТАЙМКОДЫ (ИСПРАВЛЕНО)
     // ======================
     
     let playerInterval = null;
@@ -545,7 +568,7 @@
         try {
             if (Lampa.Player.opened()) {
                 const playerData = Lampa.Player.playdata();
-                if (playerData && playerData.timeline && playerData.timeline.time) {
+                if (playerData && playerData.timeline && typeof playerData.timeline.time !== 'undefined') {
                     return playerData.timeline.time;
                 }
             }
@@ -570,6 +593,7 @@
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
             const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
             
+            // ВАЖНО: всегда устанавливаем updated
             timeline[movieKey] = {
                 time: currentTime,
                 percent: percent,
@@ -581,6 +605,8 @@
             saveTimeline(timeline);
             lastSavedProgress = currentTime;
             currentMovieTime = currentTime;
+            
+            console.log(`[NSL Sync] Progress saved: ${movieKey} - ${percent}% (${formatTime(currentTime)})`);
             
             if (Lampa.Timeline && Lampa.Timeline.update) {
                 Lampa.Timeline.update({
@@ -610,6 +636,7 @@
             const currentTime = getCurrentPlayerTime();
             
             if (wasPlayerOpen && !isPlayerOpen && currentMovieTime > 0) {
+                console.log('[NSL Sync] Player closed, saving final progress');
                 saveProgress(currentMovieTime, true);
                 if (c.auto_sync) setTimeout(() => syncToGist(false), 100);
             }
@@ -623,6 +650,7 @@
                 if (movieKey && movieKey !== currentMovieKey) {
                     currentMovieKey = movieKey;
                     lastSavedProgress = 0;
+                    console.log(`[NSL Sync] New movie key: ${movieKey}`);
                 }
                 
                 if (c.auto_save && Math.floor(currentTime) - lastSavedProgress >= 10) {
@@ -637,7 +665,7 @@
             }
         }, 1000);
         
-        console.log('[NSL Sync] Обработчик плеера запущен');
+        console.log('[NSL Sync] Player handler initialized');
     }
     
     function cleanupTimeline() {
@@ -718,7 +746,7 @@
     }
 
     // ======================
-    // 7. КНОПКА НА КАРТОЧКЕ (исправлено зависание)
+    // 7. КНОПКА НА КАРТОЧКЕ
     // ======================
     
     function addFavoriteButtonToCard() {
@@ -769,7 +797,6 @@
                                 title: 'Добавить в избранное',
                                 items: items,
                                 onCheck: (item) => {
-                                    // Асинхронно обновляем, чтобы не блокировать UI на Android
                                     setTimeout(() => {
                                         toggleFavorite(movie, item.category);
                                         const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
@@ -795,7 +822,7 @@
                         }
                         
                     } catch (err) {
-                        console.error('[NSL Sync] Ошибка:', err);
+                        console.error('[NSL Sync] Error adding button:', err);
                     }
                 }, 500);
             }
@@ -1053,7 +1080,7 @@
     }
 
     // ======================
-    // 9. GITHUB GIST СИНХРОНИЗАЦИЯ (исправлено - все данные)
+    // 9. GITHUB GIST СИНХРОНИЗАЦИЯ (ИСПРАВЛЕНО)
     // ======================
 
     function getGistData() {
@@ -1064,14 +1091,15 @@
 
     function getAllSyncData() {
         const data = {
-            version: 2,
+            version: 3,
+            profile_id: PROFILE_ID,
             updated: new Date().toISOString(),
             bookmarks: getBookmarks(),
             favorites: getFavorites(),
             history: getHistory(),
             timeline: getTimeline()
         };
-        console.log('[NSL Sync] Подготовлены данные для синхронизации:', {
+        console.log('[NSL Sync] Data prepared for sync:', {
             bookmarks: data.bookmarks.length,
             favorites: data.favorites.length,
             history: data.history.length,
@@ -1089,7 +1117,6 @@
 
         const allData = getAllSyncData();
         
-        // Проверяем, есть ли вообще данные для отправки
         const hasData = allData.bookmarks.length > 0 || allData.favorites.length > 0 || 
                         allData.history.length > 0 || Object.keys(allData.timeline).length > 0;
         
@@ -1108,7 +1135,7 @@
             }
         };
 
-        console.log('[NSL Sync] Отправка данных на Gist...');
+        console.log('[NSL Sync] Sending data to Gist...');
         
         $.ajax({
             url: `https://api.github.com/gists/${gist.id}`,
@@ -1121,10 +1148,10 @@
             success: () => {
                 if (showNotify) notify('✅ Данные отправлены в Gist');
                 Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
-                console.log('[NSL Sync] Данные успешно отправлены');
+                console.log('[NSL Sync] Data sent successfully');
             },
             error: (xhr) => {
-                console.error('[NSL Sync] Ошибка отправки:', xhr);
+                console.error('[NSL Sync] Send error:', xhr);
                 if (showNotify) notify('❌ Ошибка отправки: ' + (xhr.responseJSON?.message || 'Unknown'));
             }
         });
@@ -1137,7 +1164,7 @@
             return false;
         }
 
-        console.log('[NSL Sync] Загрузка данных с Gist...');
+        console.log('[NSL Sync] Loading data from Gist...');
         
         $.ajax({
             url: `https://api.github.com/gists/${gist.id}`,
@@ -1155,7 +1182,14 @@
                     }
 
                     const remote = JSON.parse(content);
-                    console.log('[NSL Sync] Загружены данные:', {
+                    
+                    // Проверяем совместимость профилей
+                    if (remote.profile_id && remote.profile_id !== PROFILE_ID) {
+                        console.warn(`[NSL Sync] Profile mismatch: remote=${remote.profile_id}, local=${PROFILE_ID}`);
+                    }
+                    
+                    console.log('[NSL Sync] Loaded data:', {
+                        version: remote.version || 1,
                         bookmarks: remote.bookmarks?.length || 0,
                         favorites: remote.favorites?.length || 0,
                         history: remote.history?.length || 0,
@@ -1163,29 +1197,9 @@
                     });
                     
                     const strategy = cfg().sync_strategy;
-                    let changes = 0;
+                    let totalChanges = 0;
                     
-                    // Синхронизация избранного
-                    if (remote.favorites && Array.isArray(remote.favorites)) {
-                        const localFavs = getFavorites();
-                        const remoteMap = new Map();
-                        for (const fav of remote.favorites) {
-                            remoteMap.set(`${fav.tmdb_id}_${fav.category}`, fav);
-                        }
-                        
-                        for (const [key, remoteFav] of remoteMap) {
-                            if (!localFavs.some(f => `${f.tmdb_id}_${f.category}` === key)) {
-                                localFavs.push(remoteFav);
-                                changes++;
-                            }
-                        }
-                        if (changes > 0) {
-                            saveFavorites(localFavs);
-                            console.log(`[NSL Sync] Добавлено ${changes} новых элементов в избранное`);
-                        }
-                    }
-                    
-                    // Синхронизация таймкодов
+                    // ===== СИНХРОНИЗАЦИЯ ТАЙМКОДОВ (ИСПРАВЛЕНО) =====
                     if (remote.timeline) {
                         const localTimeline = getTimeline();
                         let timelineChanges = 0;
@@ -1194,29 +1208,90 @@
                             const remoteRec = remote.timeline[key];
                             const localRec = localTimeline[key];
                             
+                            // Нормализуем remote запись
+                            if (!remoteRec.updated) {
+                                remoteRec.updated = remoteRec.saved_at || Date.now();
+                            }
+                            
                             if (!localRec) {
+                                // Нет локальной записи - просто добавляем
                                 localTimeline[key] = remoteRec;
                                 timelineChanges++;
-                            } else if (strategy === 'max_time' && remoteRec.time > localRec.time + 5) {
-                                localTimeline[key] = remoteRec;
-                                timelineChanges++;
-                            } else if (strategy === 'last_watch') {
-                                const TIME_ROLLBACK_THRESHOLD = 300;
-                                if (remoteRec.time >= localRec.time - TIME_ROLLBACK_THRESHOLD && 
-                                    (remoteRec.updated || 0) > (localRec.updated || 0)) {
-                                    localTimeline[key] = remoteRec;
-                                    timelineChanges++;
+                                console.log(`[NSL Sync] Added new timeline: ${key}`);
+                            } else {
+                                // Нормализуем локальную запись
+                                if (!localRec.updated) {
+                                    localRec.updated = localRec.saved_at || 0;
+                                }
+                                
+                                const remoteUpdated = remoteRec.updated || 0;
+                                const localUpdated = localRec.updated || 0;
+                                
+                                if (strategy === 'max_time') {
+                                    // Стратегия: берем запись с большим временем просмотра
+                                    if (remoteRec.time > localRec.time) {
+                                        localTimeline[key] = remoteRec;
+                                        timelineChanges++;
+                                        console.log(`[NSL Sync] max_time: updated ${key} (remote ${remoteRec.time}s > local ${localRec.time}s)`);
+                                    }
+                                } else if (strategy === 'last_watch') {
+                                    // Стратегия: берем запись с более поздней датой обновления
+                                    if (remoteUpdated > localUpdated) {
+                                        localTimeline[key] = remoteRec;
+                                        timelineChanges++;
+                                        console.log(`[NSL Sync] last_watch: updated ${key} (remote updated ${new Date(remoteUpdated).toLocaleString()} > local ${new Date(localUpdated).toLocaleString()})`);
+                                    } else if (remoteUpdated === localUpdated && remoteRec.time > localRec.time) {
+                                        // Даты одинаковые - берем больший прогресс
+                                        localTimeline[key] = remoteRec;
+                                        timelineChanges++;
+                                        console.log(`[NSL Sync] last_watch: updated ${key} (same date, remote time ${remoteRec.time}s > local ${localRec.time}s)`);
+                                    }
                                 }
                             }
                         }
                         
                         if (timelineChanges > 0) {
                             saveTimeline(localTimeline);
-                            console.log(`[NSL Sync] Обновлено ${timelineChanges} таймкодов`);
+                            totalChanges += timelineChanges;
+                            console.log(`[NSL Sync] Timeline: ${timelineChanges} records updated`);
+                        } else {
+                            console.log('[NSL Sync] Timeline: no changes needed');
                         }
                     }
                     
-                    // Синхронизация закладок разделов
+                    // ===== СИНХРОНИЗАЦИЯ ИЗБРАННОГО =====
+                    if (remote.favorites && Array.isArray(remote.favorites)) {
+                        const localFavs = getFavorites();
+                        const remoteMap = new Map();
+                        for (const fav of remote.favorites) {
+                            remoteMap.set(`${fav.tmdb_id}_${fav.category}`, fav);
+                        }
+                        
+                        let favChanges = 0;
+                        for (const [key, remoteFav] of remoteMap) {
+                            const existingIndex = localFavs.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
+                            
+                            if (existingIndex === -1) {
+                                localFavs.push(remoteFav);
+                                favChanges++;
+                            } else {
+                                // Обновляем если remote новее
+                                const localFav = localFavs[existingIndex];
+                                if ((remoteFav.updated || 0) > (localFav.updated || 0)) {
+                                    localFavs[existingIndex] = remoteFav;
+                                    favChanges++;
+                                }
+                            }
+                        }
+                        
+                        if (favChanges > 0) {
+                            saveFavorites(localFavs);
+                            totalChanges += favChanges;
+                            console.log(`[NSL Sync] Favorites: ${favChanges} items updated`);
+                        }
+                    }
+                    
+                    // ===== СИНХРОНИЗАЦИЯ ЗАКЛАДОК =====
                     if (remote.bookmarks && Array.isArray(remote.bookmarks)) {
                         const localBookmarks = getBookmarks();
                         const remoteMap = new Map();
@@ -1224,20 +1299,22 @@
                             remoteMap.set(bm.key, bm);
                         }
                         
-                        let bookmarkChanges = 0;
+                        let bmChanges = 0;
                         for (const [key, remoteBm] of remoteMap) {
                             if (!localBookmarks.some(b => b.key === key)) {
                                 localBookmarks.push(remoteBm);
-                                bookmarkChanges++;
+                                bmChanges++;
                             }
                         }
-                        if (bookmarkChanges > 0) {
+                        
+                        if (bmChanges > 0) {
                             saveBookmarks(localBookmarks);
-                            console.log(`[NSL Sync] Добавлено ${bookmarkChanges} закладок разделов`);
+                            totalChanges += bmChanges;
+                            console.log(`[NSL Sync] Bookmarks: ${bmChanges} items added`);
                         }
                     }
                     
-                    // Синхронизация истории
+                    // ===== СИНХРОНИЗАЦИЯ ИСТОРИИ =====
                     if (remote.history && Array.isArray(remote.history)) {
                         const localHistory = getHistory();
                         const remoteMap = new Map();
@@ -1245,32 +1322,39 @@
                             remoteMap.set(hist.tmdb_id, hist);
                         }
                         
-                        let historyChanges = 0;
+                        let histChanges = 0;
                         for (const [tmdbId, remoteHist] of remoteMap) {
                             if (!localHistory.some(h => h.tmdb_id === tmdbId)) {
                                 localHistory.push(remoteHist);
-                                historyChanges++;
+                                histChanges++;
                             }
                         }
-                        if (historyChanges > 0) {
+                        
+                        if (histChanges > 0) {
                             localHistory.sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
                             saveHistory(localHistory);
-                            console.log(`[NSL Sync] Добавлено ${historyChanges} записей в историю`);
+                            totalChanges += histChanges;
+                            console.log(`[NSL Sync] History: ${histChanges} items added`);
                         }
                     }
 
-                    if (showNotify && changes > 0) {
-                        notify(`📥 Загружено ${changes} новых элементов`);
-                    } else if (showNotify) {
-                        notify('✅ Данные актуальны');
+                    Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
+                    
+                    if (showNotify) {
+                        if (totalChanges > 0) {
+                            notify(`📥 Синхронизировано: ${totalChanges} изменений`);
+                        } else {
+                            notify('✅ Данные актуальны');
+                        }
                     }
+                    
                 } catch(e) {
-                    console.error('[NSL Sync] Ошибка парсинга:', e);
+                    console.error('[NSL Sync] Parse error:', e);
                     if (showNotify) notify('❌ Ошибка чтения данных');
                 }
             },
             error: (xhr) => {
-                console.error('[NSL Sync] Ошибка загрузки:', xhr);
+                console.error('[NSL Sync] Load error:', xhr);
                 if (showNotify) notify('❌ Ошибка загрузки: ' + (xhr.responseJSON?.message || 'Unknown'));
             }
         });
@@ -1285,7 +1369,7 @@
         const interval = (c.sync_interval_minutes || 60) * 60 * 1000;
         
         if (now - lastSync > interval) {
-            console.log('[NSL Sync] Автосинхронизация по расписанию');
+            console.log('[NSL Sync] Auto-sync triggered');
             syncFromGist(false);
         }
     }
@@ -1305,16 +1389,17 @@
         const c = cfg();
         
         Lampa.Select.show({
-            title: 'NSL Sync v16',
+            title: 'NSL Sync v17',
             items: [
-                { title: `📌 Закладки разделов`, action: 'sections' },
-                { title: `⭐ Избранное`, action: 'favorites' },
-                { title: `📜 История`, action: 'history' },
-                { title: `⏱️ Таймкоды`, action: 'timeline' },
+                { title: `📌 Закладки разделов (${getBookmarks().length})`, action: 'sections' },
+                { title: `⭐ Избранное (${getFavorites().length})`, action: 'favorites' },
+                { title: `📜 История (${getHistory().length})`, action: 'history' },
+                { title: `⏱️ Таймкоды (${Object.keys(getTimeline()).length})`, action: 'timeline' },
                 { title: `⏱️ Продолжить просмотр`, action: 'continue' },
                 { title: `☁️ GitHub Gist`, action: 'gist' },
                 { title: '──────────', separator: true },
                 { title: `🔄 Синхронизировать сейчас`, action: 'sync_now' },
+                { title: `ℹ️ Профиль: ${PROFILE_ID}`, action: 'info' },
                 { title: `❌ Закрыть`, action: 'cancel' }
             ],
             onSelect: (item) => {
@@ -1325,8 +1410,13 @@
                 else if (item.action === 'continue') showContinueSettings();
                 else if (item.action === 'gist') showGistSetup();
                 else if (item.action === 'sync_now') {
+                    notify('🔄 Синхронизация...');
                     syncToGist(true);
                     setTimeout(() => syncFromGist(true), 1500);
+                }
+                else if (item.action === 'info') {
+                    notify(`Профиль: ${PROFILE_ID}`);
+                    showMainMenu();
                 }
             },
             onBack: () => {
@@ -1343,8 +1433,7 @@
             items: [
                 { title: `📍 Положение кнопки: ${c.button_position === 'side' ? 'Боковое меню' : 'Верхняя панель'}`, action: 'toggle_position' },
                 { title: `📌 Сохранить текущий раздел`, action: 'save_section' },
-                { title: `📋 Мои закладки (${getBookmarks().length})`, action: 'view_sections' },
-                { title: `🗑️ Очистить все`, action: 'clear_sections' },
+                { title: `🗑️ Очистить все (${getBookmarks().length})`, action: 'clear_sections' },
                 { title: '◀ Назад', action: 'back' }
             ],
             onSelect: (item) => {
@@ -1355,9 +1444,6 @@
                     showSectionsSettings();
                 } else if (item.action === 'save_section') {
                     saveBookmark();
-                    setTimeout(() => showSectionsSettings(), 1000);
-                } else if (item.action === 'view_sections') {
-                    renderBookmarks();
                     setTimeout(() => showSectionsSettings(), 1000);
                 } else if (item.action === 'clear_sections') {
                     saveBookmarks([]);
@@ -1441,6 +1527,7 @@
                 } else if (item.action === 'toggle_strategy') {
                     c.sync_strategy = c.sync_strategy === 'max_time' ? 'last_watch' : 'max_time';
                     saveCfg(c);
+                    notify(`Стратегия: ${c.sync_strategy === 'max_time' ? 'По длительности' : 'По дате'}`);
                     showTimelineSettings();
                 } else if (item.action === 'set_cleanup_days') {
                     Lampa.Input.edit({ title: 'Удалять старше (дней, 0 = откл)', value: String(c.cleanup_older_days), free: true, number: true }, (val) => {
@@ -1516,8 +1603,8 @@
                 { title: `🔑 Токен: ${c.gist_token ? '✓ Установлен' : '❌ Не установлен'}`, action: 'token' },
                 { title: `📄 Gist ID: ${c.gist_id ? c.gist_id.substring(0, 8) + '…' : '❌ Не установлен'}`, action: 'id' },
                 { title: '──────────', separator: true },
-                { title: '📤 Экспорт', action: 'upload' },
-                { title: '📥 Импорт', action: 'download' },
+                { title: '📤 Экспорт на Gist', action: 'upload' },
+                { title: '📥 Импорт с Gist', action: 'download' },
                 { title: '──────────', separator: true },
                 { title: '◀ Назад', action: 'back' }
             ],
@@ -1541,9 +1628,11 @@
                         showGistSetup();
                     });
                 } else if (item.action === 'upload') {
+                    notify('📤 Отправка на Gist...');
                     syncToGist(true);
                     setTimeout(() => showGistSetup(), 1500);
                 } else if (item.action === 'download') {
+                    notify('📥 Загрузка с Gist...');
                     syncFromGist(true);
                     setTimeout(() => showGistSetup(), 1500);
                 } else if (item.action === 'back') {
@@ -1589,7 +1678,7 @@
     function init() {
         if (!cfg().enabled) return;
 
-        console.log('[NSL Sync] Инициализация...');
+        console.log('[NSL Sync] Initializing v17 for profile:', PROFILE_ID);
 
         setTimeout(() => {
             addBookmarkButton();
@@ -1620,7 +1709,7 @@
             toggleFavorite
         };
         
-        console.log('[NSL Sync] Инициализация завершена');
+        console.log('[NSL Sync] Initialization complete');
     }
 
     if (window.appready) {
