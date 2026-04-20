@@ -15,10 +15,8 @@
     const CFG = 'nsl_cfg_v1';
     const GIST_CACHE = 'nsl_gist_cache';
 
-    // Глобальный объект для отладки
     window.NSL = {};
 
-    // Категории избранного
     const FAVORITE_CATEGORIES = [
         { id: 'favorite', name: '⭐ Избранное', icon: '⭐' },
         { id: 'watching', name: '👁️ Смотрю', icon: '👁️' },
@@ -28,7 +26,6 @@
         { id: 'collection', name: '📦 Коллекция', icon: '📦' }
     ];
 
-    // Типы контента для группировки
     const MEDIA_TYPES = {
         movie: { name: 'Фильмы', icon: '🎬', filter: (item) => !item.original_name && !item.animation },
         tv: { name: 'Сериалы', icon: '📺', filter: (item) => item.original_name && !item.animation && !item.anime },
@@ -37,7 +34,6 @@
         anime: { name: 'Аниме', icon: '🇯🇵', filter: (item) => item.anime }
     };
 
-    // ========= CONFIG =========
     function cfg() {
         return Lampa.Storage.get(CFG, {
             enabled: true,
@@ -68,12 +64,17 @@
         Lampa.Storage.set(CFG, c, true);
     }
 
-    // ========= STORAGE =========
     function getBookmarks() { return Lampa.Storage.get(STORE_BOOKMARKS, []) || []; }
     function saveBookmarks(l) { Lampa.Storage.set(STORE_BOOKMARKS, l, true); renderBookmarks(); }
     
     function getFavorites() { return Lampa.Storage.get(STORE_FAVORITES, []) || []; }
-    function saveFavorites(l) { Lampa.Storage.set(STORE_FAVORITES, l, true); }
+    function saveFavorites(l) { 
+        Lampa.Storage.set(STORE_FAVORITES, l, true); 
+        // Не обновляем UI синхронно, чтобы не блокировать
+        setTimeout(() => {
+            Lampa.Listener.send('state:changed', { target: 'nsl_favorites', reason: 'update' });
+        }, 100);
+    }
     
     function getHistory() { return Lampa.Storage.get(STORE_HISTORY, []) || []; }
     function saveHistory(l) { Lampa.Storage.set(STORE_HISTORY, l, true); }
@@ -81,7 +82,10 @@
     function getTimeline() { return Lampa.Storage.get(STORE_TIMELINE, {}) || {}; }
     function saveTimeline(t) { Lampa.Storage.set(STORE_TIMELINE, t, true); }
 
-    function notify(text) { Lampa.Noty.show(text); }
+    function notify(text) { 
+        // На Android нотификации могут вызывать задержку, делаем через setTimeout
+        setTimeout(() => Lampa.Noty.show(text), 50);
+    }
 
     function formatTime(seconds) {
         if (!seconds || seconds < 0) return '0:00';
@@ -126,18 +130,8 @@
         return cleaned;
     }
 
-    function getProfileId() {
-        const c = cfg();
-        if (c.manual_profile_id) return c.manual_profile_id;
-        let profileId = Lampa.Storage.get('profile_id', '');
-        if (profileId) return String(profileId);
-        const accountUser = Lampa.Storage.get('account_user', {});
-        if (accountUser.profile) return String(accountUser.profile);
-        return '';
-    }
-
     // ======================
-    // 2. ЗАКЛАДКИ РАЗДЕЛОВ (из ybt.js)
+    // 2. ЗАКЛАДКИ РАЗДЕЛОВ
     // ======================
     
     const ICON_FLAG = '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/></svg>';
@@ -222,7 +216,7 @@
 
             const c = cfg();
             if (c.sync_on_add && c.gist_token && c.gist_id) {
-                syncToGist(false);
+                setTimeout(() => syncToGist(false), 100);
             }
 
             notify('Сохранено');
@@ -327,7 +321,7 @@
     }
 
     // ======================
-    // 3. ИЗБРАННОЕ
+    // 3. ИЗБРАННОЕ (с асинхронным сохранением)
     // ======================
     
     function addToFavorites(card, category) {
@@ -355,8 +349,12 @@
             favorites.push(favoriteItem);
         }
         
-        saveFavorites(favorites);
-        checkAutoAbandoned();
+        // Асинхронное сохранение, чтобы не блокировать UI на Android
+        setTimeout(() => {
+            saveFavorites(favorites);
+            checkAutoAbandoned();
+        }, 50);
+        
         return true;
     }
     
@@ -367,7 +365,7 @@
         
         if (index >= 0) {
             favorites.splice(index, 1);
-            saveFavorites(favorites);
+            setTimeout(() => saveFavorites(favorites), 50);
             return true;
         }
         return false;
@@ -384,10 +382,6 @@
     
     function getFavoritesByCategory(category) {
         return getFavorites().filter(f => f.category === category);
-    }
-    
-    function getFavoritesByMediaType(category, mediaType) {
-        return getFavorites().filter(f => f.category === category && f.media_type === mediaType);
     }
     
     function checkAutoAbandoned() {
@@ -411,8 +405,8 @@
         }
         
         if (changed) {
-            saveFavorites(favorites);
-            notify('📦 Некоторые позиции перемещены в "Брошено"');
+            setTimeout(() => saveFavorites(favorites), 50);
+            setTimeout(() => notify('📦 Некоторые позиции перемещены в "Брошено"'), 100);
         }
     }
     
@@ -433,7 +427,7 @@
     }
 
     // ======================
-    // 4. ИСТОРИЯ ПРОСМОТРОВ
+    // 4. ИСТОРИЯ
     // ======================
     
     function addToHistory(card, progress) {
@@ -491,7 +485,7 @@
     }
 
     // ======================
-    // 5. ТАЙМКОДЫ / ПРОГРЕСС
+    // 5. ТАЙМКОДЫ
     // ======================
     
     let playerInterval = null;
@@ -617,7 +611,7 @@
             
             if (wasPlayerOpen && !isPlayerOpen && currentMovieTime > 0) {
                 saveProgress(currentMovieTime, true);
-                if (c.auto_sync) syncToGist(false);
+                if (c.auto_sync) setTimeout(() => syncToGist(false), 100);
             }
             
             wasPlayerOpen = isPlayerOpen;
@@ -635,7 +629,7 @@
                     if (saveProgress(currentTime)) {
                         const now = Date.now();
                         if (c.auto_sync && (now - lastSyncToGist) >= (c.sync_interval * 1000)) {
-                            syncToGist(false);
+                            setTimeout(() => syncToGist(false), 100);
                             lastSyncToGist = now;
                         }
                     }
@@ -724,7 +718,7 @@
     }
 
     // ======================
-    // 7. КНОПКА НА КАРТОЧКЕ
+    // 7. КНОПКА НА КАРТОЧКЕ (исправлено зависание)
     // ======================
     
     function addFavoriteButtonToCard() {
@@ -775,15 +769,20 @@
                                 title: 'Добавить в избранное',
                                 items: items,
                                 onCheck: (item) => {
-                                    toggleFavorite(movie, item.category);
-                                    const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
-                                    button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
+                                    // Асинхронно обновляем, чтобы не блокировать UI на Android
+                                    setTimeout(() => {
+                                        toggleFavorite(movie, item.category);
+                                        const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
+                                        button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
+                                    }, 50);
                                 },
                                 onSelect: (item) => {
                                     if (item.action === 'close') return;
-                                    toggleFavorite(movie, item.category);
-                                    const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
-                                    button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
+                                    setTimeout(() => {
+                                        toggleFavorite(movie, item.category);
+                                        const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
+                                        button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
+                                    }, 50);
                                 }
                             });
                         });
@@ -898,7 +897,6 @@
             return;
         }
         
-        // Группируем по типам контента
         const grouped = {};
         for (const type in MEDIA_TYPES) {
             grouped[type] = items.filter(item => item.media_type === type);
@@ -1055,7 +1053,7 @@
     }
 
     // ======================
-    // 9. GITHUB GIST СИНХРОНИЗАЦИЯ
+    // 9. GITHUB GIST СИНХРОНИЗАЦИЯ (исправлено - все данные)
     // ======================
 
     function getGistData() {
@@ -1065,7 +1063,7 @@
     }
 
     function getAllSyncData() {
-        return {
+        const data = {
             version: 2,
             updated: new Date().toISOString(),
             bookmarks: getBookmarks(),
@@ -1073,6 +1071,13 @@
             history: getHistory(),
             timeline: getTimeline()
         };
+        console.log('[NSL Sync] Подготовлены данные для синхронизации:', {
+            bookmarks: data.bookmarks.length,
+            favorites: data.favorites.length,
+            history: data.history.length,
+            timeline: Object.keys(data.timeline).length
+        });
+        return data;
     }
 
     function syncToGist(showNotify = true) {
@@ -1082,16 +1087,29 @@
             return false;
         }
 
+        const allData = getAllSyncData();
+        
+        // Проверяем, есть ли вообще данные для отправки
+        const hasData = allData.bookmarks.length > 0 || allData.favorites.length > 0 || 
+                        allData.history.length > 0 || Object.keys(allData.timeline).length > 0;
+        
+        if (!hasData && showNotify) {
+            notify('📭 Нет данных для синхронизации');
+            return false;
+        }
+
         const data = {
             description: 'NSL Sync Data',
             public: false,
             files: {
                 'nsl_sync.json': {
-                    content: JSON.stringify(getAllSyncData(), null, 2)
+                    content: JSON.stringify(allData, null, 2)
                 }
             }
         };
 
+        console.log('[NSL Sync] Отправка данных на Gist...');
+        
         $.ajax({
             url: `https://api.github.com/gists/${gist.id}`,
             method: 'PATCH',
@@ -1103,10 +1121,11 @@
             success: () => {
                 if (showNotify) notify('✅ Данные отправлены в Gist');
                 Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
+                console.log('[NSL Sync] Данные успешно отправлены');
             },
             error: (xhr) => {
-                console.error('[NSL] Sync error:', xhr);
-                if (showNotify) notify('❌ Ошибка: ' + (xhr.responseJSON?.message || 'Unknown'));
+                console.error('[NSL Sync] Ошибка отправки:', xhr);
+                if (showNotify) notify('❌ Ошибка отправки: ' + (xhr.responseJSON?.message || 'Unknown'));
             }
         });
     }
@@ -1118,6 +1137,8 @@
             return false;
         }
 
+        console.log('[NSL Sync] Загрузка данных с Gist...');
+        
         $.ajax({
             url: `https://api.github.com/gists/${gist.id}`,
             method: 'GET',
@@ -1134,6 +1155,13 @@
                     }
 
                     const remote = JSON.parse(content);
+                    console.log('[NSL Sync] Загружены данные:', {
+                        bookmarks: remote.bookmarks?.length || 0,
+                        favorites: remote.favorites?.length || 0,
+                        history: remote.history?.length || 0,
+                        timeline: remote.timeline ? Object.keys(remote.timeline).length : 0
+                    });
+                    
                     const strategy = cfg().sync_strategy;
                     let changes = 0;
                     
@@ -1151,7 +1179,10 @@
                                 changes++;
                             }
                         }
-                        if (changes > 0) saveFavorites(localFavs);
+                        if (changes > 0) {
+                            saveFavorites(localFavs);
+                            console.log(`[NSL Sync] Добавлено ${changes} новых элементов в избранное`);
+                        }
                     }
                     
                     // Синхронизация таймкодов
@@ -1179,7 +1210,10 @@
                             }
                         }
                         
-                        if (timelineChanges > 0) saveTimeline(localTimeline);
+                        if (timelineChanges > 0) {
+                            saveTimeline(localTimeline);
+                            console.log(`[NSL Sync] Обновлено ${timelineChanges} таймкодов`);
+                        }
                     }
                     
                     // Синхронизация закладок разделов
@@ -1197,7 +1231,10 @@
                                 bookmarkChanges++;
                             }
                         }
-                        if (bookmarkChanges > 0) saveBookmarks(localBookmarks);
+                        if (bookmarkChanges > 0) {
+                            saveBookmarks(localBookmarks);
+                            console.log(`[NSL Sync] Добавлено ${bookmarkChanges} закладок разделов`);
+                        }
                     }
                     
                     // Синхронизация истории
@@ -1218,6 +1255,7 @@
                         if (historyChanges > 0) {
                             localHistory.sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
                             saveHistory(localHistory);
+                            console.log(`[NSL Sync] Добавлено ${historyChanges} записей в историю`);
                         }
                     }
 
@@ -1227,12 +1265,12 @@
                         notify('✅ Данные актуальны');
                     }
                 } catch(e) {
-                    console.error('[NSL] Parse error:', e);
+                    console.error('[NSL Sync] Ошибка парсинга:', e);
                     if (showNotify) notify('❌ Ошибка чтения данных');
                 }
             },
             error: (xhr) => {
-                console.error('[NSL] Error:', xhr);
+                console.error('[NSL Sync] Ошибка загрузки:', xhr);
                 if (showNotify) notify('❌ Ошибка загрузки: ' + (xhr.responseJSON?.message || 'Unknown'));
             }
         });
@@ -1247,6 +1285,7 @@
         const interval = (c.sync_interval_minutes || 60) * 60 * 1000;
         
         if (now - lastSync > interval) {
+            console.log('[NSL Sync] Автосинхронизация по расписанию');
             syncFromGist(false);
         }
     }
@@ -1569,7 +1608,6 @@
         
         window.addEventListener('beforeunload', onAppClose);
         
-        // Экспортируем методы для отладки
         window.NSL = {
             cfg,
             getFavorites,
@@ -1577,7 +1615,9 @@
             getHistory,
             getTimeline,
             syncToGist,
-            syncFromGist
+            syncFromGist,
+            addToFavorites,
+            toggleFavorite
         };
         
         console.log('[NSL Sync] Инициализация завершена');
