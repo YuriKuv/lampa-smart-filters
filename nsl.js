@@ -9,7 +9,10 @@
     // ======================
     
     const isAndroid = navigator.userAgent.toLowerCase().indexOf('android') > -1 || 
-                      (window.AndroidJS !== undefined);
+                      (typeof window.AndroidJS !== 'undefined');
+    
+    // Защита от рекурсии в Select
+    let _closingSelect = false;
     
     function getProfileId() {
         try {
@@ -18,11 +21,11 @@
             const profileId = profile.id;
             
             if (profileId) {
-                console.log('[NSL Sync] Profile ID:', profileId);
+                console.log('[NSL] Profile ID:', profileId);
                 return String(profileId);
             }
         } catch (e) {
-            console.warn('[NSL Sync] Error getting profile:', e);
+            console.warn('[NSL] Error getting profile:', e);
         }
         
         return 'default';
@@ -277,10 +280,7 @@
                     onSelect: (a) => {
                         if (a.action === 'remove') removeBookmark(item);
                     },
-                    onBack: () => {
-                        // Исправление для Android: не закрываем через Controller.toggle
-                        Lampa.Select.close();
-                    }
+                    onBack: () => {}
                 });
             });
 
@@ -425,7 +425,7 @@
                     notify('🗑️ Избранное очищено');
                 }
             },
-            onBack: () => Lampa.Select.close()
+            onBack: () => {}
         });
     }
 
@@ -474,7 +474,7 @@
                     notify('🗑️ История очищена');
                 }
             },
-            onBack: () => Lampa.Select.close()
+            onBack: () => {}
         });
     }
     
@@ -484,13 +484,14 @@
     }
 
     // ======================
-    // ТАЙМКОДЫ
+    // ТАЙМКОДЫ (ИСПРАВЛЕНО)
     // ======================
     
     let playerInterval = null;
     let currentMovieTime = 0;
     let currentMovieKey = null;
     let lastSavedProgress = 0;
+    let videoDuration = 0;
     
     function getCurrentMovieKey() {
         try {
@@ -524,6 +525,35 @@
         return null;
     }
     
+    function getVideoDuration() {
+        // Пробуем получить duration из разных источников
+        try {
+            // Способ 1: из timeline плеера
+            const playerData = Lampa.Player.playdata();
+            if (playerData?.timeline?.duration && playerData.timeline.duration > 0) {
+                return playerData.timeline.duration;
+            }
+            
+            // Способ 2: напрямую из video элемента
+            const video = document.querySelector('video');
+            if (video && video.duration && !isNaN(video.duration) && video.duration > 0) {
+                return video.duration;
+            }
+            
+            // Способ 3: из Lampa.Player.video()
+            if (Lampa.Player.video) {
+                const videoObj = Lampa.Player.video();
+                if (videoObj && videoObj.duration && !isNaN(videoObj.duration) && videoObj.duration > 0) {
+                    return videoObj.duration;
+                }
+            }
+        } catch (e) {
+            console.warn('[NSL] Error getting duration:', e);
+        }
+        
+        return videoDuration || 0;
+    }
+    
     function saveProgress(timeInSeconds, force = false) {
         const c = cfg();
         if (!c.auto_save && !force) return false;
@@ -536,8 +566,13 @@
         const savedTime = timeline[movieKey]?.time || 0;
         
         if (force || Math.abs(currentTime - savedTime) >= 10) {
-            const playerData = Lampa.Player.playdata();
-            const duration = playerData?.timeline?.duration || 0;
+            let duration = getVideoDuration();
+            
+            // Если duration всё ещё 0, пробуем взять из существующей записи
+            if (!duration && timeline[movieKey]?.duration) {
+                duration = timeline[movieKey].duration;
+            }
+            
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
             const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
             
@@ -553,7 +588,7 @@
             lastSavedProgress = currentTime;
             currentMovieTime = currentTime;
             
-            console.log(`[NSL] Progress: ${movieKey} - ${percent}%`);
+            console.log(`[NSL] Progress: ${movieKey} - ${currentTime}s / ${duration}s (${percent}%)`);
             
             if (Lampa.Timeline?.update) {
                 Lampa.Timeline.update({
@@ -582,7 +617,16 @@
             const isPlayerOpen = Lampa.Player.opened();
             const currentTime = getCurrentPlayerTime();
             
+            // Получаем duration при открытии плеера
+            if (isPlayerOpen && !wasPlayerOpen) {
+                setTimeout(() => {
+                    videoDuration = getVideoDuration();
+                    console.log('[NSL] Video duration detected:', videoDuration);
+                }, 2000);
+            }
+            
             if (wasPlayerOpen && !isPlayerOpen && currentMovieTime > 0) {
+                console.log('[NSL] Player closed, saving final progress');
                 saveProgress(currentMovieTime, true);
                 if (c.auto_sync) setTimeout(() => syncToGist(false), 100);
             }
@@ -596,6 +640,8 @@
                 if (movieKey && movieKey !== currentMovieKey) {
                     currentMovieKey = movieKey;
                     lastSavedProgress = 0;
+                    videoDuration = 0;
+                    console.log(`[NSL] New movie: ${movieKey}`);
                 }
                 
                 if (c.auto_save && Math.floor(currentTime) - lastSavedProgress >= 10) {
@@ -652,31 +698,21 @@
                     notify('🗑️ Таймкоды очищены');
                 }
             },
-            onBack: () => Lampa.Select.close()
+            onBack: () => {}
         });
     }
 
     // ======================
-    // ПРОДОЛЖИТЬ ПРОСМОТР (ИСПРАВЛЕНО)
+    // ПРОДОЛЖИТЬ ПРОСМОТР
     // ======================
     
     function getContinueWatching() {
         const c = cfg();
-        if (!c.show_continue) {
-            console.log('[NSL] Continue watching disabled');
-            return [];
-        }
+        if (!c.show_continue) return [];
         
         const timeline = getTimeline();
         const favorites = getFavorites();
         const result = [];
-        
-        console.log('[NSL] Checking continue watching:', {
-            timelineCount: Object.keys(timeline).length,
-            favoritesCount: favorites.length,
-            minProgress: c.continue_min_progress,
-            maxProgress: c.continue_max_progress
-        });
         
         for (const [key, timelineItem] of Object.entries(timeline)) {
             const percent = timelineItem.percent || 0;
@@ -684,8 +720,7 @@
             if (percent >= c.continue_min_progress && percent <= c.continue_max_progress) {
                 const favoriteItem = favorites.find(f => f.tmdb_id === timelineItem.tmdb_id);
                 
-                // Берем данные из избранного, если есть, иначе создаем базовый объект
-                const item = {
+                result.push({
                     key: key,
                     tmdb_id: timelineItem.tmdb_id,
                     time: timelineItem.time || 0,
@@ -696,16 +731,11 @@
                         id: timelineItem.tmdb_id, 
                         title: `ID: ${timelineItem.tmdb_id}` 
                     }
-                };
-                
-                result.push(item);
-                console.log(`[NSL] Continue item: ${key} - ${percent}%`);
+                });
             }
         }
         
         result.sort((a, b) => (b.updated || 0) - (a.updated || 0));
-        console.log(`[NSL] Continue items found: ${result.length}`);
-        
         return result;
     }
 
@@ -775,7 +805,7 @@
                                         button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
                                     }, 50);
                                 },
-                                onBack: () => Lampa.Select.close()
+                                onBack: () => {}
                             });
                         });
                         
@@ -795,15 +825,12 @@
     }
 
     // ======================
-    // МЕНЮ (ИСПРАВЛЕНО ДЛЯ ANDROID)
+    // МЕНЮ
     // ======================
     
     function addFavoritesToMenu() {
         const menuList = $('.menu__list').eq(1);
-        if (!menuList.length) {
-            console.log('[NSL] Menu list not found for favorites');
-            return;
-        }
+        if (!menuList.length) return;
         if ($('.nsl-favorites-item').length) return;
         
         const el = $(`
@@ -818,7 +845,6 @@
         });
 
         menuList.append(el);
-        console.log('[NSL] Favorites menu added');
     }
     
     function addHistoryToMenu() {
@@ -838,30 +864,19 @@
         });
 
         menuList.append(el);
-        console.log('[NSL] History menu added');
     }
     
     function addContinueToMenu() {
         const c = cfg();
-        if (!c.show_continue) {
-            console.log('[NSL] Continue menu disabled in config');
-            return;
-        }
+        if (!c.show_continue) return;
         
         const continueItems = getContinueWatching();
         
-        if (continueItems.length === 0) {
-            console.log('[NSL] No continue items to show');
-            return;
-        }
+        if (continueItems.length === 0) return;
         
         const menuList = $('.menu__list').eq(1);
-        if (!menuList.length) {
-            console.log('[NSL] Menu list not found for continue');
-            return;
-        }
+        if (!menuList.length) return;
         
-        // Удаляем старую кнопку если есть
         $('.nsl-continue-item').remove();
         
         const el = $(`
@@ -876,7 +891,6 @@
         });
 
         menuList.append(el);
-        console.log(`[NSL] Continue menu added with ${continueItems.length} items`);
     }
     
     function showFavoritesMenu() {
@@ -890,15 +904,12 @@
         
         items.push({ title: '──────────', separator: true });
         items.push({ title: '🗑️ Очистить всё', onSelect: () => clearAllFavorites() });
-        items.push({ title: '❌ Закрыть', onSelect: () => Lampa.Select.close() });
+        items.push({ title: '❌ Закрыть', onSelect: () => {} });
         
         Lampa.Select.show({
             title: '⭐ Избранное',
             items: items,
-            onBack: () => {
-                Lampa.Select.close();
-                if (!isAndroid) Lampa.Controller.toggle('menu');
-            }
+            onBack: () => {}
         });
     }
     
@@ -928,12 +939,12 @@
         
         menuItems.push({ title: '──────────', separator: true });
         menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesMenu() });
-        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Select.close() });
+        menuItems.push({ title: '❌ Закрыть', onSelect: () => {} });
         
         Lampa.Select.show({
             title: categoryName,
             items: menuItems,
-            onBack: () => showFavoritesMenu()
+            onBack: () => {}
         });
     }
     
@@ -959,19 +970,19 @@
                             showFavoritesByCategory(item.category, title.split(' - ')[0]);
                         }
                     },
-                    onBack: () => Lampa.Select.close()
+                    onBack: () => {}
                 });
             }
         }));
         
         menuItems.push({ title: '──────────', separator: true });
         menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesByCategory(items[0]?.category, title.split(' - ')[0]) });
-        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Select.close() });
+        menuItems.push({ title: '❌ Закрыть', onSelect: () => {} });
         
         Lampa.Select.show({
             title: title,
             items: menuItems,
-            onBack: () => showFavoritesByCategory(items[0]?.category, title.split(' - ')[0])
+            onBack: () => {}
         });
     }
     
@@ -995,15 +1006,12 @@
         
         items.push({ title: '──────────', separator: true });
         items.push({ title: '🗑️ Очистить историю', onSelect: () => clearHistory() });
-        items.push({ title: '❌ Закрыть', onSelect: () => Lampa.Select.close() });
+        items.push({ title: '❌ Закрыть', onSelect: () => {} });
         
         Lampa.Select.show({
             title: '📜 История просмотров',
             items: items,
-            onBack: () => {
-                Lampa.Select.close();
-                if (!isAndroid) Lampa.Controller.toggle('menu');
-            }
+            onBack: () => {}
         });
     }
     
@@ -1028,12 +1036,12 @@
         
         menuItems.push({ title: '──────────', separator: true });
         menuItems.push({ title: '◀ Назад', onSelect: () => showHistoryMenu() });
-        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Select.close() });
+        menuItems.push({ title: '❌ Закрыть', onSelect: () => {} });
         
         Lampa.Select.show({
             title: title,
             items: menuItems,
-            onBack: () => showHistoryMenu()
+            onBack: () => {}
         });
     }
     
@@ -1060,20 +1068,17 @@
         });
         
         menuItems.push({ title: '──────────', separator: true });
-        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Select.close() });
+        menuItems.push({ title: '❌ Закрыть', onSelect: () => {} });
         
         Lampa.Select.show({
             title: '⏱️ Продолжить просмотр',
             items: menuItems,
-            onBack: () => {
-                Lampa.Select.close();
-                if (!isAndroid) Lampa.Controller.toggle('menu');
-            }
+            onBack: () => {}
         });
     }
 
     // ======================
-    // GITHUB GIST СИНХРОНИЗАЦИЯ (ИСПРАВЛЕНО ДЛЯ ANDROID)
+    // GITHUB GIST СИНХРОНИЗАЦИЯ
     // ======================
 
     function getGistData() {
@@ -1092,12 +1097,6 @@
             history: getHistory(),
             timeline: getTimeline()
         };
-        console.log('[NSL] Sync data prepared:', {
-            bookmarks: data.bookmarks.length,
-            favorites: data.favorites.length,
-            history: data.history.length,
-            timeline: Object.keys(data.timeline).length
-        });
         return data;
     }
 
@@ -1128,9 +1127,6 @@
             }
         };
 
-        console.log('[NSL] Sending to Gist...');
-        
-        // Используем fetch для Android (лучше совместимость)
         const ajaxOptions = {
             url: `https://api.github.com/gists/${gist.id}`,
             method: 'PATCH',
@@ -1143,22 +1139,14 @@
             success: () => {
                 if (showNotify) notify('✅ Данные отправлены в Gist');
                 Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
-                console.log('[NSL] Data sent successfully');
             },
             error: (xhr, status, error) => {
                 console.error('[NSL] Send error:', status, error);
-                if (showNotify) {
-                    if (status === 'error' && !error) {
-                        notify('❌ Ошибка сети. Проверьте интернет.');
-                    } else {
-                        notify('❌ Ошибка отправки');
-                    }
-                }
+                if (showNotify) notify('❌ Ошибка отправки');
             },
-            timeout: 15000 // 15 секунд таймаут
+            timeout: 15000
         };
         
-        // На Android используем $.ajax с дополнительными настройками
         if (isAndroid) {
             ajaxOptions.crossDomain = true;
             ajaxOptions.xhrFields = { withCredentials: false };
@@ -1174,8 +1162,6 @@
             return false;
         }
 
-        console.log('[NSL] Loading from Gist...');
-        
         const ajaxOptions = {
             url: `https://api.github.com/gists/${gist.id}`,
             method: 'GET',
@@ -1192,14 +1178,6 @@
                     }
 
                     const remote = JSON.parse(content);
-                    
-                    console.log('[NSL] Loaded data:', {
-                        version: remote.version || 1,
-                        bookmarks: remote.bookmarks?.length || 0,
-                        favorites: remote.favorites?.length || 0,
-                        history: remote.history?.length || 0,
-                        timeline: remote.timeline ? Object.keys(remote.timeline).length : 0
-                    });
                     
                     const strategy = cfg().sync_strategy;
                     let totalChanges = 0;
@@ -1244,7 +1222,6 @@
                         if (timelineChanges > 0) {
                             saveTimeline(localTimeline);
                             totalChanges += timelineChanges;
-                            console.log(`[NSL] Timeline: ${timelineChanges} updated`);
                         }
                     }
                     
@@ -1272,7 +1249,6 @@
                         if (favChanges > 0) {
                             saveFavorites(localFavs);
                             totalChanges += favChanges;
-                            console.log(`[NSL] Favorites: ${favChanges} updated`);
                         }
                     }
                     
@@ -1291,7 +1267,6 @@
                         if (bmChanges > 0) {
                             saveBookmarks(localBookmarks);
                             totalChanges += bmChanges;
-                            console.log(`[NSL] Bookmarks: ${bmChanges} added`);
                         }
                     }
                     
@@ -1311,7 +1286,6 @@
                             localHistory.sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
                             saveHistory(localHistory);
                             totalChanges += histChanges;
-                            console.log(`[NSL] History: ${histChanges} added`);
                         }
                     }
 
@@ -1325,7 +1299,6 @@
                         }
                     }
                     
-                    // Обновляем меню после синхронизации
                     setTimeout(() => {
                         addContinueToMenu();
                         renderBookmarks();
@@ -1338,13 +1311,7 @@
             },
             error: (xhr, status, error) => {
                 console.error('[NSL] Load error:', status, error);
-                if (showNotify) {
-                    if (status === 'error' && !error) {
-                        notify('❌ Ошибка сети. Проверьте интернет.');
-                    } else {
-                        notify('❌ Ошибка загрузки');
-                    }
-                }
+                if (showNotify) notify('❌ Ошибка загрузки');
             },
             timeout: 15000
         };
@@ -1366,7 +1333,6 @@
         const interval = (c.sync_interval_minutes || 60) * 60 * 1000;
         
         if (now - lastSync > interval) {
-            console.log('[NSL] Auto-sync triggered');
             syncFromGist(false);
         }
     }
@@ -1379,14 +1345,12 @@
     }
 
     // ======================
-    // НАСТРОЙКИ (ИСПРАВЛЕНО ДЛЯ ANDROID)
+    // НАСТРОЙКИ
     // ======================
 
     function showMainMenu() {
-        const c = cfg();
-        
         Lampa.Select.show({
-            title: 'NSL Sync v18',
+            title: 'NSL Sync v19',
             items: [
                 { title: `📌 Закладки разделов (${getBookmarks().length})`, action: 'sections' },
                 { title: `⭐ Избранное (${getFavorites().length})`, action: 'favorites' },
@@ -1412,11 +1376,11 @@
                     setTimeout(() => syncFromGist(true), 1500);
                 }
                 else if (item.action === 'info') {
-                    notify(`Профиль: ${PROFILE_ID}\nПлатформа: ${isAndroid ? 'Android' : 'Web'}`);
+                    notify(`Профиль: ${PROFILE_ID}`);
                     showMainMenu();
                 }
             },
-            onBack: () => Lampa.Select.close()
+            onBack: () => {}
         });
     }
     
@@ -1448,7 +1412,7 @@
                     showMainMenu();
                 }
             },
-            onBack: () => showMainMenu()
+            onBack: () => {}
         });
     }
     
@@ -1483,7 +1447,7 @@
                     showMainMenu();
                 }
             },
-            onBack: () => showMainMenu()
+            onBack: () => {}
         });
     }
     
@@ -1548,7 +1512,7 @@
                     showMainMenu();
                 }
             },
-            onBack: () => showMainMenu()
+            onBack: () => {}
         });
     }
     
@@ -1589,7 +1553,7 @@
                     showMainMenu();
                 }
             },
-            onBack: () => showMainMenu()
+            onBack: () => {}
         });
     }
     
@@ -1638,7 +1602,7 @@
                     showMainMenu();
                 }
             },
-            onBack: () => showMainMenu()
+            onBack: () => {}
         });
     }
 
@@ -1678,7 +1642,7 @@
     function init() {
         if (!cfg().enabled) return;
 
-        console.log('[NSL] Init v18 for profile:', PROFILE_ID, 'Android:', isAndroid);
+        console.log('[NSL] Init v19 for profile:', PROFILE_ID);
 
         setTimeout(() => {
             addBookmarkButton();
@@ -1695,7 +1659,6 @@
         startAutoSync();
         onAppStart();
         
-        // Обновляем меню при изменении состояния
         Lampa.Listener.follow('state:changed', (e) => {
             if (e.target === 'nsl_favorites' || e.target === 'timeline') {
                 setTimeout(addContinueToMenu, 100);
@@ -1714,6 +1677,7 @@
             syncFromGist,
             addToFavorites,
             toggleFavorite,
+            addContinueToMenu,
             debug: () => ({
                 profile: PROFILE_ID,
                 isAndroid,
