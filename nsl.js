@@ -525,34 +525,47 @@
         return null;
     }
     
-    function getVideoDuration() {
-        // Пробуем получить duration из разных источников
-        try {
-            // Способ 1: из timeline плеера
-            const playerData = Lampa.Player.playdata();
-            if (playerData?.timeline?.duration && playerData.timeline.duration > 0) {
-                return playerData.timeline.duration;
-            }
-            
-            // Способ 2: напрямую из video элемента
-            const video = document.querySelector('video');
-            if (video && video.duration && !isNaN(video.duration) && video.duration > 0) {
-                return video.duration;
-            }
-            
-            // Способ 3: из Lampa.Player.video()
-            if (Lampa.Player.video) {
-                const videoObj = Lampa.Player.video();
-                if (videoObj && videoObj.duration && !isNaN(videoObj.duration) && videoObj.duration > 0) {
-                    return videoObj.duration;
-                }
-            }
-        } catch (e) {
-            console.warn('[NSL] Error getting duration:', e);
+function getVideoDuration() {
+    // Пробуем получить duration из разных источников
+    try {
+        // Способ 1: из timeline плеера
+        const playerData = Lampa.Player.playdata();
+        if (playerData?.timeline?.duration && playerData.timeline.duration > 0) {
+            console.log('[NSL] Duration from playerData.timeline:', playerData.timeline.duration);
+            return playerData.timeline.duration;
         }
         
-        return videoDuration || 0;
+        // Способ 2: напрямую из video элемента
+        const video = document.querySelector('video');
+        if (video && video.duration && !isNaN(video.duration) && video.duration > 0 && video.duration < Infinity) {
+            console.log('[NSL] Duration from video element:', video.duration);
+            return video.duration;
+        }
+        
+        // Способ 3: из Lampa.Player.video()
+        if (Lampa.Player.video) {
+            const videoObj = Lampa.Player.video();
+            if (videoObj && videoObj.duration && !isNaN(videoObj.duration) && videoObj.duration > 0 && videoObj.duration < Infinity) {
+                console.log('[NSL] Duration from Lampa.Player.video():', videoObj.duration);
+                return videoObj.duration;
+            }
+        }
+        
+        // Способ 4: из data-duration атрибута
+        const videoWithDuration = document.querySelector('[data-duration]');
+        if (videoWithDuration) {
+            const dur = parseFloat(videoWithDuration.getAttribute('data-duration'));
+            if (dur > 0) {
+                console.log('[NSL] Duration from data-duration:', dur);
+                return dur;
+            }
+        }
+    } catch (e) {
+        console.warn('[NSL] Error getting duration:', e);
     }
+    
+    return videoDuration || 0;
+}
     
     function saveProgress(timeInSeconds, force = false) {
         const c = cfg();
@@ -604,60 +617,142 @@
         return false;
     }
     
-    function initPlayerHandler() {
-        let wasPlayerOpen = false;
-        let lastSyncToGist = 0;
+function initPlayerHandler() {
+    let wasPlayerOpen = false;
+    let lastSyncToGist = 0;
+    
+    if (playerInterval) clearInterval(playerInterval);
+    
+    playerInterval = setInterval(() => {
+        const c = cfg();
+        if (!c.enabled) return;
         
-        if (playerInterval) clearInterval(playerInterval);
+        const isPlayerOpen = Lampa.Player.opened();
+        const currentTime = getCurrentPlayerTime();
         
-        playerInterval = setInterval(() => {
-            const c = cfg();
-            if (!c.enabled) return;
-            
-            const isPlayerOpen = Lampa.Player.opened();
-            const currentTime = getCurrentPlayerTime();
-            
-            // Получаем duration при открытии плеера
-            if (isPlayerOpen && !wasPlayerOpen) {
-                setTimeout(() => {
-                    videoDuration = getVideoDuration();
-                    console.log('[NSL] Video duration detected:', videoDuration);
-                }, 2000);
-            }
-            
-            if (wasPlayerOpen && !isPlayerOpen && currentMovieTime > 0) {
-                console.log('[NSL] Player closed, saving final progress');
-                saveProgress(currentMovieTime, true);
-                if (c.auto_sync) setTimeout(() => syncToGist(false), 100);
-            }
-            
-            wasPlayerOpen = isPlayerOpen;
-            
-            if (isPlayerOpen && currentTime !== null && currentTime > 0) {
-                currentMovieTime = currentTime;
+        // Получаем duration при открытии плеера
+        if (isPlayerOpen && !wasPlayerOpen) {
+            console.log('[NSL] Player opened');
+            setTimeout(() => {
+                videoDuration = getVideoDuration();
+                console.log('[NSL] Video duration detected:', videoDuration);
+                
+                // Принудительно сохраняем начальный прогресс
                 const movieKey = getCurrentMovieKey();
-                
-                if (movieKey && movieKey !== currentMovieKey) {
-                    currentMovieKey = movieKey;
-                    lastSavedProgress = 0;
-                    videoDuration = 0;
-                    console.log(`[NSL] New movie: ${movieKey}`);
-                }
-                
-                if (c.auto_save && Math.floor(currentTime) - lastSavedProgress >= 10) {
-                    if (saveProgress(currentTime)) {
-                        const now = Date.now();
-                        if (c.auto_sync && (now - lastSyncToGist) >= c.sync_interval * 1000) {
-                            setTimeout(() => syncToGist(false), 100);
-                            lastSyncToGist = now;
+                if (movieKey) {
+                    const timeline = getTimeline();
+                    const existing = timeline[movieKey];
+                    
+                    // Если есть сохраненный прогресс и стратегия "продолжить" - восстанавливаем
+                    if (existing && existing.time > 10 && existing.percent < 90) {
+                        const playerTimeCode = Lampa.Storage.field('player_timecode');
+                        if (playerTimeCode === 'continue' || playerTimeCode === 'ask') {
+                            console.log('[NSL] Restoring progress:', existing.time, 's');
+                            // Lampa сама восстановит прогресс через timeline
                         }
                     }
                 }
-            }
-        }, 1000);
+            }, 2000);
+        }
         
-        console.log('[NSL] Player handler started');
-    }
+        // При закрытии плеера сохраняем прогресс и синхронизируем
+        if (wasPlayerOpen && !isPlayerOpen) {
+            console.log('[NSL] Player closed, saving final progress');
+            
+            if (currentMovieTime > 0) {
+                // Сохраняем прогресс
+                saveProgress(currentMovieTime, true);
+                
+                // Добавляем в историю если просмотрено > 90%
+                if (videoDuration > 0) {
+                    const percent = Math.round((currentMovieTime / videoDuration) * 100);
+                    if (percent >= 90) {
+                        const activity = Lampa.Activity.active();
+                        if (activity && activity.movie) {
+                            addToHistory(activity.movie, { percent: percent });
+                            console.log('[NSL] Added to history:', percent + '%');
+                        }
+                    }
+                }
+                
+                // Принудительная синхронизация при закрытии плеера
+                if (c.auto_sync && c.gist_token && c.gist_id) {
+                    setTimeout(() => {
+                        console.log('[NSL] Force sync after player close');
+                        syncToGist(false);
+                        
+                        // Обновляем меню после синхронизации
+                        setTimeout(() => {
+                            addContinueToMenu();
+                        }, 1000);
+                    }, 500);
+                } else {
+                    // Даже если автосинхронизация выключена, обновляем меню
+                    setTimeout(() => {
+                        addContinueToMenu();
+                    }, 100);
+                }
+            }
+            
+            // Сбрасываем состояние
+            currentMovieTime = 0;
+            currentMovieKey = null;
+            lastSavedProgress = 0;
+            videoDuration = 0;
+        }
+        
+        wasPlayerOpen = isPlayerOpen;
+        
+        // Во время просмотра сохраняем прогресс каждые 10 секунд
+        if (isPlayerOpen && currentTime !== null && currentTime > 0) {
+            currentMovieTime = currentTime;
+            const movieKey = getCurrentMovieKey();
+            
+            // Если сменился фильм/серия
+            if (movieKey && movieKey !== currentMovieKey) {
+                console.log(`[NSL] New movie: ${movieKey} (was: ${currentMovieKey})`);
+                currentMovieKey = movieKey;
+                lastSavedProgress = 0;
+                videoDuration = 0;
+                
+                // Получаем duration для нового фильма
+                setTimeout(() => {
+                    videoDuration = getVideoDuration();
+                    console.log('[NSL] New video duration:', videoDuration);
+                }, 2000);
+            }
+            
+            // Автосохранение каждые 10 секунд
+            if (c.auto_save && Math.floor(currentTime) - lastSavedProgress >= 10) {
+                if (saveProgress(currentTime)) {
+                    lastSavedProgress = Math.floor(currentTime);
+                    
+                    // Проверяем, нужно ли синхронизировать
+                    const now = Date.now();
+                    if (c.auto_sync && c.gist_token && c.gist_id && 
+                        (now - lastSyncToGist) >= (c.sync_interval * 1000)) {
+                        setTimeout(() => {
+                            console.log('[NSL] Auto-sync during playback');
+                            syncToGist(false);
+                        }, 100);
+                        lastSyncToGist = now;
+                    }
+                }
+            }
+        }
+        
+        // Если плеер открыт но currentTime = 0, пробуем получить duration
+        if (isPlayerOpen && videoDuration === 0) {
+            const dur = getVideoDuration();
+            if (dur > 0) {
+                videoDuration = dur;
+                console.log('[NSL] Video duration detected during playback:', videoDuration);
+            }
+        }
+    }, 1000);
+    
+    console.log('[NSL] Player handler started');
+}
     
     function cleanupTimeline() {
         const c = cfg();
@@ -1155,174 +1250,222 @@
         $.ajax(ajaxOptions);
     }
 
-    function syncFromGist(showNotify = true) {
-        const gist = getGistData();
-        if (!gist) {
-            if (showNotify) notify('⚠️ GitHub Gist не настроен');
-            return false;
-        }
+function syncFromGist(showNotify = true) {
+    const gist = getGistData();
+    if (!gist) {
+        if (showNotify) notify('⚠️ GitHub Gist не настроен');
+        return false;
+    }
 
-        const ajaxOptions = {
-            url: `https://api.github.com/gists/${gist.id}`,
-            method: 'GET',
-            headers: {
-                'Authorization': `token ${gist.token}`,
-                'Accept': 'application/vnd.github.v3+json'
-            },
-            success: (data) => {
-                try {
-                    const content = data.files['nsl_sync.json']?.content;
-                    if (!content) {
-                        if (showNotify) notify('⚠️ Файл nsl_sync.json не найден');
-                        return;
-                    }
+    console.log('[NSL] Loading from Gist...');
+    
+    const ajaxOptions = {
+        url: `https://api.github.com/gists/${gist.id}`,
+        method: 'GET',
+        headers: {
+            'Authorization': `token ${gist.token}`,
+            'Accept': 'application/vnd.github.v3+json'
+        },
+        success: (data) => {
+            try {
+                const content = data.files['nsl_sync.json']?.content;
+                if (!content) {
+                    if (showNotify) notify('⚠️ Файл nsl_sync.json не найден');
+                    return;
+                }
 
-                    const remote = JSON.parse(content);
+                const remote = JSON.parse(content);
+                
+                console.log('[NSL] Remote data:', {
+                    timeline: Object.keys(remote.timeline || {}).length,
+                    favorites: remote.favorites?.length || 0,
+                    bookmarks: remote.bookmarks?.length || 0
+                });
+                
+                const strategy = cfg().sync_strategy;
+                let totalChanges = 0;
+                
+                // ===== СИНХРОНИЗАЦИЯ ТАЙМКОДОВ (ИСПРАВЛЕНО) =====
+                if (remote.timeline) {
+                    const localTimeline = getTimeline();
+                    let timelineChanges = 0;
                     
-                    const strategy = cfg().sync_strategy;
-                    let totalChanges = 0;
+                    console.log('[NSL] Local timeline before:', Object.keys(localTimeline).length);
                     
-                    // Синхронизация таймкодов
-                    if (remote.timeline) {
-                        const localTimeline = getTimeline();
-                        let timelineChanges = 0;
+                    for (const key in remote.timeline) {
+                        const remoteRec = remote.timeline[key];
+                        const localRec = localTimeline[key];
                         
-                        for (const key in remote.timeline) {
-                            const remoteRec = remote.timeline[key];
-                            const localRec = localTimeline[key];
+                        // Нормализуем remote запись
+                        if (!remoteRec.updated) {
+                            remoteRec.updated = remoteRec.saved_at || Date.now();
+                        }
+                        
+                        if (!localRec) {
+                            // Нет локальной записи - добавляем
+                            localTimeline[key] = remoteRec;
+                            timelineChanges++;
+                            console.log(`[NSL] Added timeline: ${key} (${remoteRec.percent}%)`);
+                        } else {
+                            // Нормализуем локальную запись
+                            if (!localRec.updated) {
+                                localRec.updated = localRec.saved_at || 0;
+                            }
                             
-                            if (!remoteRec.updated) remoteRec.updated = remoteRec.saved_at || 0;
+                            const remoteUpdated = remoteRec.updated || 0;
+                            const localUpdated = localRec.updated || 0;
                             
-                            if (!localRec) {
+                            let shouldUpdate = false;
+                            
+                            if (strategy === 'max_time') {
+                                // По длительности: берем запись с большим временем
+                                if (remoteRec.time > localRec.time) {
+                                    shouldUpdate = true;
+                                    console.log(`[NSL] max_time: ${key} - remote time ${remoteRec.time}s > local ${localRec.time}s`);
+                                }
+                            } else if (strategy === 'last_watch') {
+                                // По дате: берем запись с более поздней датой
+                                if (remoteUpdated > localUpdated) {
+                                    shouldUpdate = true;
+                                    console.log(`[NSL] last_watch: ${key} - remote updated ${new Date(remoteUpdated).toLocaleString()} > local ${new Date(localUpdated).toLocaleString()}`);
+                                } else if (remoteUpdated === localUpdated && remoteRec.time > localRec.time) {
+                                    // Даты одинаковые - берем больший прогресс
+                                    shouldUpdate = true;
+                                    console.log(`[NSL] last_watch: ${key} - same date, remote time ${remoteRec.time}s > local ${localRec.time}s`);
+                                }
+                            }
+                            
+                            if (shouldUpdate) {
                                 localTimeline[key] = remoteRec;
                                 timelineChanges++;
-                            } else {
-                                if (!localRec.updated) localRec.updated = localRec.saved_at || 0;
-                                
-                                const remoteUpdated = remoteRec.updated || 0;
-                                const localUpdated = localRec.updated || 0;
-                                
-                                if (strategy === 'max_time') {
-                                    if (remoteRec.time > localRec.time) {
-                                        localTimeline[key] = remoteRec;
-                                        timelineChanges++;
-                                    }
-                                } else if (strategy === 'last_watch') {
-                                    if (remoteUpdated > localUpdated) {
-                                        localTimeline[key] = remoteRec;
-                                        timelineChanges++;
-                                    } else if (remoteUpdated === localUpdated && remoteRec.time > localRec.time) {
-                                        localTimeline[key] = remoteRec;
-                                        timelineChanges++;
-                                    }
-                                }
                             }
                         }
-                        
-                        if (timelineChanges > 0) {
-                            saveTimeline(localTimeline);
-                            totalChanges += timelineChanges;
-                        }
                     }
                     
-                    // Синхронизация избранного
-                    if (remote.favorites && Array.isArray(remote.favorites)) {
-                        const localFavs = getFavorites();
-                        let favChanges = 0;
+                    if (timelineChanges > 0) {
+                        saveTimeline(localTimeline);
+                        totalChanges += timelineChanges;
+                        console.log(`[NSL] Timeline updated: ${timelineChanges} records`);
                         
-                        for (const remoteFav of remote.favorites) {
-                            const key = `${remoteFav.tmdb_id}_${remoteFav.category}`;
-                            const existingIndex = localFavs.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
-                            
-                            if (existingIndex === -1) {
-                                localFavs.push(remoteFav);
-                                favChanges++;
-                            } else {
-                                const localFav = localFavs[existingIndex];
-                                if ((remoteFav.updated || 0) > (localFav.updated || 0)) {
-                                    localFavs[existingIndex] = remoteFav;
-                                    favChanges++;
-                                }
+                        // Обновляем отображение таймлайна в Lampa
+                        for (const key in remote.timeline) {
+                            const rec = remote.timeline[key];
+                            if (Lampa.Timeline?.update) {
+                                Lampa.Timeline.update({
+                                    hash: key,
+                                    percent: rec.percent || 0,
+                                    time: rec.time || 0,
+                                    duration: rec.duration || 0
+                                });
                             }
                         }
-                        
-                        if (favChanges > 0) {
-                            saveFavorites(localFavs);
-                            totalChanges += favChanges;
-                        }
+                    } else {
+                        console.log('[NSL] Timeline: no changes needed');
                     }
-                    
-                    // Синхронизация закладок
-                    if (remote.bookmarks && Array.isArray(remote.bookmarks)) {
-                        const localBookmarks = getBookmarks();
-                        let bmChanges = 0;
-                        
-                        for (const remoteBm of remote.bookmarks) {
-                            if (!localBookmarks.some(b => b.key === remoteBm.key)) {
-                                localBookmarks.push(remoteBm);
-                                bmChanges++;
-                            }
-                        }
-                        
-                        if (bmChanges > 0) {
-                            saveBookmarks(localBookmarks);
-                            totalChanges += bmChanges;
-                        }
-                    }
-                    
-                    // Синхронизация истории
-                    if (remote.history && Array.isArray(remote.history)) {
-                        const localHistory = getHistory();
-                        let histChanges = 0;
-                        
-                        for (const remoteHist of remote.history) {
-                            if (!localHistory.some(h => h.tmdb_id === remoteHist.tmdb_id)) {
-                                localHistory.push(remoteHist);
-                                histChanges++;
-                            }
-                        }
-                        
-                        if (histChanges > 0) {
-                            localHistory.sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
-                            saveHistory(localHistory);
-                            totalChanges += histChanges;
-                        }
-                    }
-
-                    Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
-                    
-                    if (showNotify) {
-                        if (totalChanges > 0) {
-                            notify(`📥 Синхронизировано: ${totalChanges} изменений`);
-                        } else {
-                            notify('✅ Данные актуальны');
-                        }
-                    }
-                    
-                    setTimeout(() => {
-                        addContinueToMenu();
-                        renderBookmarks();
-                    }, 500);
-                    
-                } catch(e) {
-                    console.error('[NSL] Parse error:', e);
-                    if (showNotify) notify('❌ Ошибка чтения данных');
                 }
-            },
-            error: (xhr, status, error) => {
-                console.error('[NSL] Load error:', status, error);
-                if (showNotify) notify('❌ Ошибка загрузки');
-            },
-            timeout: 15000
-        };
-        
-        if (isAndroid) {
-            ajaxOptions.crossDomain = true;
-            ajaxOptions.xhrFields = { withCredentials: false };
-        }
-        
-        $.ajax(ajaxOptions);
+                
+                // Синхронизация избранного
+                if (remote.favorites && Array.isArray(remote.favorites)) {
+                    const localFavs = getFavorites();
+                    let favChanges = 0;
+                    
+                    for (const remoteFav of remote.favorites) {
+                        const key = `${remoteFav.tmdb_id}_${remoteFav.category}`;
+                        const existingIndex = localFavs.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
+                        
+                        if (existingIndex === -1) {
+                            localFavs.push(remoteFav);
+                            favChanges++;
+                        } else {
+                            const localFav = localFavs[existingIndex];
+                            if ((remoteFav.updated || 0) > (localFav.updated || 0)) {
+                                localFavs[existingIndex] = remoteFav;
+                                favChanges++;
+                            }
+                        }
+                    }
+                    
+                    if (favChanges > 0) {
+                        saveFavorites(localFavs);
+                        totalChanges += favChanges;
+                        console.log(`[NSL] Favorites updated: ${favChanges} items`);
+                    }
+                }
+                
+                // Синхронизация закладок
+                if (remote.bookmarks && Array.isArray(remote.bookmarks)) {
+                    const localBookmarks = getBookmarks();
+                    let bmChanges = 0;
+                    
+                    for (const remoteBm of remote.bookmarks) {
+                        if (!localBookmarks.some(b => b.key === remoteBm.key)) {
+                            localBookmarks.push(remoteBm);
+                            bmChanges++;
+                        }
+                    }
+                    
+                    if (bmChanges > 0) {
+                        saveBookmarks(localBookmarks);
+                        totalChanges += bmChanges;
+                        console.log(`[NSL] Bookmarks updated: ${bmChanges} items`);
+                    }
+                }
+                
+                // Синхронизация истории
+                if (remote.history && Array.isArray(remote.history)) {
+                    const localHistory = getHistory();
+                    let histChanges = 0;
+                    
+                    for (const remoteHist of remote.history) {
+                        if (!localHistory.some(h => h.tmdb_id === remoteHist.tmdb_id)) {
+                            localHistory.push(remoteHist);
+                            histChanges++;
+                        }
+                    }
+                    
+                    if (histChanges > 0) {
+                        localHistory.sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
+                        saveHistory(localHistory);
+                        totalChanges += histChanges;
+                        console.log(`[NSL] History updated: ${histChanges} items`);
+                    }
+                }
+
+                Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
+                
+                if (showNotify) {
+                    if (totalChanges > 0) {
+                        notify(`📥 Синхронизировано: ${totalChanges} изменений`);
+                    } else {
+                        notify('✅ Данные актуальны');
+                    }
+                }
+                
+                // Обновляем меню
+                setTimeout(() => {
+                    addContinueToMenu();
+                    renderBookmarks();
+                }, 500);
+                
+            } catch(e) {
+                console.error('[NSL] Parse error:', e);
+                if (showNotify) notify('❌ Ошибка чтения данных');
+            }
+        },
+        error: (xhr, status, error) => {
+            console.error('[NSL] Load error:', status, error);
+            if (showNotify) notify('❌ Ошибка загрузки');
+        },
+        timeout: 15000
+    };
+    
+    if (isAndroid) {
+        ajaxOptions.crossDomain = true;
+        ajaxOptions.xhrFields = { withCredentials: false };
     }
+    
+    $.ajax(ajaxOptions);
+}
 
     function checkAutoSync() {
         const c = cfg();
