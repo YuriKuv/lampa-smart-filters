@@ -264,7 +264,7 @@
                         { title: 'Да', action: 'remove' }
                     ],
                     onSelect: (a) => { if (a.action === 'remove') removeBookmark(item); },
-                    onBack: () => {}
+                    onBack: () => Lampa.Controller.toggle('content')
                 });
             });
 
@@ -403,8 +403,13 @@
                 { title: '✅ Да, очистить всё', action: 'clear' },
                 { title: '❌ Отмена', action: 'cancel' }
             ],
-            onSelect: (opt) => { if (opt.action === 'clear') { saveFavorites([]); notify('🗑️ Избранное очищено'); } },
-            onBack: () => {}
+            onSelect: (opt) => { 
+                if (opt.action === 'clear') { 
+                    saveFavorites([]); 
+                    notify('🗑️ Избранное очищено'); 
+                } 
+            },
+            onBack: () => Lampa.Controller.toggle('content')
         });
     }
 
@@ -447,8 +452,13 @@
                 { title: '✅ Да, очистить', action: 'clear' },
                 { title: '❌ Отмена', action: 'cancel' }
             ],
-            onSelect: (opt) => { if (opt.action === 'clear') { saveHistory([]); notify('🗑️ История очищена'); } },
-            onBack: () => {}
+            onSelect: (opt) => { 
+                if (opt.action === 'clear') { 
+                    saveHistory([]); 
+                    notify('🗑️ История очищена'); 
+                } 
+            },
+            onBack: () => Lampa.Controller.toggle('content')
         });
     }
     
@@ -647,8 +657,13 @@
                 { title: '✅ Да, очистить', action: 'clear' },
                 { title: '❌ Отмена', action: 'cancel' }
             ],
-            onSelect: (opt) => { if (opt.action === 'clear') { saveTimeline({}); notify('🗑️ Таймкоды очищены'); } },
-            onBack: () => {}
+            onSelect: (opt) => { 
+                if (opt.action === 'clear') { 
+                    saveTimeline({}); 
+                    notify('🗑️ Таймкоды очищены'); 
+                } 
+            },
+            onBack: () => Lampa.Controller.toggle('content')
         });
     }
 
@@ -749,7 +764,7 @@
                                         button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
                                     }, 50);
                                 },
-                                onBack: () => {}
+                                onBack: () => Lampa.Controller.toggle('content')
                             });
                         });
                         
@@ -825,9 +840,13 @@
         
         items.push({ title: '──────────', separator: true });
         items.push({ title: '🗑️ Очистить всё', onSelect: () => clearAllFavorites() });
-        items.push({ title: '❌ Закрыть', onSelect: () => {} });
+        items.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
         
-        Lampa.Select.show({ title: '⭐ Избранное', items: items, onBack: () => {} });
+        Lampa.Select.show({ 
+            title: '⭐ Избранное', 
+            items: items, 
+            onBack: () => Lampa.Controller.toggle('content')
+        });
     }
     
     function showFavoritesByCategory(category, categoryName) {
@@ -852,9 +871,13 @@
         
         menuItems.push({ title: '──────────', separator: true });
         menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesMenu() });
-        menuItems.push({ title: '❌ Закрыть', onSelect: () => {} });
+        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
         
-        Lampa.Select.show({ title: categoryName, items: menuItems, onBack: () => {} });
+        Lampa.Select.show({ 
+            title: categoryName, 
+            items: menuItems, 
+            onBack: () => showFavoritesMenu()
+        });
     }
     
     function showFavoritesList(items, title) {
@@ -874,16 +897,20 @@
                             showFavoritesByCategory(item.category, title.split(' - ')[0]);
                         }
                     },
-                    onBack: () => {}
+                    onBack: () => Lampa.Controller.toggle('content')
                 });
             }
         }));
         
         menuItems.push({ title: '──────────', separator: true });
         menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesByCategory(items[0]?.category, title.split(' - ')[0]) });
-        menuItems.push({ title: '❌ Закрыть', onSelect: () => {} });
+        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
         
-        Lampa.Select.show({ title: title, items: menuItems, onBack: () => {} });
+        Lampa.Select.show({ 
+            title: title, 
+            items: menuItems, 
+            onBack: () => showFavoritesByCategory(items[0]?.category, title.split(' - ')[0])
+        });
     }
     
     function showHistoryMenu() {
@@ -903,9 +930,13 @@
         
         items.push({ title: '──────────', separator: true });
         items.push({ title: '🗑️ Очистить историю', onSelect: () => clearHistory() });
-        items.push({ title: '❌ Закрыть', onSelect: () => {} });
+        items.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
         
-        Lampa.Select.show({ title: '📜 История просмотров', items: items, onBack: () => {} });
+        Lampa.Select.show({ 
+            title: '📜 История просмотров', 
+            items: items, 
+            onBack: () => Lampa.Controller.toggle('content')
+        });
     }
     
     function showHistoryList(mediaType, title) {
@@ -920,9 +951,13 @@
         
         menuItems.push({ title: '──────────', separator: true });
         menuItems.push({ title: '◀ Назад', onSelect: () => showHistoryMenu() });
-        menuItems.push({ title: '❌ Закрыть', onSelect: () => {} });
+        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
         
-        Lampa.Select.show({ title: title, items: menuItems, onBack: () => {} });
+        Lampa.Select.show({ 
+            title: title, 
+            items: menuItems, 
+            onBack: () => showHistoryMenu()
+        });
     }
     
     function showContinueMenu() {
@@ -939,9 +974,13 @@
         });
         
         menuItems.push({ title: '──────────', separator: true });
-        menuItems.push({ title: '❌ Закрыть', onSelect: () => {} });
+        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
         
-        Lampa.Select.show({ title: '⏱️ Продолжить просмотр', items: menuItems, onBack: () => {} });
+        Lampa.Select.show({ 
+            title: '⏱️ Продолжить просмотр', 
+            items: menuItems, 
+            onBack: () => Lampa.Controller.toggle('content')
+        });
     }
 
     // ======================
@@ -1133,8 +1172,6 @@
     // ======================
 
     function showMainMenu() {
-        const c = cfg();
-        
         Lampa.Select.show({
             title: 'NSL Sync v20',
             items: [
@@ -1161,7 +1198,7 @@
                     setTimeout(() => syncFromGist(true), 1500);
                 }
             },
-            onBack: () => {}
+            onBack: () => Lampa.Controller.toggle('content')
         });
     }
     
@@ -1193,7 +1230,7 @@
                     showMainMenu();
                 }
             },
-            onBack: () => {}
+            onBack: () => showMainMenu()
         });
     }
     
@@ -1228,7 +1265,7 @@
                     showMainMenu();
                 }
             },
-            onBack: () => {}
+            onBack: () => showMainMenu()
         });
     }
     
@@ -1281,7 +1318,7 @@
                     showMainMenu();
                 }
             },
-            onBack: () => {}
+            onBack: () => showMainMenu()
         });
     }
     
@@ -1317,7 +1354,7 @@
                     showMainMenu();
                 }
             },
-            onBack: () => {}
+            onBack: () => showMainMenu()
         });
     }
     
@@ -1354,7 +1391,7 @@
                     showMainMenu();
                 }
             },
-            onBack: () => {}
+            onBack: () => showMainMenu()
         });
     }
 
