@@ -1276,38 +1276,34 @@ function syncFromGist(showNotify = true) {
 
                 const remote = JSON.parse(content);
                 
-                console.log('[NSL] Remote data:', {
+                console.log('[NSL] Remote data loaded:', {
                     timeline: Object.keys(remote.timeline || {}).length,
                     favorites: remote.favorites?.length || 0,
-                    bookmarks: remote.bookmarks?.length || 0
+                    bookmarks: remote.bookmarks?.length || 0,
+                    history: remote.history?.length || 0
                 });
                 
                 const strategy = cfg().sync_strategy;
                 let totalChanges = 0;
                 
-                // ===== СИНХРОНИЗАЦИЯ ТАЙМКОДОВ (ИСПРАВЛЕНО) =====
+                // Синхронизация таймкодов
                 if (remote.timeline) {
                     const localTimeline = getTimeline();
                     let timelineChanges = 0;
-                    
-                    console.log('[NSL] Local timeline before:', Object.keys(localTimeline).length);
                     
                     for (const key in remote.timeline) {
                         const remoteRec = remote.timeline[key];
                         const localRec = localTimeline[key];
                         
-                        // Нормализуем remote запись
                         if (!remoteRec.updated) {
                             remoteRec.updated = remoteRec.saved_at || Date.now();
                         }
                         
                         if (!localRec) {
-                            // Нет локальной записи - добавляем
                             localTimeline[key] = remoteRec;
                             timelineChanges++;
                             console.log(`[NSL] Added timeline: ${key} (${remoteRec.percent}%)`);
                         } else {
-                            // Нормализуем локальную запись
                             if (!localRec.updated) {
                                 localRec.updated = localRec.saved_at || 0;
                             }
@@ -1318,26 +1314,21 @@ function syncFromGist(showNotify = true) {
                             let shouldUpdate = false;
                             
                             if (strategy === 'max_time') {
-                                // По длительности: берем запись с большим временем
                                 if (remoteRec.time > localRec.time) {
                                     shouldUpdate = true;
-                                    console.log(`[NSL] max_time: ${key} - remote time ${remoteRec.time}s > local ${localRec.time}s`);
                                 }
                             } else if (strategy === 'last_watch') {
-                                // По дате: берем запись с более поздней датой
                                 if (remoteUpdated > localUpdated) {
                                     shouldUpdate = true;
-                                    console.log(`[NSL] last_watch: ${key} - remote updated ${new Date(remoteUpdated).toLocaleString()} > local ${new Date(localUpdated).toLocaleString()}`);
                                 } else if (remoteUpdated === localUpdated && remoteRec.time > localRec.time) {
-                                    // Даты одинаковые - берем больший прогресс
                                     shouldUpdate = true;
-                                    console.log(`[NSL] last_watch: ${key} - same date, remote time ${remoteRec.time}s > local ${localRec.time}s`);
                                 }
                             }
                             
                             if (shouldUpdate) {
                                 localTimeline[key] = remoteRec;
                                 timelineChanges++;
+                                console.log(`[NSL] Updated timeline: ${key} (${remoteRec.percent}%)`);
                             }
                         }
                     }
@@ -1345,7 +1336,6 @@ function syncFromGist(showNotify = true) {
                     if (timelineChanges > 0) {
                         saveTimeline(localTimeline);
                         totalChanges += timelineChanges;
-                        console.log(`[NSL] Timeline updated: ${timelineChanges} records`);
                         
                         // Обновляем отображение таймлайна в Lampa
                         for (const key in remote.timeline) {
@@ -1359,8 +1349,6 @@ function syncFromGist(showNotify = true) {
                                 });
                             }
                         }
-                    } else {
-                        console.log('[NSL] Timeline: no changes needed');
                     }
                 }
                 
@@ -1388,7 +1376,6 @@ function syncFromGist(showNotify = true) {
                     if (favChanges > 0) {
                         saveFavorites(localFavs);
                         totalChanges += favChanges;
-                        console.log(`[NSL] Favorites updated: ${favChanges} items`);
                     }
                 }
                 
@@ -1407,7 +1394,6 @@ function syncFromGist(showNotify = true) {
                     if (bmChanges > 0) {
                         saveBookmarks(localBookmarks);
                         totalChanges += bmChanges;
-                        console.log(`[NSL] Bookmarks updated: ${bmChanges} items`);
                     }
                 }
                 
@@ -1427,11 +1413,27 @@ function syncFromGist(showNotify = true) {
                         localHistory.sort((a, b) => (b.watched_at || 0) - (a.watched_at || 0));
                         saveHistory(localHistory);
                         totalChanges += histChanges;
-                        console.log(`[NSL] History updated: ${histChanges} items`);
                     }
                 }
 
                 Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
+                
+                // ВАЖНО: Принудительно обновляем меню после синхронизации
+                setTimeout(() => {
+                    console.log('[NSL] Refreshing UI after sync...');
+                    
+                    // Удаляем старую кнопку и добавляем новую
+                    $('.nsl-continue-item').remove();
+                    addContinueToMenu();
+                    renderBookmarks();
+                    
+                    // Отправляем событие обновления
+                    Lampa.Listener.send('state:changed', { 
+                        target: 'nsl_timeline', 
+                        reason: 'sync' 
+                    });
+                    
+                }, 500);
                 
                 if (showNotify) {
                     if (totalChanges > 0) {
@@ -1440,12 +1442,6 @@ function syncFromGist(showNotify = true) {
                         notify('✅ Данные актуальны');
                     }
                 }
-                
-                // Обновляем меню
-                setTimeout(() => {
-                    addContinueToMenu();
-                    renderBookmarks();
-                }, 500);
                 
             } catch(e) {
                 console.error('[NSL] Parse error:', e);
@@ -1466,7 +1462,6 @@ function syncFromGist(showNotify = true) {
     
     $.ajax(ajaxOptions);
 }
-
     function checkAutoSync() {
         const c = cfg();
         if (!c.sync_auto_interval) return;
