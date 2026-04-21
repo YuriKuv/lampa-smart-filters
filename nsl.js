@@ -976,82 +976,90 @@
         return getCategoryDisplay(bestCategory, tmdbId);
     }
 
-    function addStatusToCard() {
-        Lampa.Listener.follow('full', (e) => {
-            if (e.type === 'complite') {
-                setTimeout(() => {
-                    try {
-                        const movie = e.data.movie;
-                        if (!movie || !movie.id) return;
-                        
-                        const statusContainer = $('.full-start__status').first();
-                        if (!statusContainer.length) return;
-                        
-                        $('.nsl-movie-status').remove();
-                        
-                        const status = getMovieStatus(movie);
-                        if (!status) return;
-                        
-                        const statusEl = $(`
-                            <div class="full-start__status nsl-movie-status" 
-                                 style="margin-left: 8px; 
-                                        display: inline-flex; 
-                                        align-items: center; 
-                                        gap: 4px;
-                                        padding: 4px 10px;
-                                        border-radius: 20px;
-                                        background-color: ${status.bgColor};
-                                        color: ${status.color};
-                                        font-weight: 500;
-                                        cursor: help;"
-                                 title="${status.extraText || status.text}">
-                                <span style="font-size: 14px;">${status.icon}</span>
-                                <span style="font-size: 13px;">${status.displayText}</span>
-                            </div>
-                        `);
-                        
-                        statusContainer.after(statusEl);
-                        
-                    } catch (err) {
-                        console.error('[NSL] Error adding status:', err);
-                    }
-                }, 300);
-            }
-        });
-    }
+function addStatusToCard() {
+    Lampa.Listener.follow('full', (e) => {
+        if (e.type === 'complite') {
+            setTimeout(() => {
+                try {
+                    const movie = e.data.movie;
+                    if (!movie || !movie.id) return;
+                    
+                    const statusContainer = $('.full-start__status').first();
+                    if (!statusContainer.length) return;
+                    
+                    $('.nsl-movie-status').remove();
+                    
+                    const status = getMovieStatus(movie);
+                    if (!status) return;
+                    
+                    const statusEl = $(`
+                        <div class="full-start__status nsl-movie-status" 
+                             style="margin-left: 8px; 
+                                    display: inline-flex; 
+                                    align-items: center; 
+                                    gap: 6px;
+                                    padding: 2px 8px;
+                                    border-radius: 4px;
+                                    background-color: rgba(255, 255, 255, 0.1);
+                                    color: rgba(255, 255, 255, 0.9);
+                                    font-size: 13px;
+                                    font-weight: 400;
+                                    cursor: help;
+                                    backdrop-filter: blur(4px);
+                                    -webkit-backdrop-filter: blur(4px);
+                                    border: 0.5px solid rgba(255, 255, 255, 0.15);"
+                             title="${status.extraText || status.text}">
+                            <span style="font-size: 13px; line-height: 1;">${status.icon}</span>
+                            <span style="font-size: 13px; line-height: 1;">${status.displayText}</span>
+                        </div>
+                    `);
+                    
+                    statusContainer.after(statusEl);
+                    
+                } catch (err) {
+                    console.error('[NSL] Error adding status:', err);
+                }
+            }, 300);
+        }
+    });
+}
 
-    function refreshCardStatus() {
-        const movie = Lampa.Activity.active()?.movie;
-        if (!movie) return;
-        
-        $('.nsl-movie-status').remove();
-        
-        const status = getMovieStatus(movie);
-        if (!status) return;
-        
-        const statusContainer = $('.full-start__status').first();
-        if (!statusContainer.length) return;
-        
-        const statusEl = $(`
-            <div class="full-start__status nsl-movie-status" 
-                 style="margin-left: 8px; 
-                        display: inline-flex; 
-                        align-items: center; 
-                        gap: 4px;
-                        padding: 4px 10px;
-                        border-radius: 20px;
-                        background-color: ${status.bgColor};
-                        color: ${status.color};
-                        font-weight: 500;
-                        cursor: help;"
-                 title="${status.extraText || status.text}">
-                <span style="font-size: 14px;">${status.icon}</span>
-                <span style="font-size: 13px;">${status.displayText}</span>
-            </div>
-        `);
-        
-        statusContainer.after(statusEl);
-    }
+function refreshCardStatus() {
+    const movie = Lampa.Activity.active()?.movie;
+    if (!movie) return;
+    
+    $('.nsl-movie-status').remove();
+    
+    const status = getMovieStatus(movie);
+    if (!status) return;
+    
+    const statusContainer = $('.full-start__status').first();
+    if (!statusContainer.length) return;
+    
+    const statusEl = $(`
+        <div class="full-start__status nsl-movie-status" 
+             style="margin-left: 8px; 
+                    display: inline-flex; 
+                    align-items: center; 
+                    gap: 6px;
+                    padding: 2px 8px;
+                    border-radius: 4px;
+                    background-color: rgba(255, 255, 255, 0.1);
+                    color: rgba(255, 255, 255, 0.9);
+                    font-size: 13px;
+                    font-weight: 400;
+                    cursor: help;
+                    backdrop-filter: blur(4px);
+                    -webkit-backdrop-filter: blur(4px);
+                    border: 0.5px solid rgba(255, 255, 255, 0.15);"
+             title="${status.extraText || status.text}">
+            <span style="font-size: 13px; line-height: 1;">${status.icon}</span>
+            <span style="font-size: 13px; line-height: 1;">${status.displayText}</span>
+        </div>
+    `);
+    
+    statusContainer.after(statusEl);
+}
 
     function refreshFavoriteButton() {
         const movie = Lampa.Activity.active()?.movie;
