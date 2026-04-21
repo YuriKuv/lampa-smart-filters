@@ -999,11 +999,11 @@ function addStatusToCard() {
                                     align-items: center; 
                                     gap: 4px;
                                     padding: 0 10px;
-                                    height: 26px;
+                                    height: 32px;
                                     border-radius: 4px;
                                     background-color: rgba(0, 0, 0, 0.4);
-                                    color: rgba(255, 255, 255, 0.85);
-                                    font-size: 13px;
+                                    color: rgba(255, 255, 255, 0.9);
+                                    font-size: 16px;
                                     font-weight: 400;
                                     cursor: help;
                                     white-space: nowrap;
