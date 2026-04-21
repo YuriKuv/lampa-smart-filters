@@ -995,19 +995,21 @@ function addStatusToCard() {
                     const statusEl = $(`
                         <div class="full-start__status nsl-movie-status" 
                              style="margin-left: 8px; 
-                                    display: inline-flex; 
+                                    display: flex; 
                                     align-items: center; 
-                                    gap: 6px;
-                                    padding: 2px 8px;
+                                    gap: 4px;
+                                    padding: 0 10px;
+                                    height: 26px;
                                     border-radius: 4px;
-                                    background-color: rgba(255, 255, 255, 0.1);
-                                    color: rgba(255, 255, 255, 0.9);
+                                    background-color: rgba(0, 0, 0, 0.4);
+                                    color: rgba(255, 255, 255, 0.85);
                                     font-size: 13px;
                                     font-weight: 400;
                                     cursor: help;
-                                    backdrop-filter: blur(4px);
-                                    -webkit-backdrop-filter: blur(4px);
-                                    border: 0.5px solid rgba(255, 255, 255, 0.15);"
+                                    white-space: nowrap;
+                                    border: none;
+                                    backdrop-filter: blur(8px);
+                                    -webkit-backdrop-filter: blur(8px);"
                              title="${status.extraText || status.text}">
                             <span style="font-size: 13px; line-height: 1;">${status.icon}</span>
                             <span style="font-size: 13px; line-height: 1;">${status.displayText}</span>
@@ -1039,19 +1041,21 @@ function refreshCardStatus() {
     const statusEl = $(`
         <div class="full-start__status nsl-movie-status" 
              style="margin-left: 8px; 
-                    display: inline-flex; 
+                    display: flex; 
                     align-items: center; 
-                    gap: 6px;
-                    padding: 2px 8px;
+                    gap: 4px;
+                    padding: 0 10px;
+                    height: 26px;
                     border-radius: 4px;
-                    background-color: rgba(255, 255, 255, 0.1);
-                    color: rgba(255, 255, 255, 0.9);
+                    background-color: rgba(0, 0, 0, 0.4);
+                    color: rgba(255, 255, 255, 0.85);
                     font-size: 13px;
                     font-weight: 400;
                     cursor: help;
-                    backdrop-filter: blur(4px);
-                    -webkit-backdrop-filter: blur(4px);
-                    border: 0.5px solid rgba(255, 255, 255, 0.15);"
+                    white-space: nowrap;
+                    border: none;
+                    backdrop-filter: blur(8px);
+                    -webkit-backdrop-filter: blur(8px);"
              title="${status.extraText || status.text}">
             <span style="font-size: 13px; line-height: 1;">${status.icon}</span>
             <span style="font-size: 13px; line-height: 1;">${status.displayText}</span>
