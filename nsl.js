@@ -48,6 +48,16 @@
         anime: { name: 'Аниме', icon: '🇯🇵' }
     };
 
+    // Приоритеты статусов для отображения
+    const STATUS_PRIORITY = {
+        'watching': 1,
+        'abandoned': 2,
+        'watched': 3,
+        'planned': 4,
+        'favorite': 5,
+        'collection': 6
+    };
+
     // Правила исключительности категорий
     const CATEGORY_RULES = {
         abandoned: { removeFrom: ['favorite', 'watching', 'planned', 'watched'] },
@@ -99,7 +109,10 @@
     }
     
     function getTimeline() { return Lampa.Storage.get(STORE_TIMELINE, {}) || {}; }
-    function saveTimeline(t) { Lampa.Storage.set(STORE_TIMELINE, t, true); }
+    function saveTimeline(t) { 
+        Lampa.Storage.set(STORE_TIMELINE, t, true); 
+        setTimeout(() => Lampa.Listener.send('state:changed', { target: 'timeline', reason: 'update' }), 100);
+    }
     
     function getMoveLog() { return Lampa.Storage.get(STORE_MOVE_LOG, []) || []; }
     function saveMoveLog(l) { 
@@ -362,19 +375,22 @@
     }
 
     // ======================
-    // ИЗБРАННОЕ (С ЛОГИКОЙ ИСКЛЮЧИТЕЛЬНОСТИ)
+    // ИЗБРАННОЕ (С ЛОГИКОЙ ИСКЛЮЧИТЕЛЬНОСТИ) - ИСПРАВЛЕНО
     // ======================
 
     function applyCategoryRules(tmdbId, newCategory, favorites) {
         const rules = CATEGORY_RULES[newCategory];
-        if (!rules || !rules.removeFrom.length) return;
+        if (!rules || !rules.removeFrom.length) return false;
         
+        let changed = false;
         for (const catToRemove of rules.removeFrom) {
             const index = favorites.findIndex(f => f.tmdb_id === tmdbId && f.category === catToRemove);
             if (index >= 0) {
                 favorites.splice(index, 1);
+                changed = true;
             }
         }
+        return changed;
     }
 
     function addToFavorites(card, category) {
@@ -383,6 +399,14 @@
         const tmdbId = extractTmdbId(card);
         const mediaType = getMediaType(card);
         const favorites = getFavorites();
+        
+        // Проверяем, не в коллекции ли уже (коллекцию не трогаем)
+        const inCollection = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'collection');
+        
+        // Удаляем из других категорий согласно правилам
+        applyCategoryRules(tmdbId, category, favorites);
+        
+        // Проверяем, есть ли уже в этой категории
         const existingIndex = favorites.findIndex(f => f.tmdb_id === tmdbId && f.category === category);
         
         const favoriteItem = {
@@ -405,7 +429,12 @@
             logMove('add', title, null, category);
         }
         
-        applyCategoryRules(tmdbId, category, favorites);
+        // Восстанавливаем коллекцию если была
+        if (inCollection && category !== 'collection') {
+            if (!favorites.some(f => f.tmdb_id === tmdbId && f.category === 'collection')) {
+                favorites.push(inCollection);
+            }
+        }
         
         setTimeout(() => {
             saveFavorites(favorites);
@@ -517,7 +546,7 @@
         return false;
     }
     
-    // Синхронизация таймкодов с категориями
+    // Синхронизация таймкодов с категориями - ИСПРАВЛЕНО
     function syncTimelineWithCategories() {
         const c = cfg();
         if (!c.auto_watching && !c.auto_watched) return;
@@ -532,47 +561,55 @@
             
             const percent = item.percent || 0;
             
-            // Не трогаем брошенное и коллекцию
+            // Не трогаем брошенное
             const isAbandoned = favorites.some(f => f.tmdb_id === tmdbId && f.category === 'abandoned');
             if (isAbandoned) continue;
             
-            const inCollection = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'collection');
-            
+            // Ищем существующие записи
             const existingWatching = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'watching');
             const existingWatched = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'watched');
             const existingPlanned = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'planned');
+            const existingFavorite = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'favorite');
+            
+            // Получаем данные карточки из любой существующей записи
+            const existingAny = existingWatching || existingWatched || existingPlanned || existingFavorite;
+            const cardData = existingAny?.data || { id: tmdbId, title: 'ID: ' + tmdbId };
+            const title = cardData.title || cardData.name || 'ID: ' + tmdbId;
             
             // Авто в "Просмотрено"
             if (c.auto_watched && !existingWatched) {
                 if (percent >= c.watched_min_progress) {
-                    let title = 'Без названия';
-                    
                     if (existingWatching) {
-                        title = existingWatching.data?.title || existingWatching.data?.name || 'Без названия';
                         existingWatching.category = 'watched';
                         existingWatching.updated = Date.now();
                         applyCategoryRules(tmdbId, 'watched', favorites);
                         logMove('auto_watched', title, 'watching', 'watched');
                         changed = true;
                     } else if (existingPlanned) {
-                        title = existingPlanned.data?.title || existingPlanned.data?.name || 'Без названия';
                         existingPlanned.category = 'watched';
                         existingPlanned.updated = Date.now();
                         applyCategoryRules(tmdbId, 'watched', favorites);
                         logMove('auto_watched', title, 'planned', 'watched');
                         changed = true;
-                    } else if (!inCollection) {
+                    } else if (existingFavorite) {
+                        existingFavorite.category = 'watched';
+                        existingFavorite.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watched', favorites);
+                        logMove('auto_watched', title, 'favorite', 'watched');
+                        changed = true;
+                    } else {
+                        // Создаём новую запись с полными данными
                         favorites.push({
                             id: Date.now(),
                             card_id: tmdbId,
                             tmdb_id: tmdbId,
                             media_type: key.includes('_s') ? 'tv' : 'movie',
                             category: 'watched',
-                            data: { id: tmdbId, title: 'ID: ' + tmdbId },
+                            data: cardData,
                             added: Date.now(),
                             updated: Date.now()
                         });
-                        logMove('auto_watched', 'ID: ' + tmdbId, null, 'watched');
+                        logMove('auto_watched', title, null, 'watched');
                         changed = true;
                     }
                     continue;
@@ -583,24 +620,29 @@
             if (c.auto_watching && !existingWatching && !existingWatched) {
                 if (percent >= c.watching_min_progress && percent <= c.watching_max_progress) {
                     if (existingPlanned) {
-                        const title = existingPlanned.data?.title || existingPlanned.data?.name || 'Без названия';
                         existingPlanned.category = 'watching';
                         existingPlanned.updated = Date.now();
                         applyCategoryRules(tmdbId, 'watching', favorites);
                         logMove('auto_watching', title, 'planned', 'watching');
                         changed = true;
-                    } else if (!inCollection) {
+                    } else if (existingFavorite) {
+                        existingFavorite.category = 'watching';
+                        existingFavorite.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watching', favorites);
+                        logMove('auto_watching', title, 'favorite', 'watching');
+                        changed = true;
+                    } else {
                         favorites.push({
                             id: Date.now(),
                             card_id: tmdbId,
                             tmdb_id: tmdbId,
                             media_type: key.includes('_s') ? 'tv' : 'movie',
                             category: 'watching',
-                            data: { id: tmdbId, title: 'ID: ' + tmdbId },
+                            data: cardData,
                             added: Date.now(),
                             updated: Date.now()
                         });
-                        logMove('auto_watching', 'ID: ' + tmdbId, null, 'watching');
+                        logMove('auto_watching', title, null, 'watching');
                         changed = true;
                     }
                 }
@@ -712,7 +754,7 @@
             currentMovieTime = currentTime;
             
             // Возвращаем из брошенного/просмотрено при просмотре
-            if (tmdbId && currentTime > 60) { // Только после 1 минуты просмотра
+            if (tmdbId && currentTime > 60) {
                 returnToWatching(tmdbId);
             }
             
@@ -829,6 +871,203 @@
     }
 
     // ======================
+    // СТАТУС НА КАРТОЧКЕ
+    // ======================
+
+    function getCategoryDisplay(category, tmdbId) {
+        const displays = {
+            'watching': { text: 'Смотрю', icon: '👁️', color: '#4CAF50', bgColor: 'rgba(76, 175, 80, 0.15)' },
+            'abandoned': { text: 'Брошено', icon: '❌', color: '#f44336', bgColor: 'rgba(244, 67, 54, 0.15)' },
+            'watched': { text: 'Просмотрено', icon: '✅', color: '#2196F3', bgColor: 'rgba(33, 150, 243, 0.15)' },
+            'planned': { text: 'Буду смотреть', icon: '📋', color: '#FF9800', bgColor: 'rgba(255, 152, 0, 0.15)' },
+            'favorite': { text: 'В избранном', icon: '⭐', color: '#FFC107', bgColor: 'rgba(255, 193, 7, 0.15)' },
+            'collection': { text: 'В коллекции', icon: '📦', color: '#9C27B0', bgColor: 'rgba(156, 39, 176, 0.15)' }
+        };
+        
+        const base = displays[category];
+        if (!base) return null;
+        
+        let extraInfo = '';
+        let extraText = '';
+        
+        if (category === 'watching' && tmdbId) {
+            const timeline = getTimeline();
+            let timelineItem = null;
+            for (const key in timeline) {
+                if (timeline[key].tmdb_id === tmdbId) {
+                    timelineItem = timeline[key];
+                    break;
+                }
+            }
+            if (timelineItem) {
+                const percent = timelineItem.percent || 0;
+                extraInfo = ` ${percent}%`;
+                extraText = `Прогресс: ${percent}%`;
+            }
+        }
+        
+        if (category === 'abandoned' && tmdbId) {
+            const favorites = getFavorites();
+            const item = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'abandoned');
+            if (item) {
+                const lastUpdate = item.updated || item.added;
+                const daysAgo = Math.floor((Date.now() - lastUpdate) / (1000 * 60 * 60 * 24));
+                if (daysAgo > 0) {
+                    extraInfo = daysAgo === 1 ? ' 1 день' : ` ${daysAgo} дн.`;
+                    extraText = `Не смотрели ${daysAgo} ${getDaysWord(daysAgo)}`;
+                }
+            }
+        }
+        
+        return {
+            ...base,
+            displayText: base.text + extraInfo,
+            extraText: extraText,
+            category: category
+        };
+    }
+
+    function getDaysWord(days) {
+        if (days % 10 === 1 && days % 100 !== 11) return 'день';
+        if (days % 10 >= 2 && days % 10 <= 4 && (days % 100 < 10 || days % 100 >= 20)) return 'дня';
+        return 'дней';
+    }
+
+    function getMovieStatus(movie) {
+        const tmdbId = extractTmdbId(movie);
+        if (!tmdbId) return null;
+        
+        const favorites = getFavorites();
+        const movieCategories = favorites.filter(f => f.tmdb_id === tmdbId).map(f => f.category);
+        
+        if (movieCategories.length === 0) return null;
+        
+        let bestCategory = null;
+        let bestPriority = 999;
+        
+        for (const cat of movieCategories) {
+            const priority = STATUS_PRIORITY[cat] || 999;
+            if (priority < bestPriority) {
+                bestPriority = priority;
+                bestCategory = cat;
+            }
+        }
+        
+        if (bestCategory === 'collection' && movieCategories.length > 1) {
+            for (const cat of movieCategories) {
+                if (cat !== 'collection') {
+                    const priority = STATUS_PRIORITY[cat] || 999;
+                    if (priority < bestPriority) {
+                        bestPriority = priority;
+                        bestCategory = cat;
+                    }
+                }
+            }
+        }
+        
+        if (bestCategory === 'favorite' && movieCategories.length > 1) {
+            for (const cat of movieCategories) {
+                if (cat !== 'favorite' && cat !== 'collection') {
+                    return getCategoryDisplay(cat, tmdbId);
+                }
+            }
+        }
+        
+        return getCategoryDisplay(bestCategory, tmdbId);
+    }
+
+    function addStatusToCard() {
+        Lampa.Listener.follow('full', (e) => {
+            if (e.type === 'complite') {
+                setTimeout(() => {
+                    try {
+                        const movie = e.data.movie;
+                        if (!movie || !movie.id) return;
+                        
+                        const statusContainer = $('.full-start__status').first();
+                        if (!statusContainer.length) return;
+                        
+                        $('.nsl-movie-status').remove();
+                        
+                        const status = getMovieStatus(movie);
+                        if (!status) return;
+                        
+                        const statusEl = $(`
+                            <div class="full-start__status nsl-movie-status" 
+                                 style="margin-left: 8px; 
+                                        display: inline-flex; 
+                                        align-items: center; 
+                                        gap: 4px;
+                                        padding: 4px 10px;
+                                        border-radius: 20px;
+                                        background-color: ${status.bgColor};
+                                        color: ${status.color};
+                                        font-weight: 500;
+                                        cursor: help;"
+                                 title="${status.extraText || status.text}">
+                                <span style="font-size: 14px;">${status.icon}</span>
+                                <span style="font-size: 13px;">${status.displayText}</span>
+                            </div>
+                        `);
+                        
+                        statusContainer.after(statusEl);
+                        
+                    } catch (err) {
+                        console.error('[NSL] Error adding status:', err);
+                    }
+                }, 300);
+            }
+        });
+    }
+
+    function refreshCardStatus() {
+        const movie = Lampa.Activity.active()?.movie;
+        if (!movie) return;
+        
+        $('.nsl-movie-status').remove();
+        
+        const status = getMovieStatus(movie);
+        if (!status) return;
+        
+        const statusContainer = $('.full-start__status').first();
+        if (!statusContainer.length) return;
+        
+        const statusEl = $(`
+            <div class="full-start__status nsl-movie-status" 
+                 style="margin-left: 8px; 
+                        display: inline-flex; 
+                        align-items: center; 
+                        gap: 4px;
+                        padding: 4px 10px;
+                        border-radius: 20px;
+                        background-color: ${status.bgColor};
+                        color: ${status.color};
+                        font-weight: 500;
+                        cursor: help;"
+                 title="${status.extraText || status.text}">
+                <span style="font-size: 14px;">${status.icon}</span>
+                <span style="font-size: 13px;">${status.displayText}</span>
+            </div>
+        `);
+        
+        statusContainer.after(statusEl);
+    }
+
+    function refreshFavoriteButton() {
+        const movie = Lampa.Activity.active()?.movie;
+        if (!movie) return;
+        
+        const button = $('.nsl-favorite-button');
+        if (!button.length) return;
+        
+        const tmdbId = extractTmdbId(movie);
+        const favorites = getFavorites();
+        const isAny = favorites.some(f => f.tmdb_id === tmdbId && f.category !== 'collection');
+        
+        button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
+    }
+
+    // ======================
     // КНОПКА НА КАРТОЧКЕ
     // ======================
     
@@ -881,6 +1120,7 @@
                                         toggleFavorite(movie, item.category);
                                         const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
                                         button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
+                                        refreshCardStatus();
                                     }, 50);
                                 },
                                 onSelect: (item) => {
@@ -889,6 +1129,7 @@
                                         toggleFavorite(movie, item.category);
                                         const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
                                         button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
+                                        refreshCardStatus();
                                     }, 50);
                                 },
                                 onBack: () => Lampa.Controller.toggle('content')
@@ -984,7 +1225,6 @@
     
     function showFavoritesList(items, title, currentCategory) {
         const timeline = getTimeline();
-        const categories = FAVORITE_CATEGORIES.map(c => ({ id: c.id, name: c.name }));
         
         const menuItems = items.map(item => {
             let sub = '';
@@ -1010,7 +1250,6 @@
                 item: item,
                 onSelect: () => Lampa.Router.call('full', { id: item.card_id, source: item.data?.source || 'tmdb' }),
                 onLongPress: () => {
-                    // Меню действий с фильмом
                     const actionItems = [
                         { title: `📋 Переместить в...`, action: 'move' },
                         { title: `🗑️ Удалить из категории`, action: 'remove' },
@@ -1408,7 +1647,7 @@
 
     function showMainMenu() {
         Lampa.Select.show({
-            title: 'NSL Sync v22',
+            title: 'NSL Sync v23',
             items: [
                 { title: `📌 Закладки разделов (${getBookmarks().length})`, action: 'sections' },
                 { title: `⭐ Избранное (${getFavorites().length})`, action: 'favorites' },
@@ -1744,6 +1983,7 @@
         }, 1000);
 
         addFavoriteButtonToCard();
+        addStatusToCard();
         initPlayerHandler();
         
         startAutoSync();
@@ -1751,12 +1991,21 @@
         
         setTimeout(() => syncTimelineWithCategories(), 3000);
         
+        Lampa.Listener.follow('state:changed', (e) => {
+            if (e.target === 'nsl_favorites' || e.target === 'timeline') {
+                setTimeout(() => {
+                    refreshCardStatus();
+                    refreshFavoriteButton();
+                }, 100);
+            }
+        });
+        
         window.addEventListener('beforeunload', onAppClose);
         
         window.NSL = {
             cfg, getFavorites, getBookmarks, getTimeline,
             syncToGist, syncFromGist, addToFavorites, toggleFavorite,
-            getMoveLog
+            getMoveLog, getMovieStatus, refreshCardStatus
         };
     }
 
