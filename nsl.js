@@ -705,78 +705,95 @@
     // КНОПКА НА КАРТОЧКЕ
     // ======================
     
-    function addFavoriteButtonToCard() {
-        Lampa.Listener.follow('full', (e) => {
-            if (e.type === 'complite') {
-                setTimeout(() => {
-                    try {
-                        const movie = e.data.movie;
-                        if (!movie || !movie.id) return;
+ function addFavoriteButtonToCard() {
+    Lampa.Listener.follow('full', (e) => {
+        if (e.type === 'complite') {
+            setTimeout(() => {
+                try {
+                    const movie = e.data.movie;
+                    if (!movie || !movie.id) return;
+                    
+                    // Ищем контейнер с кнопками
+                    const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').first();
+                    if (!buttonsContainer.length) return;
+                    if (buttonsContainer.find('.nsl-favorite-button').length) return;
+                    
+                    const isFavorite = isInFavorites(movie, 'favorite');
+                    
+                    // Создаем кнопку с правильными классами для навигации
+                    const button = $(`
+                        <div class="full-start__button selector nsl-favorite-button" tabindex="0" role="button">
+                            <svg viewBox="0 0 24 24" width="20" height="20">
+                                <path fill="${isFavorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" 
+                                      d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
+                            </svg>
+                            <span>В избранное</span>
+                        </div>
+                    `);
+                    
+                    // Обработчик выбора
+                    button.on('hover:enter', () => {
+                        const categories = [
+                            { id: 'favorite', name: 'Избранное', checked: isInFavorites(movie, 'favorite') },
+                            { id: 'watching', name: 'Смотрю', checked: isInFavorites(movie, 'watching') },
+                            { id: 'planned', name: 'Буду смотреть', checked: isInFavorites(movie, 'planned') },
+                            { id: 'watched', name: 'Просмотрено', checked: isInFavorites(movie, 'watched') },
+                            { id: 'abandoned', name: 'Брошено', checked: isInFavorites(movie, 'abandoned') },
+                            { id: 'collection', name: 'Коллекция', checked: isInFavorites(movie, 'collection') }
+                        ];
                         
-                        const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').first();
-                        if (!buttonsContainer.length) return;
-                        if (buttonsContainer.find('.nsl-favorite-button').length) return;
+                        const items = categories.map(cat => ({
+                            title: cat.name, checkbox: true, checked: cat.checked, category: cat.id
+                        }));
                         
-                        const isFavorite = isInFavorites(movie, 'favorite');
+                        items.push({ title: '──────────', separator: true });
+                        items.push({ title: '❌ Закрыть', action: 'close' });
                         
-                        const button = $(`
-                            <div class="full-start__button selector nsl-favorite-button">
-                                <svg viewBox="0 0 24 24" width="20" height="20">
-                                    <path fill="${isFavorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" 
-                                          d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
-                                </svg>
-                                <span>В избранное</span>
-                            </div>
-                        `);
-                        
-                        button.on('hover:enter', () => {
-                            const categories = [
-                                { id: 'favorite', name: 'Избранное', checked: isInFavorites(movie, 'favorite') },
-                                { id: 'watching', name: 'Смотрю', checked: isInFavorites(movie, 'watching') },
-                                { id: 'planned', name: 'Буду смотреть', checked: isInFavorites(movie, 'planned') },
-                                { id: 'watched', name: 'Просмотрено', checked: isInFavorites(movie, 'watched') },
-                                { id: 'abandoned', name: 'Брошено', checked: isInFavorites(movie, 'abandoned') },
-                                { id: 'collection', name: 'Коллекция', checked: isInFavorites(movie, 'collection') }
-                            ];
-                            
-                            const items = categories.map(cat => ({
-                                title: cat.name, checkbox: true, checked: cat.checked, category: cat.id
-                            }));
-                            
-                            items.push({ title: '──────────', separator: true });
-                            items.push({ title: '❌ Закрыть', action: 'close' });
-                            
-                            Lampa.Select.show({
-                                title: 'Добавить в избранное',
-                                items: items,
-                                onCheck: (item) => {
-                                    setTimeout(() => {
-                                        toggleFavorite(movie, item.category);
-                                        const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
-                                        button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
-                                    }, 50);
-                                },
-                                onSelect: (item) => {
-                                    if (item.action === 'close') return;
-                                    setTimeout(() => {
-                                        toggleFavorite(movie, item.category);
-                                        const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
-                                        button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
-                                    }, 50);
-                                },
-                                onBack: () => Lampa.Controller.toggle('content')
-                            });
+                        Lampa.Select.show({
+                            title: 'Добавить в избранное',
+                            items: items,
+                            onCheck: (item) => {
+                                setTimeout(() => {
+                                    toggleFavorite(movie, item.category);
+                                    const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
+                                    button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
+                                }, 50);
+                            },
+                            onSelect: (item) => {
+                                if (item.action === 'close') return;
+                                setTimeout(() => {
+                                    toggleFavorite(movie, item.category);
+                                    const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
+                                    button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
+                                }, 50);
+                            },
+                            onBack: () => Lampa.Controller.toggle('content')
                         });
-                        
-                        const playButton = buttonsContainer.find('.button--play');
-                        if (playButton.length) playButton.after(button);
-                        else buttonsContainer.prepend(button);
-                        
-                    } catch (err) {}
-                }, 500);
-            }
-        });
-    }
+                    });
+                    
+                    // Важно: добавляем кнопку ПЕРЕД кнопкой "Смотреть" чтобы она была первой в навигации
+                    const playButton = buttonsContainer.find('.button--play, .full-start__button').first();
+                    if (playButton.length) {
+                        playButton.before(button);
+                    } else {
+                        buttonsContainer.prepend(button);
+                    }
+                    
+                    // Для Android TV: обновляем навигацию
+                    if (isAndroid && Lampa.Controller) {
+                        setTimeout(() => {
+                            // Принудительно обновляем коллекцию фокусируемых элементов
+                            Lampa.Controller.collectionSet(buttonsContainer);
+                        }, 100);
+                    }
+                    
+                } catch (err) {
+                    console.error('[NSL] Error adding button:', err);
+                }
+            }, 500);
+        }
+    });
+}
 
     // ======================
     // МЕНЮ
