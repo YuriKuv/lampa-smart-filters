@@ -22,11 +22,11 @@
     }
 
     const PROFILE_ID = getProfileId();
-    const STORE_BOOKMARKS = `nsl_bookmarks_${PROFILE_ID}_v3`;
-    const STORE_FAVORITES = `nsl_favorites_${PROFILE_ID}_v3`;
-    const STORE_TIMELINE = `nsl_timeline_${PROFILE_ID}_v3`;
+    const STORE_BOOKMARKS = `nsl_bookmarks_${PROFILE_ID}_v4`;
+    const STORE_FAVORITES = `nsl_favorites_${PROFILE_ID}_v4`;
+    const STORE_TIMELINE = `nsl_timeline_${PROFILE_ID}_v4`;
     const STORE_MOVE_LOG = `nsl_move_log_${PROFILE_ID}_v1`;
-    const CFG = `nsl_cfg_${PROFILE_ID}_v3`;
+    const CFG = `nsl_cfg_${PROFILE_ID}_v4`;
     const GIST_CACHE = `nsl_gist_cache_${PROFILE_ID}`;
 
     window.NSL = {};
@@ -68,6 +68,11 @@
         planned: { removeFrom: [] }
     };
 
+    // Переменные для нового функционала
+    let timelineStylesInjected = false;
+    let timelineModulePatched = false;
+    let ratingsObserver = null;
+
     function cfg() {
         return Lampa.Storage.get(CFG, {
             enabled: true,
@@ -93,7 +98,14 @@
             watched_min_progress: 95,
             show_move_notifications: true,
             cleanup_older_days: 0,
-            cleanup_completed: false
+            cleanup_completed: false,
+            // Новые настройки
+            show_timeline_on_cards: true,
+            timeline_position: 'bottom',
+            show_ratings: true,
+            ratings_on_cards: true,
+            ratings_on_full: true,
+            ratings_source: 'both'
         }) || {};
     }
 
@@ -116,7 +128,7 @@
     
     function getMoveLog() { return Lampa.Storage.get(STORE_MOVE_LOG, []) || []; }
     function saveMoveLog(l) { 
-        if (l.length > 100) l = l.slice(-100);
+        if (l.length > 50) l = l.slice(-50);
         Lampa.Storage.set(STORE_MOVE_LOG, l, true); 
     }
 
@@ -192,7 +204,7 @@
         const cleaned = {};
         const allowedFields = ['id', 'title', 'name', 'original_title', 'original_name', 
             'poster_path', 'backdrop_path', 'vote_average', 'release_date', 'first_air_date',
-            'overview', 'genre_ids', 'source', 'animation', 'anime'];
+            'overview', 'genre_ids', 'source', 'animation', 'anime', 'kp_rating', 'rating'];
         for (const field of allowedFields) {
             if (card[field] !== undefined) cleaned[field] = card[field];
         }
@@ -375,7 +387,7 @@
     }
 
     // ======================
-    // ИЗБРАННОЕ (С ЛОГИКОЙ ИСКЛЮЧИТЕЛЬНОСТИ) - ИСПРАВЛЕНО
+    // ИЗБРАННОЕ (С ЛОГИКОЙ ИСКЛЮЧИТЕЛЬНОСТИ)
     // ======================
 
     function applyCategoryRules(tmdbId, newCategory, favorites) {
@@ -546,7 +558,7 @@
         return false;
     }
     
-    // Синхронизация таймкодов с категориями - ИСПРАВЛЕНО
+    // Синхронизация таймкодов с категориями
     function syncTimelineWithCategories() {
         const c = cfg();
         if (!c.auto_watching && !c.auto_watched) return;
@@ -976,94 +988,94 @@
         return getCategoryDisplay(bestCategory, tmdbId);
     }
 
-function addStatusToCard() {
-    Lampa.Listener.follow('full', (e) => {
-        if (e.type === 'complite') {
-            setTimeout(() => {
-                try {
-                    const movie = e.data.movie;
-                    if (!movie || !movie.id) return;
-                    
-                    const statusContainer = $('.full-start__status').first();
-                    if (!statusContainer.length) return;
-                    
-                    $('.nsl-movie-status').remove();
-                    
-                    const status = getMovieStatus(movie);
-                    if (!status) return;
-                    
-                    const statusEl = $(`
-                        <div class="full-start__status nsl-movie-status" 
-                             style="margin-left: 8px; 
-                                    display: flex; 
-                                    align-items: center; 
-                                    gap: 6px;
-                                    padding: 0 12px;
-                                    height: 32px;
-                                    border-radius: 4px;
-                                    background-color: rgba(0, 0, 0, 0.4);
-                                    color: rgba(255, 255, 255, 0.9) !important;
-                                    font-size: 16px !important;
-                                    font-weight: 400;
-                                    cursor: help;
-                                    white-space: nowrap;
-                                    border: none;
-                                    backdrop-filter: blur(8px);
-                                    -webkit-backdrop-filter: blur(8px);"
-                             title="${status.extraText || status.text}">
-                            <span style="font-size: 16px !important; line-height: 1;">${status.icon}</span>
-                            <span style="font-size: 16px !important; line-height: 1;">${status.displayText}</span>
-                        </div>
-                    `);
-                    
-                    statusContainer.after(statusEl);
-                    
-                } catch (err) {
-                    console.error('[NSL] Error adding status:', err);
-                }
-            }, 300);
-        }
-    });
-}
+    function addStatusToCard() {
+        Lampa.Listener.follow('full', (e) => {
+            if (e.type === 'complite') {
+                setTimeout(() => {
+                    try {
+                        const movie = e.data.movie;
+                        if (!movie || !movie.id) return;
+                        
+                        const statusContainer = $('.full-start__status').first();
+                        if (!statusContainer.length) return;
+                        
+                        $('.nsl-movie-status').remove();
+                        
+                        const status = getMovieStatus(movie);
+                        if (!status) return;
+                        
+                        const statusEl = $(`
+                            <div class="full-start__status nsl-movie-status" 
+                                 style="margin-left: 8px; 
+                                        display: flex; 
+                                        align-items: center; 
+                                        gap: 6px;
+                                        padding: 0 12px;
+                                        height: 32px;
+                                        border-radius: 4px;
+                                        background-color: rgba(0, 0, 0, 0.4);
+                                        color: rgba(255, 255, 255, 0.9) !important;
+                                        font-size: 16px !important;
+                                        font-weight: 400;
+                                        cursor: help;
+                                        white-space: nowrap;
+                                        border: none;
+                                        backdrop-filter: blur(8px);
+                                        -webkit-backdrop-filter: blur(8px);"
+                                 title="${status.extraText || status.text}">
+                                <span style="font-size: 16px !important; line-height: 1;">${status.icon}</span>
+                                <span style="font-size: 16px !important; line-height: 1;">${status.displayText}</span>
+                            </div>
+                        `);
+                        
+                        statusContainer.after(statusEl);
+                        
+                    } catch (err) {
+                        console.error('[NSL] Error adding status:', err);
+                    }
+                }, 300);
+            }
+        });
+    }
 
-function refreshCardStatus() {
-    const movie = Lampa.Activity.active()?.movie;
-    if (!movie) return;
-    
-    $('.nsl-movie-status').remove();
-    
-    const status = getMovieStatus(movie);
-    if (!status) return;
-    
-    const statusContainer = $('.full-start__status').first();
-    if (!statusContainer.length) return;
-    
-    const statusEl = $(`
-        <div class="full-start__status nsl-movie-status" 
-             style="margin-left: 8px; 
-                    display: flex; 
-                    align-items: center; 
-                    gap: 6px;
-                    padding: 0 12px;
-                    height: 32px;
-                    border-radius: 4px;
-                    background-color: rgba(0, 0, 0, 0.4);
-                    color: rgba(255, 255, 255, 0.9) !important;
-                    font-size: 16px !important;
-                    font-weight: 400;
-                    cursor: help;
-                    white-space: nowrap;
-                    border: none;
-                    backdrop-filter: blur(8px);
-                    -webkit-backdrop-filter: blur(8px);"
-             title="${status.extraText || status.text}">
-            <span style="font-size: 16px !important; line-height: 1;">${status.icon}</span>
-            <span style="font-size: 16px !important; line-height: 1;">${status.displayText}</span>
-        </div>
-    `);
-    
-    statusContainer.after(statusEl);
-}
+    function refreshCardStatus() {
+        const movie = Lampa.Activity.active()?.movie;
+        if (!movie) return;
+        
+        $('.nsl-movie-status').remove();
+        
+        const status = getMovieStatus(movie);
+        if (!status) return;
+        
+        const statusContainer = $('.full-start__status').first();
+        if (!statusContainer.length) return;
+        
+        const statusEl = $(`
+            <div class="full-start__status nsl-movie-status" 
+                 style="margin-left: 8px; 
+                        display: flex; 
+                        align-items: center; 
+                        gap: 6px;
+                        padding: 0 12px;
+                        height: 32px;
+                        border-radius: 4px;
+                        background-color: rgba(0, 0, 0, 0.4);
+                        color: rgba(255, 255, 255, 0.9) !important;
+                        font-size: 16px !important;
+                        font-weight: 400;
+                        cursor: help;
+                        white-space: nowrap;
+                        border: none;
+                        backdrop-filter: blur(8px);
+                        -webkit-backdrop-filter: blur(8px);"
+                 title="${status.extraText || status.text}">
+                <span style="font-size: 16px !important; line-height: 1;">${status.icon}</span>
+                <span style="font-size: 16px !important; line-height: 1;">${status.displayText}</span>
+            </div>
+        `);
+        
+        statusContainer.after(statusEl);
+    }
 
     function refreshFavoriteButton() {
         const movie = Lampa.Activity.active()?.movie;
@@ -1348,192 +1360,546 @@ function refreshCardStatus() {
         });
     }
 
-// ======================
-// GITHUB GIST СИНХРОНИЗАЦИЯ
-// ======================
+    // ======================
+    // ТАЙМКОДЫ НА КАРТОЧКАХ
+    // ======================
 
-function getGistData() {
-    const c = cfg();
-    if (!c.gist_token || !c.gist_id) return null;
-    return { token: c.gist_token, id: c.gist_id };
-}
+    function getTimelinePositionStyles() {
+        const c = cfg();
+        const pos = c.timeline_position || 'bottom';
+        const styles = {
+            bottom: `bottom: 2.5em !important; top: auto !important;`,
+            center: `bottom: auto !important; top: 50% !important; transform: translateY(-50%) !important;`,
+            top: `bottom: auto !important; top: 0.5em !important;`
+        };
+        return styles[pos] || styles.bottom;
+    }
 
-function getAllSyncData() {
-    return {
-        version: 4,
-        profile_id: PROFILE_ID,
-        updated: new Date().toISOString(),
-        bookmarks: getBookmarks(),
-        favorites: getFavorites(),
-        timeline: getTimeline()
-    };
-}
-
-function mergeTimeline(localTimeline, remoteTimeline, strategy) {
-    const merged = { ...localTimeline };
-    let changes = 0;
-    
-    for (const key in remoteTimeline) {
-        const remoteRec = remoteTimeline[key];
-        const localRec = merged[key];
+    function injectTimelineStyles() {
+        const oldStyle = document.getElementById('nsl-timeline-styles');
+        if (oldStyle) oldStyle.remove();
         
-        if (!remoteRec.updated) remoteRec.updated = remoteRec.saved_at || 0;
+        const positionStyles = getTimelinePositionStyles();
         
-        if (!localRec) {
-            merged[key] = remoteRec;
-            changes++;
-        } else {
-            if (!localRec.updated) localRec.updated = localRec.saved_at || 0;
-            
-            const remoteUpdated = remoteRec.updated || 0;
-            const localUpdated = localRec.updated || 0;
-            const remoteTime = remoteRec.time || 0;
-            const localTime = localRec.time || 0;
-            
-            let shouldUpdate = false;
-            
-            if (strategy === 'max_time') {
-                if (remoteTime > localTime) shouldUpdate = true;
-            } else {
-                if (remoteUpdated > localUpdated) shouldUpdate = true;
-                else if (remoteUpdated === localUpdated && remoteTime > localTime) shouldUpdate = true;
+        const style = document.createElement('style');
+        style.id = 'nsl-timeline-styles';
+        style.textContent = `
+            .card .card-watched {
+                display: block !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+                pointer-events: none;
+                ${positionStyles}
+                left: 0.8em !important;
+                right: 0.8em !important;
+                z-index: 5 !important;
+                background-color: rgba(0, 0, 0, 0.7) !important;
+                -webkit-backdrop-filter: blur(2px);
+                backdrop-filter: blur(2px);
+                border-radius: 0.5em !important;
             }
             
-            if (shouldUpdate) {
+            .card:not(.focus) .card-watched {
+                display: block !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+            }
+            
+            .card-watched[style*="display: none"] {
+                display: block !important;
+            }
+            
+            .card-watched__item:nth-child(n+3) {
+                display: none !important;
+            }
+            
+            .card--wide .card-watched__item:nth-child(n+2) {
+                display: none !important;
+            }
+            
+            @media screen and (max-width: 480px) {
+                .card .card-watched {
+                    left: 0.5em !important;
+                    right: 0.5em !important;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+        timelineStylesInjected = true;
+        console.log('[NSL] Стили таймкодов добавлены');
+    }
+
+    function removeTimelineStyles() {
+        const oldStyle = document.getElementById('nsl-timeline-styles');
+        if (oldStyle) oldStyle.remove();
+        timelineStylesInjected = false;
+        console.log('[NSL] Стили таймкодов удалены');
+    }
+
+    function patchTimelineModule() {
+        if (timelineModulePatched) return;
+        if (!Lampa.Maker || !Lampa.Maker.map) return;
+
+        try {
+            const cardMap = Lampa.Maker.map('Card');
+            if (cardMap && cardMap.Watched) {
+                const originalOnCreate = cardMap.Watched.onCreate;
+                
+                cardMap.Watched.onCreate = function() {
+                    if (originalOnCreate) originalOnCreate.call(this);
+                    
+                    const c = cfg();
+                    if (!c.show_timeline_on_cards) return;
+                    
+                    setTimeout(() => this.emit('watched'), 100);
+                    
+                    Lampa.Listener.follow('state:changed', (e) => {
+                        if (e.target === 'timeline' && (e.reason === 'read' || e.reason === 'update')) {
+                            setTimeout(() => this.emit('watched'), 50);
+                        }
+                    });
+                };
+                
+                timelineModulePatched = true;
+                console.log('[NSL] Модуль таймкодов пропатчен');
+            }
+        } catch(e) {
+            console.warn('[NSL] Не удалось пропатчить модуль таймкодов:', e);
+        }
+    }
+
+    function forceRefreshCards() {
+        const c = cfg();
+        if (!c.show_timeline_on_cards) return;
+        
+        if (Lampa.Timeline && Lampa.Timeline.read) {
+            Lampa.Timeline.read(true);
+        }
+        
+        setTimeout(() => {
+            document.querySelectorAll('.card').forEach(card => {
+                card.classList.add('focus');
+                setTimeout(() => card.classList.remove('focus'), 50);
+            });
+        }, 200);
+    }
+
+    function enableTimelineOnCards() {
+        injectTimelineStyles();
+        patchTimelineModule();
+        forceRefreshCards();
+        console.log('[NSL] Таймкоды на карточках включены');
+    }
+
+    function disableTimelineOnCards() {
+        removeTimelineStyles();
+        console.log('[NSL] Таймкоды на карточках выключены');
+    }
+
+    // ======================
+    // РЕЙТИНГИ НА КАРТОЧКАХ
+    // ======================
+
+    function getCardRatings(card) {
+        const ratings = {};
+        const c = cfg();
+        
+        // TMDB рейтинг
+        if (card.vote_average && (c.ratings_source === 'tmdb' || c.ratings_source === 'both')) {
+            ratings.tmdb = parseFloat(card.vote_average).toFixed(1);
+        }
+        
+        // Кинопоиск рейтинг
+        if ((c.ratings_source === 'kp' || c.ratings_source === 'both')) {
+            if (card.kp_rating) {
+                ratings.kp = parseFloat(card.kp_rating).toFixed(1);
+            } else if (card.rating) {
+                ratings.kp = parseFloat(card.rating).toFixed(1);
+            }
+        }
+        
+        return ratings;
+    }
+
+    function getDisplayRating(card) {
+        const ratings = getCardRatings(card);
+        const c = cfg();
+        
+        // Приоритет: KP > TMDB если оба
+        if (c.ratings_source === 'both') {
+            return ratings.kp || ratings.tmdb || null;
+        } else if (c.ratings_source === 'kp') {
+            return ratings.kp || null;
+        } else if (c.ratings_source === 'tmdb') {
+            return ratings.tmdb || null;
+        }
+        return null;
+    }
+
+    function updateCardRatingElement(cardElement, cardData) {
+        const rating = getDisplayRating(cardData);
+        let voteEl = cardElement.querySelector('.card__vote');
+        
+        if (rating) {
+            if (!voteEl) {
+                // Создаём элемент рейтинга если его нет
+                const viewEl = cardElement.querySelector('.card__view');
+                if (viewEl) {
+                    voteEl = document.createElement('div');
+                    voteEl.className = 'card__vote';
+                    viewEl.appendChild(voteEl);
+                }
+            }
+            if (voteEl) {
+                voteEl.textContent = rating;
+                voteEl.style.display = '';
+            }
+        } else {
+            if (voteEl) {
+                voteEl.style.display = 'none';
+            }
+        }
+    }
+
+    function processExistingCards() {
+        document.querySelectorAll('.card.card--loaded').forEach(card => {
+            if (card.card_data) {
+                updateCardRatingElement(card, card.card_data);
+            }
+        });
+    }
+
+    function setupRatingsObserver() {
+        if (ratingsObserver) ratingsObserver.disconnect();
+        
+        const c = cfg();
+        if (!c.show_ratings || !c.ratings_on_cards) return;
+        
+        // Наблюдаем за добавлением новых карточек
+        ratingsObserver = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType === 1) {
+                        // Проверяем сам элемент
+                        if (node.classList && node.classList.contains('card')) {
+                            setTimeout(() => {
+                                if (node.card_data) {
+                                    updateCardRatingElement(node, node.card_data);
+                                }
+                            }, 100);
+                        }
+                        // Проверяем вложенные карточки
+                        const cards = node.querySelectorAll ? node.querySelectorAll('.card') : [];
+                        cards.forEach(card => {
+                            setTimeout(() => {
+                                if (card.card_data) {
+                                    updateCardRatingElement(card, card.card_data);
+                                }
+                            }, 100);
+                        });
+                    }
+                }
+            }
+        });
+        
+        ratingsObserver.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+        
+        // Обрабатываем существующие карточки
+        setTimeout(processExistingCards, 500);
+        console.log('[NSL] Наблюдатель за рейтингами запущен');
+    }
+
+    function patchCardRender() {
+        // Перехватываем создание карточек через Lampa.Maker
+        if (!Lampa.Maker || !Lampa.Maker.map) return;
+        
+        try {
+            const cardMap = Lampa.Maker.map('Card');
+            if (cardMap && cardMap.Base) {
+                const originalOnCreate = cardMap.Base.onCreate;
+                
+                cardMap.Base.onCreate = function() {
+                    if (originalOnCreate) originalOnCreate.call(this);
+                    
+                    const c = cfg();
+                    if (!c.show_ratings || !c.ratings_on_cards) return;
+                    
+                    setTimeout(() => {
+                        const cardData = this.data;
+                        const cardElement = this.render().get(0);
+                        if (cardData && cardElement) {
+                            updateCardRatingElement(cardElement, cardData);
+                        }
+                    }, 50);
+                };
+                
+                console.log('[NSL] Модуль карточек пропатчен для рейтингов');
+            }
+        } catch(e) {
+            console.warn('[NSL] Не удалось пропатчить модуль карточек:', e);
+        }
+    }
+
+    function enableRatings() {
+        patchCardRender();
+        setupRatingsObserver();
+        processExistingCards();
+        console.log('[NSL] Рейтинги включены');
+    }
+
+    function disableRatings() {
+        if (ratingsObserver) {
+            ratingsObserver.disconnect();
+            ratingsObserver = null;
+        }
+        // Скрываем все рейтинги
+        document.querySelectorAll('.card__vote').forEach(el => {
+            el.style.display = 'none';
+        });
+        console.log('[NSL] Рейтинги выключены');
+    }
+
+    function refreshRatingsSettings() {
+        const c = cfg();
+        
+        if (c.show_ratings && c.ratings_on_cards) {
+            enableRatings();
+        } else {
+            disableRatings();
+        }
+    }
+
+    // ======================
+    // GITHUB GIST СИНХРОНИЗАЦИЯ
+    // ======================
+
+    function getGistData() {
+        const c = cfg();
+        if (!c.gist_token || !c.gist_id) return null;
+        return { token: c.gist_token, id: c.gist_id };
+    }
+
+    function getAllSyncData() {
+        return {
+            version: 5,
+            profile_id: PROFILE_ID,
+            updated: new Date().toISOString(),
+            bookmarks: getBookmarks(),
+            favorites: getFavorites(),
+            timeline: getTimeline()
+        };
+    }
+
+    function mergeTimeline(localTimeline, remoteTimeline, strategy) {
+        const merged = { ...localTimeline };
+        let changes = 0;
+        
+        for (const key in remoteTimeline) {
+            const remoteRec = remoteTimeline[key];
+            const localRec = merged[key];
+            
+            if (!remoteRec.updated) remoteRec.updated = remoteRec.saved_at || 0;
+            
+            if (!localRec) {
                 merged[key] = remoteRec;
                 changes++;
-            }
-        }
-    }
-    
-    return { merged, changes };
-}
-
-// Очистка дубликатов и применение правил исключительности
-function cleanupDuplicateCategories() {
-    const favorites = getFavorites();
-    const tmdbMap = new Map();
-    let changed = false;
-    
-    // Группируем по tmdb_id
-    for (const item of favorites) {
-        if (!tmdbMap.has(item.tmdb_id)) {
-            tmdbMap.set(item.tmdb_id, []);
-        }
-        tmdbMap.get(item.tmdb_id).push(item);
-    }
-    
-    // Для каждого фильма оставляем только разрешённые комбинации
-    for (const [tmdbId, items] of tmdbMap) {
-        if (items.length <= 1) continue;
-        
-        const categories = items.map(i => i.category);
-        let keepCategories = [...categories];
-        
-        // Применяем правила исключительности
-        if (categories.includes('abandoned')) {
-            keepCategories = keepCategories.filter(c => c === 'abandoned' || c === 'collection');
-        } else if (categories.includes('watched')) {
-            keepCategories = keepCategories.filter(c => c === 'watched' || c === 'collection');
-        } else if (categories.includes('watching')) {
-            keepCategories = keepCategories.filter(c => c === 'watching' || c === 'collection');
-        } else if (categories.includes('planned') && categories.includes('favorite')) {
-            keepCategories = ['planned', 'collection'];
-        }
-        
-        const uniqueKeep = [...new Set(keepCategories)];
-        
-        // Удаляем лишние записи
-        for (const item of items) {
-            if (!uniqueKeep.includes(item.category)) {
-                const index = favorites.findIndex(f => f.id === item.id);
-                if (index >= 0) {
-                    favorites.splice(index, 1);
-                    changed = true;
+            } else {
+                if (!localRec.updated) localRec.updated = localRec.saved_at || 0;
+                
+                const remoteUpdated = remoteRec.updated || 0;
+                const localUpdated = localRec.updated || 0;
+                const remoteTime = remoteRec.time || 0;
+                const localTime = localRec.time || 0;
+                
+                let shouldUpdate = false;
+                
+                if (strategy === 'max_time') {
+                    if (remoteTime > localTime) shouldUpdate = true;
+                } else {
+                    if (remoteUpdated > localUpdated) shouldUpdate = true;
+                    else if (remoteUpdated === localUpdated && remoteTime > localTime) shouldUpdate = true;
+                }
+                
+                if (shouldUpdate) {
+                    merged[key] = remoteRec;
+                    changes++;
                 }
             }
         }
         
-        // Удаляем дубликаты в одной категории (оставляем самый новый)
-        for (const cat of uniqueKeep) {
-            const catItems = items.filter(i => i.category === cat);
-            if (catItems.length > 1) {
-                catItems.sort((a, b) => (b.updated || 0) - (a.updated || 0));
-                for (let i = 1; i < catItems.length; i++) {
-                    const index = favorites.findIndex(f => f.id === catItems[i].id);
+        return { merged, changes };
+    }
+
+    // Очистка дубликатов и применение правил исключительности
+    function cleanupDuplicateCategories() {
+        const favorites = getFavorites();
+        const tmdbMap = new Map();
+        let changed = false;
+        
+        // Группируем по tmdb_id
+        for (const item of favorites) {
+            if (!tmdbMap.has(item.tmdb_id)) {
+                tmdbMap.set(item.tmdb_id, []);
+            }
+            tmdbMap.get(item.tmdb_id).push(item);
+        }
+        
+        // Для каждого фильма оставляем только разрешённые комбинации
+        for (const [tmdbId, items] of tmdbMap) {
+            if (items.length <= 1) continue;
+            
+            const categories = items.map(i => i.category);
+            let keepCategories = [...categories];
+            
+            // Применяем правила исключительности
+            if (categories.includes('abandoned')) {
+                keepCategories = keepCategories.filter(c => c === 'abandoned' || c === 'collection');
+            } else if (categories.includes('watched')) {
+                keepCategories = keepCategories.filter(c => c === 'watched' || c === 'collection');
+            } else if (categories.includes('watching')) {
+                keepCategories = keepCategories.filter(c => c === 'watching' || c === 'collection');
+            } else if (categories.includes('planned') && categories.includes('favorite')) {
+                keepCategories = ['planned', 'collection'];
+            }
+            
+            const uniqueKeep = [...new Set(keepCategories)];
+            
+            // Удаляем лишние записи
+            for (const item of items) {
+                if (!uniqueKeep.includes(item.category)) {
+                    const index = favorites.findIndex(f => f.id === item.id);
                     if (index >= 0) {
                         favorites.splice(index, 1);
                         changed = true;
                     }
                 }
             }
-        }
-    }
-    
-    if (changed) {
-        saveFavorites(favorites);
-        logMove('cleanup', 'Система', null, null);
-    }
-    
-    return changed;
-}
-
-function syncToGist(showNotify) {
-    const gist = getGistData();
-    if (!gist) { 
-        if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
-        return; 
-    }
-
-    $.ajax({
-        url: `https://api.github.com/gists/${gist.id}`,
-        method: 'GET',
-        headers: {
-            'Authorization': `token ${gist.token}`,
-            'Accept': 'application/vnd.github.v3+json'
-        },
-        success: (data) => {
-            try {
-                const content = data.files['nsl_sync.json']?.content;
-                let remoteData = { bookmarks: [], favorites: [], timeline: {} };
-                
-                if (content) remoteData = JSON.parse(content);
-                
-                const localData = getAllSyncData();
-                const strategy = cfg().sync_strategy;
-                
-                const { merged: mergedTimeline } = mergeTimeline(localData.timeline, remoteData.timeline || {}, strategy);
-                
-                const mergedFavorites = [...(remoteData.favorites || [])];
-                for (const localFav of localData.favorites) {
-                    const key = `${localFav.tmdb_id}_${localFav.category}`;
-                    const existingIndex = mergedFavorites.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
-                    
-                    if (existingIndex === -1) {
-                        mergedFavorites.push(localFav);
-                    } else {
-                        const remoteFav = mergedFavorites[existingIndex];
-                        if ((localFav.updated || 0) > (remoteFav.updated || 0)) {
-                            mergedFavorites[existingIndex] = localFav;
+            
+            // Удаляем дубликаты в одной категории (оставляем самый новый)
+            for (const cat of uniqueKeep) {
+                const catItems = items.filter(i => i.category === cat);
+                if (catItems.length > 1) {
+                    catItems.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+                    for (let i = 1; i < catItems.length; i++) {
+                        const index = favorites.findIndex(f => f.id === catItems[i].id);
+                        if (index >= 0) {
+                            favorites.splice(index, 1);
+                            changed = true;
                         }
                     }
                 }
-                
-                const mergedBookmarks = [...(remoteData.bookmarks || [])];
-                for (const localBm of localData.bookmarks) {
-                    if (!mergedBookmarks.some(b => b.key === localBm.key)) {
-                        mergedBookmarks.push(localBm);
+            }
+        }
+        
+        if (changed) {
+            saveFavorites(favorites);
+            logMove('cleanup', 'Система', null, null);
+            console.log('[NSL] Дубликаты очищены');
+        }
+        
+        return changed;
+    }
+
+    function syncToGist(showNotify) {
+        const gist = getGistData();
+        if (!gist) { 
+            if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
+            return; 
+        }
+
+        $.ajax({
+            url: `https://api.github.com/gists/${gist.id}`,
+            method: 'GET',
+            headers: {
+                'Authorization': `token ${gist.token}`,
+                'Accept': 'application/vnd.github.v3+json'
+            },
+            success: (data) => {
+                try {
+                    const content = data.files['nsl_sync.json']?.content;
+                    let remoteData = { bookmarks: [], favorites: [], timeline: {} };
+                    
+                    if (content) remoteData = JSON.parse(content);
+                    
+                    const localData = getAllSyncData();
+                    const strategy = cfg().sync_strategy;
+                    
+                    const { merged: mergedTimeline } = mergeTimeline(localData.timeline, remoteData.timeline || {}, strategy);
+                    
+                    const mergedFavorites = [...(remoteData.favorites || [])];
+                    for (const localFav of localData.favorites) {
+                        const key = `${localFav.tmdb_id}_${localFav.category}`;
+                        const existingIndex = mergedFavorites.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
+                        
+                        if (existingIndex === -1) {
+                            mergedFavorites.push(localFav);
+                        } else {
+                            const remoteFav = mergedFavorites[existingIndex];
+                            if ((localFav.updated || 0) > (remoteFav.updated || 0)) {
+                                mergedFavorites[existingIndex] = localFav;
+                            }
+                        }
                     }
+                    
+                    const mergedBookmarks = [...(remoteData.bookmarks || [])];
+                    for (const localBm of localData.bookmarks) {
+                        if (!mergedBookmarks.some(b => b.key === localBm.key)) {
+                            mergedBookmarks.push(localBm);
+                        }
+                    }
+                    
+                    const mergedData = {
+                        version: 5,
+                        profile_id: PROFILE_ID,
+                        updated: new Date().toISOString(),
+                        bookmarks: mergedBookmarks,
+                        favorites: mergedFavorites,
+                        timeline: mergedTimeline
+                    };
+                    
+                    $.ajax({
+                        url: `https://api.github.com/gists/${gist.id}`,
+                        method: 'PATCH',
+                        headers: {
+                            'Authorization': `token ${gist.token}`,
+                            'Accept': 'application/vnd.github.v3+json',
+                            'Content-Type': 'application/json'
+                        },
+                        data: JSON.stringify({
+                            description: 'NSL Sync Data',
+                            public: false,
+                            files: { 'nsl_sync.json': { content: JSON.stringify(mergedData) } }
+                        }),
+                        success: () => {
+                            saveTimeline(mergedTimeline);
+                            saveFavorites(mergedFavorites);
+                            saveBookmarks(mergedBookmarks);
+                            
+                            syncTimelineWithCategories();
+                            
+                            if (showNotify) notify('✅ Синхронизировано');
+                            Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
+                            setTimeout(() => renderBookmarks(), 500);
+                        },
+                        error: (xhr) => {
+                            console.error('[NSL] Send error:', xhr.status);
+                            if (showNotify) notify('❌ Ошибка отправки');
+                        },
+                        timeout: 15000,
+                        crossDomain: true
+                    });
+                    
+                } catch(e) {
+                    console.error('[NSL] Sync error:', e);
+                    if (showNotify) notify('❌ Ошибка синхронизации');
                 }
-                
-                const mergedData = {
-                    version: 4,
-                    profile_id: PROFILE_ID,
-                    updated: new Date().toISOString(),
-                    bookmarks: mergedBookmarks,
-                    favorites: mergedFavorites,
-                    timeline: mergedTimeline
-                };
+            },
+            error: (xhr) => {
+                console.error('[NSL] Gist fetch error:', xhr.status);
+                const localData = getAllSyncData();
                 
                 $.ajax({
                     url: `https://api.github.com/gists/${gist.id}`,
@@ -1546,211 +1912,278 @@ function syncToGist(showNotify) {
                     data: JSON.stringify({
                         description: 'NSL Sync Data',
                         public: false,
-                        files: { 'nsl_sync.json': { content: JSON.stringify(mergedData) } }
+                        files: { 'nsl_sync.json': { content: JSON.stringify(localData) } }
                     }),
                     success: () => {
-                        saveTimeline(mergedTimeline);
-                        saveFavorites(mergedFavorites);
-                        saveBookmarks(mergedBookmarks);
-                        
-                        syncTimelineWithCategories();
-                        
-                        if (showNotify) notify('✅ Синхронизировано');
+                        if (showNotify) notify('✅ Отправлено');
                         Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
-                        setTimeout(() => renderBookmarks(), 500);
                     },
-                    error: () => { if (showNotify) notify('❌ Ошибка отправки'); },
+                    error: () => { if (showNotify) notify('❌ Ошибка'); },
                     timeout: 15000,
                     crossDomain: true
                 });
-                
-            } catch(e) {
-                console.error('[NSL] Sync error:', e);
-                if (showNotify) notify('❌ Ошибка синхронизации');
-            }
-        },
-        error: () => {
-            const localData = getAllSyncData();
-            
-            $.ajax({
-                url: `https://api.github.com/gists/${gist.id}`,
-                method: 'PATCH',
-                headers: {
-                    'Authorization': `token ${gist.token}`,
-                    'Accept': 'application/vnd.github.v3+json',
-                    'Content-Type': 'application/json'
-                },
-                data: JSON.stringify({
-                    description: 'NSL Sync Data',
-                    public: false,
-                    files: { 'nsl_sync.json': { content: JSON.stringify(localData) } }
-                }),
-                success: () => {
-                    if (showNotify) notify('✅ Отправлено');
-                    Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
-                },
-                error: () => { if (showNotify) notify('❌ Ошибка'); },
-                timeout: 15000,
-                crossDomain: true
-            });
-        },
-        timeout: 15000,
-        crossDomain: true
-    });
-}
-
-function syncFromGist(showNotify) {
-    const gist = getGistData();
-    if (!gist) { 
-        if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
-        return; 
+            },
+            timeout: 15000,
+            crossDomain: true
+        });
     }
 
-    $.ajax({
-        url: `https://api.github.com/gists/${gist.id}`,
-        method: 'GET',
-        headers: {
-            'Authorization': `token ${gist.token}`,
-            'Accept': 'application/vnd.github.v3+json'
-        },
-        success: (data) => {
-            try {
-                const content = data.files['nsl_sync.json']?.content;
-                if (!content) {
-                    if (showNotify) notify('⚠️ Файл не найден');
-                    return;
-                }
+    function syncFromGist(showNotify) {
+        const gist = getGistData();
+        if (!gist) { 
+            if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
+            return; 
+        }
 
-                const remote = JSON.parse(content);
-                const strategy = cfg().sync_strategy;
-                let totalChanges = 0;
-                
-                if (remote.timeline) {
-                    const localTimeline = getTimeline();
-                    const { merged, changes } = mergeTimeline(localTimeline, remote.timeline, strategy);
+        $.ajax({
+            url: `https://api.github.com/gists/${gist.id}`,
+            method: 'GET',
+            headers: {
+                'Authorization': `token ${gist.token}`,
+                'Accept': 'application/vnd.github.v3+json'
+            },
+            success: (data) => {
+                try {
+                    const content = data.files['nsl_sync.json']?.content;
+                    if (!content) {
+                        if (showNotify) notify('⚠️ Файл не найден');
+                        return;
+                    }
+
+                    const remote = JSON.parse(content);
+                    const strategy = cfg().sync_strategy;
+                    let totalChanges = 0;
                     
-                    if (changes > 0) {
-                        saveTimeline(merged);
-                        totalChanges += changes;
+                    if (remote.timeline) {
+                        const localTimeline = getTimeline();
+                        const { merged, changes } = mergeTimeline(localTimeline, remote.timeline, strategy);
                         
-                        for (const key in remote.timeline) {
-                            const rec = merged[key];
-                            if (Lampa.Timeline?.update) {
-                                Lampa.Timeline.update({
-                                    hash: key, percent: rec.percent || 0, time: rec.time || 0, duration: rec.duration || 0
-                                });
+                        if (changes > 0) {
+                            saveTimeline(merged);
+                            totalChanges += changes;
+                            
+                            for (const key in remote.timeline) {
+                                const rec = merged[key];
+                                if (Lampa.Timeline?.update) {
+                                    Lampa.Timeline.update({
+                                        hash: key, percent: rec.percent || 0, time: rec.time || 0, duration: rec.duration || 0
+                                    });
+                                }
                             }
                         }
                     }
-                }
-                
-                if (remote.favorites) {
-                    const localFavs = getFavorites();
-                    let changed = false;
                     
-                    for (const remoteFav of remote.favorites) {
-                        const key = `${remoteFav.tmdb_id}_${remoteFav.category}`;
-                        const existingIndex = localFavs.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
+                    if (remote.favorites) {
+                        const localFavs = getFavorites();
+                        let changed = false;
                         
-                        if (existingIndex === -1) {
-                            localFavs.push(remoteFav);
-                            changed = true;
-                        } else {
-                            const localFav = localFavs[existingIndex];
-                            if ((remoteFav.updated || 0) > (localFav.updated || 0)) {
-                                localFavs[existingIndex] = remoteFav;
+                        for (const remoteFav of remote.favorites) {
+                            const key = `${remoteFav.tmdb_id}_${remoteFav.category}`;
+                            const existingIndex = localFavs.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
+                            
+                            if (existingIndex === -1) {
+                                localFavs.push(remoteFav);
+                                changed = true;
+                            } else {
+                                const localFav = localFavs[existingIndex];
+                                if ((remoteFav.updated || 0) > (localFav.updated || 0)) {
+                                    localFavs[existingIndex] = remoteFav;
+                                    changed = true;
+                                }
+                            }
+                        }
+                        
+                        if (changed) {
+                            saveFavorites(localFavs);
+                            totalChanges++;
+                        }
+                    }
+                    
+                    if (remote.bookmarks) {
+                        const localBookmarks = getBookmarks();
+                        let changed = false;
+                        
+                        for (const remoteBm of remote.bookmarks) {
+                            if (!localBookmarks.some(b => b.key === remoteBm.key)) {
+                                localBookmarks.push(remoteBm);
                                 changed = true;
                             }
                         }
-                    }
-                    
-                    if (changed) {
-                        saveFavorites(localFavs);
-                        totalChanges++;
-                    }
-                }
-                
-                if (remote.bookmarks) {
-                    const localBookmarks = getBookmarks();
-                    let changed = false;
-                    
-                    for (const remoteBm of remote.bookmarks) {
-                        if (!localBookmarks.some(b => b.key === remoteBm.key)) {
-                            localBookmarks.push(remoteBm);
-                            changed = true;
+                        
+                        if (changed) {
+                            saveBookmarks(localBookmarks);
+                            totalChanges++;
                         }
                     }
+
+                    // Очищаем дубликаты после синхронизации
+                    cleanupDuplicateCategories();
+                    syncTimelineWithCategories();
                     
-                    if (changed) {
-                        saveBookmarks(localBookmarks);
-                        totalChanges++;
-                    }
+                    Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
+                    setTimeout(() => renderBookmarks(), 500);
+                    
+                    if (showNotify) notify(totalChanges > 0 ? `📥 Загружено ${totalChanges} изм.` : '✅ Актуально');
+                    
+                } catch(e) {
+                    console.error('[NSL] Parse error:', e);
+                    if (showNotify) notify('❌ Ошибка чтения');
                 }
-
-                // Очищаем дубликаты после синхронизации
-                cleanupDuplicateCategories();
-                syncTimelineWithCategories();
-                
-                Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
-                setTimeout(() => renderBookmarks(), 500);
-                
-                if (showNotify) notify(totalChanges > 0 ? `📥 Загружено ${totalChanges} изм.` : '✅ Актуально');
-                
-            } catch(e) {
-                console.error('[NSL] Parse error:', e);
-                if (showNotify) notify('❌ Ошибка чтения');
-            }
-        },
-        error: () => { if (showNotify) notify('❌ Ошибка загрузки'); },
-        timeout: 15000,
-        crossDomain: true
-    });
-}
-
-function checkAutoSync() {
-    const c = cfg();
-    if (!c.sync_auto_interval) return;
-    
-    const lastSync = Lampa.Storage.get(GIST_CACHE + '_last_sync', 0);
-    if (Date.now() - lastSync > (c.sync_interval_minutes || 60) * 60 * 1000) {
-        syncFromGist(false);
+            },
+            error: (xhr) => {
+                console.error('[NSL] Load error:', xhr.status);
+                if (showNotify) notify('❌ Ошибка загрузки');
+            },
+            timeout: 15000,
+            crossDomain: true
+        });
     }
-}
 
-let syncTimer = null;
+    function checkAutoSync() {
+        const c = cfg();
+        if (!c.sync_auto_interval) return;
+        
+        const lastSync = Lampa.Storage.get(GIST_CACHE + '_last_sync', 0);
+        if (Date.now() - lastSync > (c.sync_interval_minutes || 60) * 60 * 1000) {
+            syncFromGist(false);
+        }
+    }
 
-function startAutoSync() {
-    if (syncTimer) clearInterval(syncTimer);
-    syncTimer = setInterval(() => checkAutoSync(), 5 * 60 * 1000);
-}
+    let syncTimer = null;
+    
+    function startAutoSync() {
+        if (syncTimer) clearInterval(syncTimer);
+        syncTimer = setInterval(() => checkAutoSync(), 5 * 60 * 1000);
+    }
 
     // ======================
     // НАСТРОЙКИ
     // ======================
 
     function showMainMenu() {
+        const c = cfg();
+        const timelinePosName = c.timeline_position === 'bottom' ? 'снизу' : (c.timeline_position === 'center' ? 'по центру' : 'сверху');
+        const ratingsSourceName = c.ratings_source === 'both' ? 'КП + TMDB' : (c.ratings_source === 'kp' ? 'Кинопоиск' : 'TMDB');
+        
         Lampa.Select.show({
-            title: 'NSL Sync v23',
+            title: 'NSL Sync v24',
             items: [
                 { title: `📌 Закладки разделов (${getBookmarks().length})`, action: 'sections' },
                 { title: `⭐ Избранное (${getFavorites().length})`, action: 'favorites' },
                 { title: `⏱️ Таймкоды (${Object.keys(getTimeline()).length})`, action: 'timeline' },
                 { title: `☁️ GitHub Gist`, action: 'gist' },
                 { title: '──────────', separator: true },
+                { title: `🎬 Таймкоды на карточках: ${c.show_timeline_on_cards ? 'Вкл' : 'Выкл'}`, action: 'toggle_timeline_cards' },
+                { title: `📍 Позиция таймкодов: ${timelinePosName}`, action: 'timeline_position' },
+                { title: '──────────', separator: true },
+                { title: `⭐ Рейтинги: ${c.show_ratings ? 'Вкл' : 'Выкл'}`, action: 'toggle_ratings' },
+                { title: `📊 Источник рейтингов: ${ratingsSourceName}`, action: 'ratings_source' },
+                { title: `🖼️ На карточках: ${c.ratings_on_cards ? 'Вкл' : 'Выкл'}`, action: 'toggle_ratings_cards' },
+                { title: `📄 На странице: ${c.ratings_on_full ? 'Вкл' : 'Выкл'}`, action: 'toggle_ratings_full' },
+                { title: '──────────', separator: true },
                 { title: `🔄 Синхронизировать сейчас`, action: 'sync_now' },
+                { title: `🧹 Очистить дубликаты`, action: 'cleanup_duplicates' },
                 { title: `📋 Лог перемещений`, action: 'show_log' },
                 { title: `❌ Закрыть`, action: 'cancel' }
             ],
             onSelect: (item) => {
+                const c = cfg();
+                
                 if (item.action === 'sections') showSectionsSettings();
                 else if (item.action === 'favorites') showFavoritesSettings();
                 else if (item.action === 'timeline') showTimelineSettings();
                 else if (item.action === 'gist') showGistSetup();
+                else if (item.action === 'toggle_timeline_cards') {
+                    c.show_timeline_on_cards = !c.show_timeline_on_cards;
+                    saveCfg(c);
+                    if (c.show_timeline_on_cards) {
+                        enableTimelineOnCards();
+                        notify('Таймкоды на карточках включены');
+                    } else {
+                        disableTimelineOnCards();
+                        notify('Таймкоды на карточках выключены');
+                    }
+                    showMainMenu();
+                }
+                else if (item.action === 'timeline_position') {
+                    Lampa.Select.show({
+                        title: 'Позиция таймкодов',
+                        items: [
+                            { title: 'Снизу', action: 'bottom' },
+                            { title: 'По центру', action: 'center' },
+                            { title: 'Сверху', action: 'top' }
+                        ],
+                        onSelect: (subItem) => {
+                            if (subItem.action) {
+                                c.timeline_position = subItem.action;
+                                saveCfg(c);
+                                if (c.show_timeline_on_cards) {
+                                    enableTimelineOnCards();
+                                }
+                                const posName = subItem.action === 'bottom' ? 'снизу' : (subItem.action === 'center' ? 'по центру' : 'сверху');
+                                notify('Позиция: ' + posName);
+                            }
+                            showMainMenu();
+                        },
+                        onBack: () => showMainMenu()
+                    });
+                }
+                else if (item.action === 'toggle_ratings') {
+                    c.show_ratings = !c.show_ratings;
+                    saveCfg(c);
+                    refreshRatingsSettings();
+                    notify('Рейтинги ' + (c.show_ratings ? 'включены' : 'выключены'));
+                    showMainMenu();
+                }
+                else if (item.action === 'ratings_source') {
+                    Lampa.Select.show({
+                        title: 'Источник рейтингов',
+                        items: [
+                            { title: 'Кинопоиск', action: 'kp' },
+                            { title: 'TMDB', action: 'tmdb' },
+                            { title: 'КП + TMDB', action: 'both' }
+                        ],
+                        onSelect: (subItem) => {
+                            if (subItem.action) {
+                                c.ratings_source = subItem.action;
+                                saveCfg(c);
+                                refreshRatingsSettings();
+                                const sourceName = subItem.action === 'both' ? 'КП + TMDB' : (subItem.action === 'kp' ? 'Кинопоиск' : 'TMDB');
+                                notify('Источник: ' + sourceName);
+                            }
+                            showMainMenu();
+                        },
+                        onBack: () => showMainMenu()
+                    });
+                }
+                else if (item.action === 'toggle_ratings_cards') {
+                    c.ratings_on_cards = !c.ratings_on_cards;
+                    saveCfg(c);
+                    refreshRatingsSettings();
+                    notify('Рейтинги на карточках ' + (c.ratings_on_cards ? 'включены' : 'выключены'));
+                    showMainMenu();
+                }
+                else if (item.action === 'toggle_ratings_full') {
+                    c.ratings_on_full = !c.ratings_on_full;
+                    saveCfg(c);
+                    notify('Рейтинги на странице ' + (c.ratings_on_full ? 'включены' : 'выключены'));
+                    showMainMenu();
+                }
                 else if (item.action === 'sync_now') {
                     notify('🔄 Синхронизация...');
                     syncToGist(true);
                     setTimeout(() => syncFromGist(true), 1500);
-                } else if (item.action === 'show_log') {
+                }
+                else if (item.action === 'cleanup_duplicates') {
+                    if (cleanupDuplicateCategories()) {
+                        notify('🧹 Дубликаты очищены');
+                        syncTimelineWithCategories();
+                    } else {
+                        notify('✅ Дубликатов не найдено');
+                    }
+                    showMainMenu();
+                }
+                else if (item.action === 'show_log') {
                     showMoveLog();
                 }
             },
@@ -1788,6 +2221,8 @@ function startAutoSync() {
                 text = `🗑️ "${entry.title}" удалён полностью`;
             } else if (entry.action === 'clear_all') {
                 text = `🗑️ Всё избранное очищено`;
+            } else if (entry.action === 'cleanup') {
+                text = `🧹 Системная очистка дубликатов`;
             } else {
                 text = `${entry.action}: ${entry.title}`;
             }
@@ -1964,7 +2399,9 @@ function startAutoSync() {
                     });
                 } else if (item.action === 'toggle_strategy') {
                     c.sync_strategy = c.sync_strategy === 'max_time' ? 'last_watch' : 'max_time';
-                    saveCfg(c); showTimelineSettings();
+                    saveCfg(c);
+                    notify(`Стратегия: ${c.sync_strategy === 'max_time' ? 'По длительности' : 'По дате'}`);
+                    showTimelineSettings();
                 } else if (item.action === 'set_cleanup_days') {
                     Lampa.Input.edit({ title: 'Удалять старше (дней, 0 = откл)', value: String(c.cleanup_older_days), free: true, number: true }, (val) => {
                         if (val !== null && !isNaN(val)) {
@@ -2055,47 +2492,59 @@ function startAutoSync() {
         }
     }
 
-function init() {
-    if (!cfg().enabled) return;
+    function init() {
+        if (!cfg().enabled) return;
 
-    setTimeout(() => {
-        addBookmarkButton();
-        addFavoritesToMenu();
-        addSettingsButton();
-        renderBookmarks();
-    }, 1000);
+        console.log('[NSL] Init v24 for profile:', PROFILE_ID);
 
-    addFavoriteButtonToCard();
-    addStatusToCard();
-    initPlayerHandler();
-    
-    startAutoSync();
-    onAppStart();
-    
-    // Очищаем дубликаты при запуске
-    setTimeout(() => {
-        cleanupDuplicateCategories();
-        syncTimelineWithCategories();
-    }, 3000);
-    
-    Lampa.Listener.follow('state:changed', (e) => {
-        if (e.target === 'nsl_favorites' || e.target === 'timeline') {
-            setTimeout(() => {
-                refreshCardStatus();
-                refreshFavoriteButton();
-            }, 100);
+        setTimeout(() => {
+            addBookmarkButton();
+            addFavoritesToMenu();
+            addSettingsButton();
+            renderBookmarks();
+        }, 1000);
+
+        addFavoriteButtonToCard();
+        addStatusToCard();
+        initPlayerHandler();
+        
+        startAutoSync();
+        onAppStart();
+        
+        // Новые функции
+        const c = cfg();
+        if (c.show_timeline_on_cards) {
+            enableTimelineOnCards();
         }
-    });
-    
-    window.addEventListener('beforeunload', onAppClose);
-    
-    window.NSL = {
-        cfg, getFavorites, getBookmarks, getTimeline,
-        syncToGist, syncFromGist, addToFavorites, toggleFavorite,
-        getMoveLog, getMovieStatus, refreshCardStatus,
-        cleanupDuplicateCategories
-    };
-}
+        if (c.show_ratings) {
+            refreshRatingsSettings();
+        }
+        
+        setTimeout(() => {
+            cleanupDuplicateCategories();
+            syncTimelineWithCategories();
+        }, 3000);
+        
+        Lampa.Listener.follow('state:changed', (e) => {
+            if (e.target === 'nsl_favorites' || e.target === 'timeline') {
+                setTimeout(() => {
+                    refreshCardStatus();
+                    refreshFavoriteButton();
+                }, 100);
+            }
+        });
+        
+        window.addEventListener('beforeunload', onAppClose);
+        
+        window.NSL = {
+            cfg, getFavorites, getBookmarks, getTimeline,
+            syncToGist, syncFromGist, addToFavorites, toggleFavorite,
+            getMoveLog, getMovieStatus, refreshCardStatus,
+            cleanupDuplicateCategories, enableTimelineOnCards, refreshRatingsSettings
+        };
+        
+        console.log('[NSL] Init complete');
+    }
 
     if (window.appready) init();
     else Lampa.Listener.follow('app', e => { if (e.type === 'ready') init(); });
