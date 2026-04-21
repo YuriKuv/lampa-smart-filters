@@ -1518,111 +1518,221 @@
         });
     }
 
-    function syncFromGist(showNotify) {
-        const gist = getGistData();
-        if (!gist) { 
-            if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
-            return; 
-        }
-
-        $.ajax({
-            url: `https://api.github.com/gists/${gist.id}`,
-            method: 'GET',
-            headers: {
-                'Authorization': `token ${gist.token}`,
-                'Accept': 'application/vnd.github.v3+json'
-            },
-            success: (data) => {
-                try {
-                    const content = data.files['nsl_sync.json']?.content;
-                    if (!content) {
-                        if (showNotify) notify('⚠️ Файл не найден');
-                        return;
-                    }
-
-                    const remote = JSON.parse(content);
-                    const strategy = cfg().sync_strategy;
-                    let totalChanges = 0;
-                    
-                    if (remote.timeline) {
-                        const localTimeline = getTimeline();
-                        const { merged, changes } = mergeTimeline(localTimeline, remote.timeline, strategy);
-                        
-                        if (changes > 0) {
-                            saveTimeline(merged);
-                            totalChanges += changes;
-                            
-                            for (const key in remote.timeline) {
-                                const rec = merged[key];
-                                if (Lampa.Timeline?.update) {
-                                    Lampa.Timeline.update({
-                                        hash: key, percent: rec.percent || 0, time: rec.time || 0, duration: rec.duration || 0
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    
-                    if (remote.favorites) {
-                        const localFavs = getFavorites();
-                        let changed = false;
-                        
-                        for (const remoteFav of remote.favorites) {
-                            const key = `${remoteFav.tmdb_id}_${remoteFav.category}`;
-                            const existingIndex = localFavs.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
-                            
-                            if (existingIndex === -1) {
-                                localFavs.push(remoteFav);
-                                changed = true;
-                            } else {
-                                const localFav = localFavs[existingIndex];
-                                if ((remoteFav.updated || 0) > (localFav.updated || 0)) {
-                                    localFavs[existingIndex] = remoteFav;
-                                    changed = true;
-                                }
-                            }
-                        }
-                        
-                        if (changed) {
-                            saveFavorites(localFavs);
-                            totalChanges++;
-                        }
-                    }
-                    
-                    if (remote.bookmarks) {
-                        const localBookmarks = getBookmarks();
-                        let changed = false;
-                        
-                        for (const remoteBm of remote.bookmarks) {
-                            if (!localBookmarks.some(b => b.key === remoteBm.key)) {
-                                localBookmarks.push(remoteBm);
-                                changed = true;
-                            }
-                        }
-                        
-                        if (changed) {
-                            saveBookmarks(localBookmarks);
-                            totalChanges++;
-                        }
-                    }
-
-                    syncTimelineWithCategories();
-                    
-                    Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
-                    setTimeout(() => renderBookmarks(), 500);
-                    
-                    if (showNotify) notify(totalChanges > 0 ? `📥 Загружено ${totalChanges} изм.` : '✅ Актуально');
-                    
-                } catch(e) {
-                    console.error('[NSL] Parse error:', e);
-                    if (showNotify) notify('❌ Ошибка чтения');
-                }
-            },
-            error: () => { if (showNotify) notify('❌ Ошибка загрузки'); },
-            timeout: 15000,
-            crossDomain: true
-        });
+function syncFromGist(showNotify) {
+    const gist = getGistData();
+    if (!gist) { 
+        if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
+        return; 
     }
+
+    $.ajax({
+        url: `https://api.github.com/gists/${gist.id}`,
+        method: 'GET',
+        headers: {
+            'Authorization': `token ${gist.token}`,
+            'Accept': 'application/vnd.github.v3+json'
+        },
+        success: (data) => {
+            try {
+                const content = data.files['nsl_sync.json']?.content;
+                if (!content) {
+                    if (showNotify) notify('⚠️ Файл не найден');
+                    return;
+                }
+
+                const remote = JSON.parse(content);
+                const strategy = cfg().sync_strategy;
+                let totalChanges = 0;
+                
+                if (remote.timeline) {
+                    const localTimeline = getTimeline();
+                    const { merged, changes } = mergeTimeline(localTimeline, remote.timeline, strategy);
+                    
+                    if (changes > 0) {
+                        saveTimeline(merged);
+                        totalChanges += changes;
+                        
+                        for (const key in remote.timeline) {
+                            const rec = merged[key];
+                            if (Lampa.Timeline?.update) {
+                                Lampa.Timeline.update({
+                                    hash: key, percent: rec.percent || 0, time: rec.time || 0, duration: rec.duration || 0
+                                });
+                            }
+                        }
+                    }
+                }
+                
+                if (remote.favorites) {
+                    const localFavs = getFavorites();
+                    let changed = false;
+                    
+                    for (const remoteFav of remote.favorites) {
+                        const key = `${remoteFav.tmdb_id}_${remoteFav.category}`;
+                        const existingIndex = localFavs.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
+                        
+                        if (existingIndex === -1) {
+                            localFavs.push(remoteFav);
+                            changed = true;
+                        } else {
+                            const localFav = localFavs[existingIndex];
+                            if ((remoteFav.updated || 0) > (localFav.updated || 0)) {
+                                localFavs[existingIndex] = remoteFav;
+                                changed = true;
+                            }
+                        }
+                    }
+                    
+                    if (changed) {
+                        saveFavorites(localFavs);
+                        totalChanges++;
+                    }
+                }
+                
+                if (remote.bookmarks) {
+                    const localBookmarks = getBookmarks();
+                    let changed = false;
+                    
+                    for (const remoteBm of remote.bookmarks) {
+                        if (!localBookmarks.some(b => b.key === remoteBm.key)) {
+                            localBookmarks.push(remoteBm);
+                            changed = true;
+                        }
+                    }
+                    
+                    if (changed) {
+                        saveBookmarks(localBookmarks);
+                        totalChanges++;
+                    }
+                }
+
+                // Очищаем дубликаты после синхронизации
+                cleanupDuplicateCategories();
+                syncTimelineWithCategories();
+                
+                Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
+                setTimeout(() => renderBookmarks(), 500);
+                
+                if (showNotify) notify(totalChanges > 0 ? `📥 Загружено ${totalChanges} изм.` : '✅ Актуально');
+                
+            } catch(e) {
+                console.error('[NSL] Parse error:', e);
+                if (showNotify) notify('❌ Ошибка чтения');
+            }
+        },
+        error: () => { if (showNotify) notify('❌ Ошибка загрузки'); },
+        timeout: 15000,
+        crossDomain: true
+    });
+}
+    
+function syncFromGist(showNotify) {
+    const gist = getGistData();
+    if (!gist) { 
+        if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
+        return; 
+    }
+
+    $.ajax({
+        url: `https://api.github.com/gists/${gist.id}`,
+        method: 'GET',
+        headers: {
+            'Authorization': `token ${gist.token}`,
+            'Accept': 'application/vnd.github.v3+json'
+        },
+        success: (data) => {
+            try {
+                const content = data.files['nsl_sync.json']?.content;
+                if (!content) {
+                    if (showNotify) notify('⚠️ Файл не найден');
+                    return;
+                }
+
+                const remote = JSON.parse(content);
+                const strategy = cfg().sync_strategy;
+                let totalChanges = 0;
+                
+                if (remote.timeline) {
+                    const localTimeline = getTimeline();
+                    const { merged, changes } = mergeTimeline(localTimeline, remote.timeline, strategy);
+                    
+                    if (changes > 0) {
+                        saveTimeline(merged);
+                        totalChanges += changes;
+                        
+                        for (const key in remote.timeline) {
+                            const rec = merged[key];
+                            if (Lampa.Timeline?.update) {
+                                Lampa.Timeline.update({
+                                    hash: key, percent: rec.percent || 0, time: rec.time || 0, duration: rec.duration || 0
+                                });
+                            }
+                        }
+                    }
+                }
+                
+                if (remote.favorites) {
+                    const localFavs = getFavorites();
+                    let changed = false;
+                    
+                    for (const remoteFav of remote.favorites) {
+                        const key = `${remoteFav.tmdb_id}_${remoteFav.category}`;
+                        const existingIndex = localFavs.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
+                        
+                        if (existingIndex === -1) {
+                            localFavs.push(remoteFav);
+                            changed = true;
+                        } else {
+                            const localFav = localFavs[existingIndex];
+                            if ((remoteFav.updated || 0) > (localFav.updated || 0)) {
+                                localFavs[existingIndex] = remoteFav;
+                                changed = true;
+                            }
+                        }
+                    }
+                    
+                    if (changed) {
+                        saveFavorites(localFavs);
+                        totalChanges++;
+                    }
+                }
+                
+                if (remote.bookmarks) {
+                    const localBookmarks = getBookmarks();
+                    let changed = false;
+                    
+                    for (const remoteBm of remote.bookmarks) {
+                        if (!localBookmarks.some(b => b.key === remoteBm.key)) {
+                            localBookmarks.push(remoteBm);
+                            changed = true;
+                        }
+                    }
+                    
+                    if (changed) {
+                        saveBookmarks(localBookmarks);
+                        totalChanges++;
+                    }
+                }
+
+                // Очищаем дубликаты после синхронизации
+                cleanupDuplicateCategories();
+                syncTimelineWithCategories();
+                
+                Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
+                setTimeout(() => renderBookmarks(), 500);
+                
+                if (showNotify) notify(totalChanges > 0 ? `📥 Загружено ${totalChanges} изм.` : '✅ Актуально');
+                
+            } catch(e) {
+                console.error('[NSL] Parse error:', e);
+                if (showNotify) notify('❌ Ошибка чтения');
+            }
+        },
+        error: () => { if (showNotify) notify('❌ Ошибка загрузки'); },
+        timeout: 15000,
+        crossDomain: true
+    });
+}
 
     function checkAutoSync() {
         const c = cfg();
@@ -1972,42 +2082,47 @@
         }
     }
 
-    function init() {
-        if (!cfg().enabled) return;
+function init() {
+    if (!cfg().enabled) return;
 
-        setTimeout(() => {
-            addBookmarkButton();
-            addFavoritesToMenu();
-            addSettingsButton();
-            renderBookmarks();
-        }, 1000);
+    setTimeout(() => {
+        addBookmarkButton();
+        addFavoritesToMenu();
+        addSettingsButton();
+        renderBookmarks();
+    }, 1000);
 
-        addFavoriteButtonToCard();
-        addStatusToCard();
-        initPlayerHandler();
-        
-        startAutoSync();
-        onAppStart();
-        
-        setTimeout(() => syncTimelineWithCategories(), 3000);
-        
-        Lampa.Listener.follow('state:changed', (e) => {
-            if (e.target === 'nsl_favorites' || e.target === 'timeline') {
-                setTimeout(() => {
-                    refreshCardStatus();
-                    refreshFavoriteButton();
-                }, 100);
-            }
-        });
-        
-        window.addEventListener('beforeunload', onAppClose);
-        
-        window.NSL = {
-            cfg, getFavorites, getBookmarks, getTimeline,
-            syncToGist, syncFromGist, addToFavorites, toggleFavorite,
-            getMoveLog, getMovieStatus, refreshCardStatus
-        };
-    }
+    addFavoriteButtonToCard();
+    addStatusToCard();
+    initPlayerHandler();
+    
+    startAutoSync();
+    onAppStart();
+    
+    // Очищаем дубликаты при запуске
+    setTimeout(() => {
+        cleanupDuplicateCategories();
+        syncTimelineWithCategories();
+    }, 3000);
+    
+    Lampa.Listener.follow('state:changed', (e) => {
+        if (e.target === 'nsl_favorites' || e.target === 'timeline') {
+            setTimeout(() => {
+                refreshCardStatus();
+                refreshFavoriteButton();
+            }, 100);
+        }
+    });
+    
+    window.addEventListener('beforeunload', onAppClose);
+    
+    window.NSL = {
+        cfg, getFavorites, getBookmarks, getTimeline,
+        syncToGist, syncFromGist, addToFavorites, toggleFavorite,
+        getMoveLog, getMovieStatus, refreshCardStatus,
+        cleanupDuplicateCategories
+    };
+}
 
     if (window.appready) init();
     else Lampa.Listener.follow('app', e => { if (e.type === 'ready') init(); });
