@@ -997,13 +997,13 @@ function addStatusToCard() {
                              style="margin-left: 8px; 
                                     display: flex; 
                                     align-items: center; 
-                                    gap: 4px;
-                                    padding: 0 10px;
+                                    gap: 6px;
+                                    padding: 0 12px;
                                     height: 32px;
                                     border-radius: 4px;
                                     background-color: rgba(0, 0, 0, 0.4);
-                                    color: rgba(255, 255, 255, 0.9);
-                                    font-size: 16px;
+                                    color: rgba(255, 255, 255, 0.9) !important;
+                                    font-size: 16px !important;
                                     font-weight: 400;
                                     cursor: help;
                                     white-space: nowrap;
@@ -1011,8 +1011,8 @@ function addStatusToCard() {
                                     backdrop-filter: blur(8px);
                                     -webkit-backdrop-filter: blur(8px);"
                              title="${status.extraText || status.text}">
-                            <span style="font-size: 13px; line-height: 1;">${status.icon}</span>
-                            <span style="font-size: 13px; line-height: 1;">${status.displayText}</span>
+                            <span style="font-size: 16px !important; line-height: 1;">${status.icon}</span>
+                            <span style="font-size: 16px !important; line-height: 1;">${status.displayText}</span>
                         </div>
                     `);
                     
@@ -1043,13 +1043,13 @@ function refreshCardStatus() {
              style="margin-left: 8px; 
                     display: flex; 
                     align-items: center; 
-                    gap: 4px;
-                    padding: 0 10px;
-                    height: 26px;
+                    gap: 6px;
+                    padding: 0 12px;
+                    height: 32px;
                     border-radius: 4px;
                     background-color: rgba(0, 0, 0, 0.4);
-                    color: rgba(255, 255, 255, 0.85);
-                    font-size: 13px;
+                    color: rgba(255, 255, 255, 0.9) !important;
+                    font-size: 16px !important;
                     font-weight: 400;
                     cursor: help;
                     white-space: nowrap;
@@ -1057,8 +1057,8 @@ function refreshCardStatus() {
                     backdrop-filter: blur(8px);
                     -webkit-backdrop-filter: blur(8px);"
              title="${status.extraText || status.text}">
-            <span style="font-size: 13px; line-height: 1;">${status.icon}</span>
-            <span style="font-size: 13px; line-height: 1;">${status.displayText}</span>
+            <span style="font-size: 16px !important; line-height: 1;">${status.icon}</span>
+            <span style="font-size: 16px !important; line-height: 1;">${status.displayText}</span>
         </div>
     `);
     
