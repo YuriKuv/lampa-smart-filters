@@ -25,26 +25,37 @@
     const STORE_BOOKMARKS = `nsl_bookmarks_${PROFILE_ID}_v3`;
     const STORE_FAVORITES = `nsl_favorites_${PROFILE_ID}_v3`;
     const STORE_TIMELINE = `nsl_timeline_${PROFILE_ID}_v3`;
+    const STORE_MOVE_LOG = `nsl_move_log_${PROFILE_ID}_v1`;
     const CFG = `nsl_cfg_${PROFILE_ID}_v3`;
     const GIST_CACHE = `nsl_gist_cache_${PROFILE_ID}`;
 
     window.NSL = {};
 
     const FAVORITE_CATEGORIES = [
-        { id: 'favorite', name: 'Избранное', icon: '⭐' },
-        { id: 'watching', name: 'Смотрю', icon: '👁️' },
-        { id: 'planned', name: 'Буду смотреть', icon: '📋' },
-        { id: 'watched', name: 'Просмотрено', icon: '✅' },
-        { id: 'abandoned', name: 'Брошено', icon: '❌' },
-        { id: 'collection', name: 'Коллекция', icon: '📦' }
+        { id: 'favorite', name: '⭐ Избранное', icon: '⭐' },
+        { id: 'watching', name: '👁️ Смотрю', icon: '👁️' },
+        { id: 'planned', name: '📋 Буду смотреть', icon: '📋' },
+        { id: 'watched', name: '✅ Просмотрено', icon: '✅' },
+        { id: 'abandoned', name: '❌ Брошено', icon: '❌' },
+        { id: 'collection', name: '📦 Коллекция', icon: '📦' }
     ];
 
     const MEDIA_TYPES = {
         movie: { name: 'Фильмы', icon: '🎬' },
         tv: { name: 'Сериалы', icon: '📺' },
         cartoon: { name: 'Мультфильмы', icon: '🐭' },
-        cartoon_series: { name: 'Мультсериалы', icon: '🐭' },
-        anime: { name: 'Аниме', icon: '🐭' }
+        cartoon_series: { name: 'Мультсериалы', icon: '🐭📺' },
+        anime: { name: 'Аниме', icon: '🇯🇵' }
+    };
+
+    // Правила исключительности категорий
+    const CATEGORY_RULES = {
+        abandoned: { removeFrom: ['favorite', 'watching', 'planned', 'watched'] },
+        watched: { removeFrom: ['favorite', 'watching', 'planned'] },
+        watching: { removeFrom: ['planned'] },
+        collection: { removeFrom: [] },
+        favorite: { removeFrom: [] },
+        planned: { removeFrom: [] }
     };
 
     function cfg() {
@@ -65,13 +76,12 @@
             sync_strategy: 'max_time',
             auto_abandoned: false,
             abandoned_days: 30,
-            // Новые настройки
             auto_watching: true,
             watching_min_progress: 5,
             watching_max_progress: 95,
             auto_watched: true,
             watched_min_progress: 95,
-            // Старые настройки (оставляем для совместимости)
+            show_move_notifications: true,
             cleanup_older_days: 0,
             cleanup_completed: false
         }) || {};
@@ -90,9 +100,51 @@
     
     function getTimeline() { return Lampa.Storage.get(STORE_TIMELINE, {}) || {}; }
     function saveTimeline(t) { Lampa.Storage.set(STORE_TIMELINE, t, true); }
+    
+    function getMoveLog() { return Lampa.Storage.get(STORE_MOVE_LOG, []) || []; }
+    function saveMoveLog(l) { 
+        if (l.length > 100) l = l.slice(-100);
+        Lampa.Storage.set(STORE_MOVE_LOG, l, true); 
+    }
 
     function notify(text) { 
         if (Lampa.Noty) Lampa.Noty.show(text);
+    }
+
+    function logMove(action, title, fromCategory, toCategory) {
+        const c = cfg();
+        if (!c.show_move_notifications && fromCategory) return;
+        
+        const logEntry = {
+            time: Date.now(),
+            action: action,
+            title: title,
+            from: fromCategory || 'none',
+            to: toCategory || 'none'
+        };
+        
+        const log = getMoveLog();
+        log.push(logEntry);
+        saveMoveLog(log);
+        
+        if (c.show_move_notifications) {
+            const catNames = {};
+            FAVORITE_CATEGORIES.forEach(c => catNames[c.id] = c.name);
+            
+            if (action === 'move') {
+                notify(`📦 "${title}" → ${catNames[toCategory]}`);
+            } else if (action === 'auto_watching') {
+                notify(`👁️ "${title}" → Смотрю`);
+            } else if (action === 'auto_watched') {
+                notify(`✅ "${title}" → Просмотрено`);
+            } else if (action === 'auto_abandoned') {
+                notify(`❌ "${title}" → Брошено`);
+            } else if (action === 'return_abandoned') {
+                notify(`🔄 "${title}" возвращён в Смотрю`);
+            } else if (action === 'return_watched') {
+                notify(`🔄 "${title}" возвращён в Смотрю (повторный просмотр)`);
+            }
+        }
     }
 
     function formatTime(seconds) {
@@ -310,9 +362,21 @@
     }
 
     // ======================
-    // ИЗБРАННОЕ
+    // ИЗБРАННОЕ (С ЛОГИКОЙ ИСКЛЮЧИТЕЛЬНОСТИ)
     // ======================
-    
+
+    function applyCategoryRules(tmdbId, newCategory, favorites) {
+        const rules = CATEGORY_RULES[newCategory];
+        if (!rules || !rules.removeFrom.length) return;
+        
+        for (const catToRemove of rules.removeFrom) {
+            const index = favorites.findIndex(f => f.tmdb_id === tmdbId && f.category === catToRemove);
+            if (index >= 0) {
+                favorites.splice(index, 1);
+            }
+        }
+    }
+
     function addToFavorites(card, category) {
         if (!card || !card.id) return false;
         
@@ -332,11 +396,16 @@
             updated: Date.now()
         };
         
+        const title = card.title || card.name || 'Без названия';
+        
         if (existingIndex >= 0) {
             favorites[existingIndex] = favoriteItem;
         } else {
             favorites.push(favoriteItem);
+            logMove('add', title, null, category);
         }
+        
+        applyCategoryRules(tmdbId, category, favorites);
         
         setTimeout(() => {
             saveFavorites(favorites);
@@ -372,6 +441,29 @@
         return getFavorites().filter(f => f.category === category);
     }
     
+    // Удаление фильма полностью (из избранного и таймкодов)
+    function deleteCompletely(item) {
+        const favorites = getFavorites();
+        const timeline = getTimeline();
+        const tmdbId = item.tmdb_id;
+        const title = item.data?.title || item.data?.name || 'Без названия';
+        
+        // Удаляем из избранного
+        const newFavorites = favorites.filter(f => !(f.tmdb_id === tmdbId));
+        saveFavorites(newFavorites);
+        
+        // Удаляем таймкоды
+        for (const key in timeline) {
+            if (timeline[key].tmdb_id === tmdbId) {
+                delete timeline[key];
+            }
+        }
+        saveTimeline(timeline);
+        
+        notify(`🗑️ "${title}" удалён полностью`);
+        logMove('delete', title, item.category, null);
+    }
+    
     function checkAutoAbandoned() {
         const c = cfg();
         if (!c.auto_abandoned) return;
@@ -384,19 +476,48 @@
         for (const item of favorites.filter(f => f.category === 'watching')) {
             const lastUpdate = item.updated || item.added;
             if (lastUpdate > 0 && (now - lastUpdate) > abandonedAfter) {
+                const oldCategory = item.category;
+                const title = item.data?.title || item.data?.name || 'Без названия';
+                
                 item.category = 'abandoned';
                 item.updated = now;
+                
+                applyCategoryRules(item.tmdb_id, 'abandoned', favorites);
+                logMove('auto_abandoned', title, oldCategory, 'abandoned');
+                
                 changed = true;
             }
         }
         
         if (changed) {
             setTimeout(() => saveFavorites(favorites), 50);
-            setTimeout(() => notify('📦 Некоторые позиции перемещены в "Брошено"'), 100);
         }
     }
     
-    // Новая функция: синхронизация таймкодов с категориями
+    // Возвращает фильм из брошенного/просмотрено в смотрю
+    function returnToWatching(tmdbId) {
+        const favorites = getFavorites();
+        const item = favorites.find(f => f.tmdb_id === tmdbId && (f.category === 'abandoned' || f.category === 'watched'));
+        
+        if (item) {
+            const oldCategory = item.category;
+            const title = item.data?.title || item.data?.name || 'Без названия';
+            
+            item.category = 'watching';
+            item.updated = Date.now();
+            
+            applyCategoryRules(tmdbId, 'watching', favorites);
+            
+            const action = oldCategory === 'abandoned' ? 'return_abandoned' : 'return_watched';
+            logMove(action, title, oldCategory, 'watching');
+            
+            saveFavorites(favorites);
+            return true;
+        }
+        return false;
+    }
+    
+    // Синхронизация таймкодов с категориями
     function syncTimelineWithCategories() {
         const c = cfg();
         if (!c.auto_watching && !c.auto_watched) return;
@@ -410,26 +531,37 @@
             if (!tmdbId) continue;
             
             const percent = item.percent || 0;
+            
+            // Не трогаем брошенное и коллекцию
+            const isAbandoned = favorites.some(f => f.tmdb_id === tmdbId && f.category === 'abandoned');
+            if (isAbandoned) continue;
+            
+            const inCollection = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'collection');
+            
             const existingWatching = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'watching');
             const existingWatched = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'watched');
-            const existingAbandoned = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'abandoned');
+            const existingPlanned = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'planned');
             
-            // Не трогаем брошенное
-            if (existingAbandoned) continue;
-            
-            // Авто в "Просмотрено" (приоритет выше)
+            // Авто в "Просмотрено"
             if (c.auto_watched && !existingWatched) {
                 if (percent >= c.watched_min_progress) {
-                    const existingAny = favorites.find(f => f.tmdb_id === tmdbId);
+                    let title = 'Без названия';
                     
-                    if (existingAny) {
-                        if (existingAny.category !== 'watched') {
-                            existingAny.category = 'watched';
-                            existingAny.updated = Date.now();
-                            changed = true;
-                        }
-                    } else {
-                        // Создаём базовую запись
+                    if (existingWatching) {
+                        title = existingWatching.data?.title || existingWatching.data?.name || 'Без названия';
+                        existingWatching.category = 'watched';
+                        existingWatching.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watched', favorites);
+                        logMove('auto_watched', title, 'watching', 'watched');
+                        changed = true;
+                    } else if (existingPlanned) {
+                        title = existingPlanned.data?.title || existingPlanned.data?.name || 'Без названия';
+                        existingPlanned.category = 'watched';
+                        existingPlanned.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watched', favorites);
+                        logMove('auto_watched', title, 'planned', 'watched');
+                        changed = true;
+                    } else if (!inCollection) {
                         favorites.push({
                             id: Date.now(),
                             card_id: tmdbId,
@@ -440,24 +572,24 @@
                             added: Date.now(),
                             updated: Date.now()
                         });
+                        logMove('auto_watched', 'ID: ' + tmdbId, null, 'watched');
                         changed = true;
                     }
-                    continue; // Пропускаем проверку на "Смотрю"
+                    continue;
                 }
             }
             
             // Авто в "Смотрю"
             if (c.auto_watching && !existingWatching && !existingWatched) {
                 if (percent >= c.watching_min_progress && percent <= c.watching_max_progress) {
-                    const existingAny = favorites.find(f => f.tmdb_id === tmdbId);
-                    
-                    if (existingAny) {
-                        if (existingAny.category !== 'watching') {
-                            existingAny.category = 'watching';
-                            existingAny.updated = Date.now();
-                            changed = true;
-                        }
-                    } else {
+                    if (existingPlanned) {
+                        const title = existingPlanned.data?.title || existingPlanned.data?.name || 'Без названия';
+                        existingPlanned.category = 'watching';
+                        existingPlanned.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watching', favorites);
+                        logMove('auto_watching', title, 'planned', 'watching');
+                        changed = true;
+                    } else if (!inCollection) {
                         favorites.push({
                             id: Date.now(),
                             card_id: tmdbId,
@@ -468,6 +600,7 @@
                             added: Date.now(),
                             updated: Date.now()
                         });
+                        logMove('auto_watching', 'ID: ' + tmdbId, null, 'watching');
                         changed = true;
                     }
                 }
@@ -490,6 +623,7 @@
                 if (opt.action === 'clear') { 
                     saveFavorites([]); 
                     notify('🗑️ Избранное очищено'); 
+                    logMove('clear_all', 'Все фильмы', null, null);
                 } 
             },
             onBack: () => Lampa.Controller.toggle('content')
@@ -576,6 +710,11 @@
             saveTimeline(timeline);
             lastSavedProgress = currentTime;
             currentMovieTime = currentTime;
+            
+            // Возвращаем из брошенного/просмотрено при просмотре
+            if (tmdbId && currentTime > 60) { // Только после 1 минуты просмотра
+                returnToWatching(tmdbId);
+            }
             
             // Синхронизируем с категориями
             syncTimelineWithCategories();
@@ -778,7 +917,7 @@
     }
 
     // ======================
-    // МЕНЮ (УПРОЩЁННОЕ)
+    // МЕНЮ
     // ======================
     
     function addFavoritesToMenu() {
@@ -827,7 +966,7 @@
                 const typeInfo = MEDIA_TYPES[type];
                 menuItems.push({
                     title: `${typeInfo.icon} ${typeInfo.name} (${typeItems.length})`,
-                    onSelect: () => showFavoritesList(typeItems, `${categoryName} - ${typeInfo.name}`)
+                    onSelect: () => showFavoritesList(typeItems, `${categoryName} - ${typeInfo.name}`, category)
                 });
             }
         }
@@ -843,14 +982,14 @@
         });
     }
     
-    function showFavoritesList(items, title) {
+    function showFavoritesList(items, title, currentCategory) {
         const timeline = getTimeline();
+        const categories = FAVORITE_CATEGORIES.map(c => ({ id: c.id, name: c.name }));
         
         const menuItems = items.map(item => {
             let sub = '';
             
             if (item.category === 'watching') {
-                // Ищем таймлайн по tmdb_id (может быть с сезоном/эпизодом)
                 let timelineItem = null;
                 for (const key in timeline) {
                     if (timeline[key].tmdb_id === item.tmdb_id) {
@@ -868,18 +1007,42 @@
             return {
                 title: item.data?.title || item.data?.name || 'Без названия',
                 sub: sub,
+                item: item,
                 onSelect: () => Lampa.Router.call('full', { id: item.card_id, source: item.data?.source || 'tmdb' }),
                 onLongPress: () => {
+                    // Меню действий с фильмом
+                    const actionItems = [
+                        { title: `📋 Переместить в...`, action: 'move' },
+                        { title: `🗑️ Удалить из категории`, action: 'remove' },
+                        { title: `💥 Удалить полностью (с таймкодами)`, action: 'delete_all' },
+                        { title: '❌ Отмена', action: 'cancel' }
+                    ];
+                    
                     Lampa.Select.show({
-                        title: `Удалить из "${title}"?`,
-                        items: [
-                            { title: '✅ Да, удалить', action: 'delete' },
-                            { title: '❌ Отмена', action: 'cancel' }
-                        ],
+                        title: `Действия с "${item.data?.title || item.data?.name || 'Без названия'}"`,
+                        items: actionItems,
                         onSelect: (opt) => {
-                            if (opt.action === 'delete') {
+                            if (opt.action === 'move') {
+                                showMoveMenu(item);
+                            } else if (opt.action === 'remove') {
                                 removeFromFavorites(item.data, item.category);
-                                showFavoritesByCategory(item.category, title.split(' - ')[0]);
+                                showFavoritesByCategory(currentCategory, title.split(' - ')[0]);
+                                notify(`Удалено из "${FAVORITE_CATEGORIES.find(c => c.id === item.category)?.name}"`);
+                            } else if (opt.action === 'delete_all') {
+                                Lampa.Select.show({
+                                    title: '⚠️ Удалить полностью?',
+                                    items: [
+                                        { title: '✅ Да, удалить всё', action: 'confirm' },
+                                        { title: '❌ Отмена', action: 'cancel' }
+                                    ],
+                                    onSelect: (opt2) => {
+                                        if (opt2.action === 'confirm') {
+                                            deleteCompletely(item);
+                                            showFavoritesByCategory(currentCategory, title.split(' - ')[0]);
+                                        }
+                                    },
+                                    onBack: () => Lampa.Controller.toggle('content')
+                                });
                             }
                         },
                         onBack: () => Lampa.Controller.toggle('content')
@@ -898,9 +1061,44 @@
             onBack: () => showFavoritesByCategory(items[0]?.category, title.split(' - ')[0])
         });
     }
+    
+    function showMoveMenu(item) {
+        const categories = FAVORITE_CATEGORIES.filter(c => c.id !== item.category);
+        
+        const items = categories.map(cat => ({
+            title: `${cat.icon} ${cat.name}`,
+            category: cat.id,
+            onSelect: () => {
+                const favorites = getFavorites();
+                const targetItem = favorites.find(f => f.tmdb_id === item.tmdb_id && f.category === item.category);
+                
+                if (targetItem) {
+                    const oldCategory = targetItem.category;
+                    const title = targetItem.data?.title || targetItem.data?.name || 'Без названия';
+                    
+                    targetItem.category = cat.id;
+                    targetItem.updated = Date.now();
+                    
+                    applyCategoryRules(item.tmdb_id, cat.id, favorites);
+                    saveFavorites(favorites);
+                    
+                    logMove('move', title, oldCategory, cat.id);
+                    notify(`📦 "${title}" → ${cat.name}`);
+                }
+            }
+        }));
+        
+        items.push({ title: '❌ Отмена', action: 'cancel' });
+        
+        Lampa.Select.show({
+            title: `Переместить "${item.data?.title || item.data?.name}"`,
+            items: items,
+            onBack: () => Lampa.Controller.toggle('content')
+        });
+    }
 
     // ======================
-    // GITHUB GIST СИНХРОНИЗАЦИЯ (СЛИЯНИЕ)
+    // GITHUB GIST СИНХРОНИЗАЦИЯ
     // ======================
 
     function getGistData() {
@@ -979,27 +1177,17 @@
                     const content = data.files['nsl_sync.json']?.content;
                     let remoteData = { bookmarks: [], favorites: [], timeline: {} };
                     
-                    if (content) {
-                        remoteData = JSON.parse(content);
-                    }
+                    if (content) remoteData = JSON.parse(content);
                     
                     const localData = getAllSyncData();
                     const strategy = cfg().sync_strategy;
                     
-                    // Слияние таймкодов
-                    const { merged: mergedTimeline, changes: timelineChanges } = mergeTimeline(
-                        localData.timeline,
-                        remoteData.timeline || {},
-                        strategy
-                    );
+                    const { merged: mergedTimeline } = mergeTimeline(localData.timeline, remoteData.timeline || {}, strategy);
                     
-                    // Слияние избранного
                     const mergedFavorites = [...(remoteData.favorites || [])];
                     for (const localFav of localData.favorites) {
                         const key = `${localFav.tmdb_id}_${localFav.category}`;
-                        const existingIndex = mergedFavorites.findIndex(f => 
-                            `${f.tmdb_id}_${f.category}` === key
-                        );
+                        const existingIndex = mergedFavorites.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
                         
                         if (existingIndex === -1) {
                             mergedFavorites.push(localFav);
@@ -1011,7 +1199,6 @@
                         }
                     }
                     
-                    // Слияние закладок
                     const mergedBookmarks = [...(remoteData.bookmarks || [])];
                     for (const localBm of localData.bookmarks) {
                         if (!mergedBookmarks.some(b => b.key === localBm.key)) {
@@ -1046,19 +1233,13 @@
                             saveFavorites(mergedFavorites);
                             saveBookmarks(mergedBookmarks);
                             
-                            // Синхронизируем категории после загрузки
                             syncTimelineWithCategories();
                             
-                            if (showNotify) {
-                                notify('✅ Синхронизировано');
-                            }
-                            
+                            if (showNotify) notify('✅ Синхронизировано');
                             Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
                             setTimeout(() => renderBookmarks(), 500);
                         },
-                        error: () => { 
-                            if (showNotify) notify('❌ Ошибка отправки'); 
-                        },
+                        error: () => { if (showNotify) notify('❌ Ошибка отправки'); },
                         timeout: 15000,
                         crossDomain: true
                     });
@@ -1088,9 +1269,7 @@
                         if (showNotify) notify('✅ Отправлено');
                         Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
                     },
-                    error: () => { 
-                        if (showNotify) notify('❌ Ошибка'); 
-                    },
+                    error: () => { if (showNotify) notify('❌ Ошибка'); },
                     timeout: 15000,
                     crossDomain: true
                 });
@@ -1126,7 +1305,6 @@
                     const strategy = cfg().sync_strategy;
                     let totalChanges = 0;
                     
-                    // Слияние таймкодов
                     if (remote.timeline) {
                         const localTimeline = getTimeline();
                         const { merged, changes } = mergeTimeline(localTimeline, remote.timeline, strategy);
@@ -1139,26 +1317,20 @@
                                 const rec = merged[key];
                                 if (Lampa.Timeline?.update) {
                                     Lampa.Timeline.update({
-                                        hash: key,
-                                        percent: rec.percent || 0,
-                                        time: rec.time || 0,
-                                        duration: rec.duration || 0
+                                        hash: key, percent: rec.percent || 0, time: rec.time || 0, duration: rec.duration || 0
                                     });
                                 }
                             }
                         }
                     }
                     
-                    // Слияние избранного
                     if (remote.favorites) {
                         const localFavs = getFavorites();
                         let changed = false;
                         
                         for (const remoteFav of remote.favorites) {
                             const key = `${remoteFav.tmdb_id}_${remoteFav.category}`;
-                            const existingIndex = localFavs.findIndex(f => 
-                                `${f.tmdb_id}_${f.category}` === key
-                            );
+                            const existingIndex = localFavs.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
                             
                             if (existingIndex === -1) {
                                 localFavs.push(remoteFav);
@@ -1178,7 +1350,6 @@
                         }
                     }
                     
-                    // Слияние закладок
                     if (remote.bookmarks) {
                         const localBookmarks = getBookmarks();
                         let changed = false;
@@ -1196,25 +1367,19 @@
                         }
                     }
 
-                    // Синхронизируем категории после загрузки
                     syncTimelineWithCategories();
                     
                     Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
-                    
                     setTimeout(() => renderBookmarks(), 500);
                     
-                    if (showNotify) {
-                        notify(totalChanges > 0 ? `📥 Загружено ${totalChanges} изм.` : '✅ Актуально');
-                    }
+                    if (showNotify) notify(totalChanges > 0 ? `📥 Загружено ${totalChanges} изм.` : '✅ Актуально');
                     
                 } catch(e) {
                     console.error('[NSL] Parse error:', e);
                     if (showNotify) notify('❌ Ошибка чтения');
                 }
             },
-            error: () => { 
-                if (showNotify) notify('❌ Ошибка загрузки'); 
-            },
+            error: () => { if (showNotify) notify('❌ Ошибка загрузки'); },
             timeout: 15000,
             crossDomain: true
         });
@@ -1243,7 +1408,7 @@
 
     function showMainMenu() {
         Lampa.Select.show({
-            title: 'NSL Sync v21',
+            title: 'NSL Sync v22',
             items: [
                 { title: `📌 Закладки разделов (${getBookmarks().length})`, action: 'sections' },
                 { title: `⭐ Избранное (${getFavorites().length})`, action: 'favorites' },
@@ -1251,6 +1416,7 @@
                 { title: `☁️ GitHub Gist`, action: 'gist' },
                 { title: '──────────', separator: true },
                 { title: `🔄 Синхронизировать сейчас`, action: 'sync_now' },
+                { title: `📋 Лог перемещений`, action: 'show_log' },
                 { title: `❌ Закрыть`, action: 'cancel' }
             ],
             onSelect: (item) => {
@@ -1262,9 +1428,65 @@
                     notify('🔄 Синхронизация...');
                     syncToGist(true);
                     setTimeout(() => syncFromGist(true), 1500);
+                } else if (item.action === 'show_log') {
+                    showMoveLog();
                 }
             },
             onBack: () => Lampa.Controller.toggle('content')
+        });
+    }
+    
+    function showMoveLog() {
+        const log = getMoveLog();
+        
+        if (log.length === 0) {
+            notify('📋 Лог пуст');
+            return;
+        }
+        
+        const items = log.slice(-30).reverse().map(entry => {
+            const time = new Date(entry.time).toLocaleString();
+            let text = '';
+            
+            if (entry.action === 'move') {
+                const fromCat = FAVORITE_CATEGORIES.find(c => c.id === entry.from)?.name || entry.from;
+                const toCat = FAVORITE_CATEGORIES.find(c => c.id === entry.to)?.name || entry.to;
+                text = `📦 "${entry.title}" ${fromCat} → ${toCat}`;
+            } else if (entry.action === 'auto_watching') {
+                text = `👁️ "${entry.title}" → Смотрю`;
+            } else if (entry.action === 'auto_watched') {
+                text = `✅ "${entry.title}" → Просмотрено`;
+            } else if (entry.action === 'auto_abandoned') {
+                text = `❌ "${entry.title}" → Брошено`;
+            } else if (entry.action === 'return_abandoned') {
+                text = `🔄 "${entry.title}" возвращён в Смотрю`;
+            } else if (entry.action === 'return_watched') {
+                text = `🔄 "${entry.title}" возвращён в Смотрю (повтор)`;
+            } else if (entry.action === 'delete') {
+                text = `🗑️ "${entry.title}" удалён полностью`;
+            } else if (entry.action === 'clear_all') {
+                text = `🗑️ Всё избранное очищено`;
+            } else {
+                text = `${entry.action}: ${entry.title}`;
+            }
+            
+            return { title: text, sub: time };
+        });
+        
+        items.push({ title: '──────────', separator: true });
+        items.push({ title: '🗑️ Очистить лог', action: 'clear' });
+        items.push({ title: '❌ Закрыть', onSelect: () => {} });
+        
+        Lampa.Select.show({
+            title: '📋 Лог перемещений',
+            items: items,
+            onSelect: (item) => {
+                if (item.action === 'clear') {
+                    saveMoveLog([]);
+                    notify('📋 Лог очищен');
+                }
+            },
+            onBack: () => showMainMenu()
         });
     }
     
@@ -1306,6 +1528,8 @@
         Lampa.Select.show({
             title: '⭐ Избранное',
             items: [
+                { title: `🔔 Уведомления: ${c.show_move_notifications ? 'Вкл' : 'Выкл'}`, action: 'toggle_notifications' },
+                { title: '──────────', separator: true },
                 { title: `🔄 Авто в Брошено: ${c.auto_abandoned ? 'Вкл' : 'Выкл'}`, action: 'toggle_auto_abandoned' },
                 { title: `📅 Дней до Брошено: ${c.abandoned_days}`, action: 'set_abandoned_days' },
                 { title: '──────────', separator: true },
@@ -1319,7 +1543,10 @@
                 { title: '◀ Назад', action: 'back' }
             ],
             onSelect: (item) => {
-                if (item.action === 'toggle_auto_abandoned') {
+                if (item.action === 'toggle_notifications') {
+                    c.show_move_notifications = !c.show_move_notifications;
+                    saveCfg(c); showFavoritesSettings();
+                } else if (item.action === 'toggle_auto_abandoned') {
                     c.auto_abandoned = !c.auto_abandoned; saveCfg(c); showFavoritesSettings();
                 } else if (item.action === 'set_abandoned_days') {
                     Lampa.Input.edit({ title: 'Дней без просмотра', value: String(c.abandoned_days), free: true, number: true }, (val) => {
@@ -1522,20 +1749,14 @@
         startAutoSync();
         onAppStart();
         
-        // Синхронизируем категории при запуске
         setTimeout(() => syncTimelineWithCategories(), 3000);
-        
-        Lampa.Listener.follow('state:changed', (e) => {
-            if (e.target === 'nsl_favorites' || e.target === 'timeline') {
-                // Ничего не делаем, меню обновляется автоматически
-            }
-        });
         
         window.addEventListener('beforeunload', onAppClose);
         
         window.NSL = {
             cfg, getFavorites, getBookmarks, getTimeline,
-            syncToGist, syncFromGist, addToFavorites, toggleFavorite
+            syncToGist, syncFromGist, addToFavorites, toggleFavorite,
+            getMoveLog
         };
     }
 
