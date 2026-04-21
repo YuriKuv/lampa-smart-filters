@@ -31,20 +31,20 @@
     window.NSL = {};
 
     const FAVORITE_CATEGORIES = [
-        { id: 'favorite', name: '⭐ Избранное', icon: '⭐' },
-        { id: 'watching', name: '👁️ Смотрю', icon: '👁️' },
-        { id: 'planned', name: '📋 Буду смотреть', icon: '📋' },
-        { id: 'watched', name: '✅ Просмотрено', icon: '✅' },
-        { id: 'abandoned', name: '❌ Брошено', icon: '❌' },
-        { id: 'collection', name: '📦 Коллекция', icon: '📦' }
+        { id: 'favorite', name: 'Избранное', icon: '⭐' },
+        { id: 'watching', name: 'Смотрю', icon: '👁️' },
+        { id: 'planned', name: 'Буду смотреть', icon: '📋' },
+        { id: 'watched', name: 'Просмотрено', icon: '✅' },
+        { id: 'abandoned', name: 'Брошено', icon: '❌' },
+        { id: 'collection', name: 'Коллекция', icon: '📦' }
     ];
 
     const MEDIA_TYPES = {
         movie: { name: 'Фильмы', icon: '🎬' },
         tv: { name: 'Сериалы', icon: '📺' },
         cartoon: { name: 'Мультфильмы', icon: '🐭' },
-        cartoon_series: { name: 'Мультсериалы', icon: '🐭📺' },
-        anime: { name: 'Аниме', icon: '🇯🇵' }
+        cartoon_series: { name: 'Мультсериалы', icon: '🐭' },
+        anime: { name: 'Аниме', icon: '🐭' }
     };
 
     function cfg() {
