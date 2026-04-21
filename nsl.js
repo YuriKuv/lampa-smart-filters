@@ -1336,160 +1336,192 @@
         });
     }
 
-    // ======================
-    // GITHUB GIST СИНХРОНИЗАЦИЯ
-    // ======================
+// ======================
+// GITHUB GIST СИНХРОНИЗАЦИЯ
+// ======================
 
-    function getGistData() {
-        const c = cfg();
-        if (!c.gist_token || !c.gist_id) return null;
-        return { token: c.gist_token, id: c.gist_id };
-    }
+function getGistData() {
+    const c = cfg();
+    if (!c.gist_token || !c.gist_id) return null;
+    return { token: c.gist_token, id: c.gist_id };
+}
 
-    function getAllSyncData() {
-        return {
-            version: 4,
-            profile_id: PROFILE_ID,
-            updated: new Date().toISOString(),
-            bookmarks: getBookmarks(),
-            favorites: getFavorites(),
-            timeline: getTimeline()
-        };
-    }
+function getAllSyncData() {
+    return {
+        version: 4,
+        profile_id: PROFILE_ID,
+        updated: new Date().toISOString(),
+        bookmarks: getBookmarks(),
+        favorites: getFavorites(),
+        timeline: getTimeline()
+    };
+}
 
-    function mergeTimeline(localTimeline, remoteTimeline, strategy) {
-        const merged = { ...localTimeline };
-        let changes = 0;
+function mergeTimeline(localTimeline, remoteTimeline, strategy) {
+    const merged = { ...localTimeline };
+    let changes = 0;
+    
+    for (const key in remoteTimeline) {
+        const remoteRec = remoteTimeline[key];
+        const localRec = merged[key];
         
-        for (const key in remoteTimeline) {
-            const remoteRec = remoteTimeline[key];
-            const localRec = merged[key];
+        if (!remoteRec.updated) remoteRec.updated = remoteRec.saved_at || 0;
+        
+        if (!localRec) {
+            merged[key] = remoteRec;
+            changes++;
+        } else {
+            if (!localRec.updated) localRec.updated = localRec.saved_at || 0;
             
-            if (!remoteRec.updated) remoteRec.updated = remoteRec.saved_at || 0;
+            const remoteUpdated = remoteRec.updated || 0;
+            const localUpdated = localRec.updated || 0;
+            const remoteTime = remoteRec.time || 0;
+            const localTime = localRec.time || 0;
             
-            if (!localRec) {
+            let shouldUpdate = false;
+            
+            if (strategy === 'max_time') {
+                if (remoteTime > localTime) shouldUpdate = true;
+            } else {
+                if (remoteUpdated > localUpdated) shouldUpdate = true;
+                else if (remoteUpdated === localUpdated && remoteTime > localTime) shouldUpdate = true;
+            }
+            
+            if (shouldUpdate) {
                 merged[key] = remoteRec;
                 changes++;
-            } else {
-                if (!localRec.updated) localRec.updated = localRec.saved_at || 0;
-                
-                const remoteUpdated = remoteRec.updated || 0;
-                const localUpdated = localRec.updated || 0;
-                const remoteTime = remoteRec.time || 0;
-                const localTime = localRec.time || 0;
-                
-                let shouldUpdate = false;
-                
-                if (strategy === 'max_time') {
-                    if (remoteTime > localTime) shouldUpdate = true;
-                } else {
-                    if (remoteUpdated > localUpdated) shouldUpdate = true;
-                    else if (remoteUpdated === localUpdated && remoteTime > localTime) shouldUpdate = true;
-                }
-                
-                if (shouldUpdate) {
-                    merged[key] = remoteRec;
-                    changes++;
+            }
+        }
+    }
+    
+    return { merged, changes };
+}
+
+// Очистка дубликатов и применение правил исключительности
+function cleanupDuplicateCategories() {
+    const favorites = getFavorites();
+    const tmdbMap = new Map();
+    let changed = false;
+    
+    // Группируем по tmdb_id
+    for (const item of favorites) {
+        if (!tmdbMap.has(item.tmdb_id)) {
+            tmdbMap.set(item.tmdb_id, []);
+        }
+        tmdbMap.get(item.tmdb_id).push(item);
+    }
+    
+    // Для каждого фильма оставляем только разрешённые комбинации
+    for (const [tmdbId, items] of tmdbMap) {
+        if (items.length <= 1) continue;
+        
+        const categories = items.map(i => i.category);
+        let keepCategories = [...categories];
+        
+        // Применяем правила исключительности
+        if (categories.includes('abandoned')) {
+            keepCategories = keepCategories.filter(c => c === 'abandoned' || c === 'collection');
+        } else if (categories.includes('watched')) {
+            keepCategories = keepCategories.filter(c => c === 'watched' || c === 'collection');
+        } else if (categories.includes('watching')) {
+            keepCategories = keepCategories.filter(c => c === 'watching' || c === 'collection');
+        } else if (categories.includes('planned') && categories.includes('favorite')) {
+            keepCategories = ['planned', 'collection'];
+        }
+        
+        const uniqueKeep = [...new Set(keepCategories)];
+        
+        // Удаляем лишние записи
+        for (const item of items) {
+            if (!uniqueKeep.includes(item.category)) {
+                const index = favorites.findIndex(f => f.id === item.id);
+                if (index >= 0) {
+                    favorites.splice(index, 1);
+                    changed = true;
                 }
             }
         }
         
-        return { merged, changes };
+        // Удаляем дубликаты в одной категории (оставляем самый новый)
+        for (const cat of uniqueKeep) {
+            const catItems = items.filter(i => i.category === cat);
+            if (catItems.length > 1) {
+                catItems.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+                for (let i = 1; i < catItems.length; i++) {
+                    const index = favorites.findIndex(f => f.id === catItems[i].id);
+                    if (index >= 0) {
+                        favorites.splice(index, 1);
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+    
+    if (changed) {
+        saveFavorites(favorites);
+        logMove('cleanup', 'Система', null, null);
+    }
+    
+    return changed;
+}
+
+function syncToGist(showNotify) {
+    const gist = getGistData();
+    if (!gist) { 
+        if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
+        return; 
     }
 
-    function syncToGist(showNotify) {
-        const gist = getGistData();
-        if (!gist) { 
-            if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
-            return; 
-        }
-
-        $.ajax({
-            url: `https://api.github.com/gists/${gist.id}`,
-            method: 'GET',
-            headers: {
-                'Authorization': `token ${gist.token}`,
-                'Accept': 'application/vnd.github.v3+json'
-            },
-            success: (data) => {
-                try {
-                    const content = data.files['nsl_sync.json']?.content;
-                    let remoteData = { bookmarks: [], favorites: [], timeline: {} };
-                    
-                    if (content) remoteData = JSON.parse(content);
-                    
-                    const localData = getAllSyncData();
-                    const strategy = cfg().sync_strategy;
-                    
-                    const { merged: mergedTimeline } = mergeTimeline(localData.timeline, remoteData.timeline || {}, strategy);
-                    
-                    const mergedFavorites = [...(remoteData.favorites || [])];
-                    for (const localFav of localData.favorites) {
-                        const key = `${localFav.tmdb_id}_${localFav.category}`;
-                        const existingIndex = mergedFavorites.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
-                        
-                        if (existingIndex === -1) {
-                            mergedFavorites.push(localFav);
-                        } else {
-                            const remoteFav = mergedFavorites[existingIndex];
-                            if ((localFav.updated || 0) > (remoteFav.updated || 0)) {
-                                mergedFavorites[existingIndex] = localFav;
-                            }
-                        }
-                    }
-                    
-                    const mergedBookmarks = [...(remoteData.bookmarks || [])];
-                    for (const localBm of localData.bookmarks) {
-                        if (!mergedBookmarks.some(b => b.key === localBm.key)) {
-                            mergedBookmarks.push(localBm);
-                        }
-                    }
-                    
-                    const mergedData = {
-                        version: 4,
-                        profile_id: PROFILE_ID,
-                        updated: new Date().toISOString(),
-                        bookmarks: mergedBookmarks,
-                        favorites: mergedFavorites,
-                        timeline: mergedTimeline
-                    };
-                    
-                    $.ajax({
-                        url: `https://api.github.com/gists/${gist.id}`,
-                        method: 'PATCH',
-                        headers: {
-                            'Authorization': `token ${gist.token}`,
-                            'Accept': 'application/vnd.github.v3+json',
-                            'Content-Type': 'application/json'
-                        },
-                        data: JSON.stringify({
-                            description: 'NSL Sync Data',
-                            public: false,
-                            files: { 'nsl_sync.json': { content: JSON.stringify(mergedData) } }
-                        }),
-                        success: () => {
-                            saveTimeline(mergedTimeline);
-                            saveFavorites(mergedFavorites);
-                            saveBookmarks(mergedBookmarks);
-                            
-                            syncTimelineWithCategories();
-                            
-                            if (showNotify) notify('✅ Синхронизировано');
-                            Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
-                            setTimeout(() => renderBookmarks(), 500);
-                        },
-                        error: () => { if (showNotify) notify('❌ Ошибка отправки'); },
-                        timeout: 15000,
-                        crossDomain: true
-                    });
-                    
-                } catch(e) {
-                    console.error('[NSL] Sync error:', e);
-                    if (showNotify) notify('❌ Ошибка синхронизации');
-                }
-            },
-            error: () => {
+    $.ajax({
+        url: `https://api.github.com/gists/${gist.id}`,
+        method: 'GET',
+        headers: {
+            'Authorization': `token ${gist.token}`,
+            'Accept': 'application/vnd.github.v3+json'
+        },
+        success: (data) => {
+            try {
+                const content = data.files['nsl_sync.json']?.content;
+                let remoteData = { bookmarks: [], favorites: [], timeline: {} };
+                
+                if (content) remoteData = JSON.parse(content);
+                
                 const localData = getAllSyncData();
+                const strategy = cfg().sync_strategy;
+                
+                const { merged: mergedTimeline } = mergeTimeline(localData.timeline, remoteData.timeline || {}, strategy);
+                
+                const mergedFavorites = [...(remoteData.favorites || [])];
+                for (const localFav of localData.favorites) {
+                    const key = `${localFav.tmdb_id}_${localFav.category}`;
+                    const existingIndex = mergedFavorites.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
+                    
+                    if (existingIndex === -1) {
+                        mergedFavorites.push(localFav);
+                    } else {
+                        const remoteFav = mergedFavorites[existingIndex];
+                        if ((localFav.updated || 0) > (remoteFav.updated || 0)) {
+                            mergedFavorites[existingIndex] = localFav;
+                        }
+                    }
+                }
+                
+                const mergedBookmarks = [...(remoteData.bookmarks || [])];
+                for (const localBm of localData.bookmarks) {
+                    if (!mergedBookmarks.some(b => b.key === localBm.key)) {
+                        mergedBookmarks.push(localBm);
+                    }
+                }
+                
+                const mergedData = {
+                    version: 4,
+                    profile_id: PROFILE_ID,
+                    updated: new Date().toISOString(),
+                    bookmarks: mergedBookmarks,
+                    favorites: mergedFavorites,
+                    timeline: mergedTimeline
+                };
                 
                 $.ajax({
                     url: `https://api.github.com/gists/${gist.id}`,
@@ -1502,21 +1534,58 @@
                     data: JSON.stringify({
                         description: 'NSL Sync Data',
                         public: false,
-                        files: { 'nsl_sync.json': { content: JSON.stringify(localData) } }
+                        files: { 'nsl_sync.json': { content: JSON.stringify(mergedData) } }
                     }),
                     success: () => {
-                        if (showNotify) notify('✅ Отправлено');
+                        saveTimeline(mergedTimeline);
+                        saveFavorites(mergedFavorites);
+                        saveBookmarks(mergedBookmarks);
+                        
+                        syncTimelineWithCategories();
+                        
+                        if (showNotify) notify('✅ Синхронизировано');
                         Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
+                        setTimeout(() => renderBookmarks(), 500);
                     },
-                    error: () => { if (showNotify) notify('❌ Ошибка'); },
+                    error: () => { if (showNotify) notify('❌ Ошибка отправки'); },
                     timeout: 15000,
                     crossDomain: true
                 });
-            },
-            timeout: 15000,
-            crossDomain: true
-        });
-    }
+                
+            } catch(e) {
+                console.error('[NSL] Sync error:', e);
+                if (showNotify) notify('❌ Ошибка синхронизации');
+            }
+        },
+        error: () => {
+            const localData = getAllSyncData();
+            
+            $.ajax({
+                url: `https://api.github.com/gists/${gist.id}`,
+                method: 'PATCH',
+                headers: {
+                    'Authorization': `token ${gist.token}`,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                },
+                data: JSON.stringify({
+                    description: 'NSL Sync Data',
+                    public: false,
+                    files: { 'nsl_sync.json': { content: JSON.stringify(localData) } }
+                }),
+                success: () => {
+                    if (showNotify) notify('✅ Отправлено');
+                    Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
+                },
+                error: () => { if (showNotify) notify('❌ Ошибка'); },
+                timeout: 15000,
+                crossDomain: true
+            });
+        },
+        timeout: 15000,
+        crossDomain: true
+    });
+}
 
 function syncFromGist(showNotify) {
     const gist = getGistData();
@@ -1625,131 +1694,23 @@ function syncFromGist(showNotify) {
         crossDomain: true
     });
 }
+
+function checkAutoSync() {
+    const c = cfg();
+    if (!c.sync_auto_interval) return;
     
-function syncFromGist(showNotify) {
-    const gist = getGistData();
-    if (!gist) { 
-        if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
-        return; 
+    const lastSync = Lampa.Storage.get(GIST_CACHE + '_last_sync', 0);
+    if (Date.now() - lastSync > (c.sync_interval_minutes || 60) * 60 * 1000) {
+        syncFromGist(false);
     }
-
-    $.ajax({
-        url: `https://api.github.com/gists/${gist.id}`,
-        method: 'GET',
-        headers: {
-            'Authorization': `token ${gist.token}`,
-            'Accept': 'application/vnd.github.v3+json'
-        },
-        success: (data) => {
-            try {
-                const content = data.files['nsl_sync.json']?.content;
-                if (!content) {
-                    if (showNotify) notify('⚠️ Файл не найден');
-                    return;
-                }
-
-                const remote = JSON.parse(content);
-                const strategy = cfg().sync_strategy;
-                let totalChanges = 0;
-                
-                if (remote.timeline) {
-                    const localTimeline = getTimeline();
-                    const { merged, changes } = mergeTimeline(localTimeline, remote.timeline, strategy);
-                    
-                    if (changes > 0) {
-                        saveTimeline(merged);
-                        totalChanges += changes;
-                        
-                        for (const key in remote.timeline) {
-                            const rec = merged[key];
-                            if (Lampa.Timeline?.update) {
-                                Lampa.Timeline.update({
-                                    hash: key, percent: rec.percent || 0, time: rec.time || 0, duration: rec.duration || 0
-                                });
-                            }
-                        }
-                    }
-                }
-                
-                if (remote.favorites) {
-                    const localFavs = getFavorites();
-                    let changed = false;
-                    
-                    for (const remoteFav of remote.favorites) {
-                        const key = `${remoteFav.tmdb_id}_${remoteFav.category}`;
-                        const existingIndex = localFavs.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
-                        
-                        if (existingIndex === -1) {
-                            localFavs.push(remoteFav);
-                            changed = true;
-                        } else {
-                            const localFav = localFavs[existingIndex];
-                            if ((remoteFav.updated || 0) > (localFav.updated || 0)) {
-                                localFavs[existingIndex] = remoteFav;
-                                changed = true;
-                            }
-                        }
-                    }
-                    
-                    if (changed) {
-                        saveFavorites(localFavs);
-                        totalChanges++;
-                    }
-                }
-                
-                if (remote.bookmarks) {
-                    const localBookmarks = getBookmarks();
-                    let changed = false;
-                    
-                    for (const remoteBm of remote.bookmarks) {
-                        if (!localBookmarks.some(b => b.key === remoteBm.key)) {
-                            localBookmarks.push(remoteBm);
-                            changed = true;
-                        }
-                    }
-                    
-                    if (changed) {
-                        saveBookmarks(localBookmarks);
-                        totalChanges++;
-                    }
-                }
-
-                // Очищаем дубликаты после синхронизации
-                cleanupDuplicateCategories();
-                syncTimelineWithCategories();
-                
-                Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
-                setTimeout(() => renderBookmarks(), 500);
-                
-                if (showNotify) notify(totalChanges > 0 ? `📥 Загружено ${totalChanges} изм.` : '✅ Актуально');
-                
-            } catch(e) {
-                console.error('[NSL] Parse error:', e);
-                if (showNotify) notify('❌ Ошибка чтения');
-            }
-        },
-        error: () => { if (showNotify) notify('❌ Ошибка загрузки'); },
-        timeout: 15000,
-        crossDomain: true
-    });
 }
 
-    function checkAutoSync() {
-        const c = cfg();
-        if (!c.sync_auto_interval) return;
-        
-        const lastSync = Lampa.Storage.get(GIST_CACHE + '_last_sync', 0);
-        if (Date.now() - lastSync > (c.sync_interval_minutes || 60) * 60 * 1000) {
-            syncFromGist(false);
-        }
-    }
+let syncTimer = null;
 
-    let syncTimer = null;
-    
-    function startAutoSync() {
-        if (syncTimer) clearInterval(syncTimer);
-        syncTimer = setInterval(() => checkAutoSync(), 5 * 60 * 1000);
-    }
+function startAutoSync() {
+    if (syncTimer) clearInterval(syncTimer);
+    syncTimer = setInterval(() => checkAutoSync(), 5 * 60 * 1000);
+}
 
     // ======================
     // НАСТРОЙКИ
