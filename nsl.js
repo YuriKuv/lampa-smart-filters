@@ -1258,99 +1258,107 @@
         });
     }
     
-    // ИСПРАВЛЕНО: Правильное открытие сериалов
-    function showFavoritesList(items, title, currentCategory) {
-        const timeline = getTimeline();
+    // Открытие сериалов и фильмов
+function showFavoritesList(items, title, currentCategory) {
+    const timeline = getTimeline();
+    
+    const menuItems = items.map(item => {
+        let sub = '';
         
-        const menuItems = items.map(item => {
-            let sub = '';
-            
-            if (item.category === 'watching') {
-                const baseId = getBaseTmdbId(item.tmdb_id);
-                let timelineItem = null;
-                for (const key in timeline) {
-                    if (getBaseTmdbId(timeline[key].tmdb_id) === baseId) {
-                        timelineItem = timeline[key];
-                        break;
-                    }
+        if (item.category === 'watching') {
+            const baseId = getBaseTmdbId(item.tmdb_id);
+            let timelineItem = null;
+            for (const key in timeline) {
+                if (getBaseTmdbId(timeline[key].tmdb_id) === baseId) {
+                    timelineItem = timeline[key];
+                    break;
                 }
-                if (timelineItem) {
-                    sub = `${formatTime(timelineItem.time || 0)} / ${formatTime(timelineItem.duration || 0)} (${timelineItem.percent || 0}%)`;
-                }
-            } else if (item.category === 'watched') {
-                sub = '✓ Просмотрено';
             }
-            
-            return {
-                title: item.data?.title || item.data?.name || 'Без названия',
-                sub: sub,
-                item: item,
-                onSelect: () => {
-                    // Правильное открытие сериалов
-                    const cardData = item.data || {};
-                    const params = {
-                        id: cardData.id || item.card_id || getBaseTmdbId(item.tmdb_id),
-                        source: cardData.source || 'tmdb'
-                    };
-                    
-                    // Если это сериал, добавляем method: 'tv'
-                    if (item.media_type === 'tv' || cardData.original_name || cardData.name) {
-                        params.method = 'tv';
-                    }
-                    
-                    Lampa.Router.call('full', params);
-                },
-                onLongPress: () => {
-                    const actionItems = [
-                        { title: `📋 Переместить в...`, action: 'move' },
-                        { title: `🗑️ Удалить из категории`, action: 'remove' },
-                        { title: `💥 Удалить полностью (с таймкодами)`, action: 'delete_all' },
-                        { title: '❌ Отмена', action: 'cancel' }
-                    ];
-                    
-                    Lampa.Select.show({
-                        title: `Действия с "${item.data?.title || item.data?.name || 'Без названия'}"`,
-                        items: actionItems,
-                        onSelect: (opt) => {
-                            if (opt.action === 'move') {
-                                showMoveMenu(item);
-                            } else if (opt.action === 'remove') {
-                                removeFromFavorites(item.data, item.category);
-                                showFavoritesByCategory(currentCategory, title.split(' - ')[0]);
-                                notify(`Удалено из "${FAVORITE_CATEGORIES.find(c => c.id === item.category)?.name}"`);
-                            } else if (opt.action === 'delete_all') {
-                                Lampa.Select.show({
-                                    title: '⚠️ Удалить полностью?',
-                                    items: [
-                                        { title: '✅ Да, удалить всё', action: 'confirm' },
-                                        { title: '❌ Отмена', action: 'cancel' }
-                                    ],
-                                    onSelect: (opt2) => {
-                                        if (opt2.action === 'confirm') {
-                                            deleteCompletely(item);
-                                            showFavoritesByCategory(currentCategory, title.split(' - ')[0]);
-                                        }
-                                    },
-                                    onBack: () => Lampa.Controller.toggle('content')
-                                });
-                            }
-                        },
-                        onBack: () => Lampa.Controller.toggle('content')
-                    });
+            if (timelineItem) {
+                sub = `${formatTime(timelineItem.time || 0)} / ${formatTime(timelineItem.duration || 0)} (${timelineItem.percent || 0}%)`;
+            }
+        } else if (item.category === 'watched') {
+            sub = '✓ Просмотрено';
+        }
+        
+        return {
+            title: item.data?.title || item.data?.name || 'Без названия',
+            sub: sub,
+            item: item,
+            onSelect: () => {
+                // Правильное открытие сериалов
+                const cardData = item.data || {};
+                
+                // Определяем тип контента
+                let mediaType = 'movie';
+                if (item.media_type === 'tv' || cardData.original_name) {
+                    mediaType = 'tv';
                 }
-            };
-        });
-        
-        menuItems.push({ title: '──────────', separator: true });
-        menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesByCategory(items[0]?.category, title.split(' - ')[0]) });
-        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
-        
-        Lampa.Select.show({ 
-            title: title, 
-            items: menuItems, 
-            onBack: () => showFavoritesByCategory(items[0]?.category, title.split(' - ')[0])
-        });
-    }
+                
+                const params = {
+                    card: cardData.id || item.card_id || getBaseTmdbId(item.tmdb_id),
+                    media: mediaType,
+                    source: cardData.source || 'tmdb'
+                };
+                
+                console.log('[NSL] Opening card:', params);
+                Lampa.Activity.push({
+                    url: '',
+                    component: 'full',
+                    ...params
+                });
+            },
+            onLongPress: () => {
+                const actionItems = [
+                    { title: `📋 Переместить в...`, action: 'move' },
+                    { title: `🗑️ Удалить из категории`, action: 'remove' },
+                    { title: `💥 Удалить полностью (с таймкодами)`, action: 'delete_all' },
+                    { title: '❌ Отмена', action: 'cancel' }
+                ];
+                
+                Lampa.Select.show({
+                    title: `Действия с "${item.data?.title || item.data?.name || 'Без названия'}"`,
+                    items: actionItems,
+                    onSelect: (opt) => {
+                        if (opt.action === 'move') {
+                            showMoveMenu(item);
+                        } else if (opt.action === 'remove') {
+                            removeFromFavorites(item.data, item.category);
+                            showFavoritesByCategory(currentCategory, title.split(' - ')[0]);
+                            notify(`Удалено из "${FAVORITE_CATEGORIES.find(c => c.id === item.category)?.name}"`);
+                        } else if (opt.action === 'delete_all') {
+                            Lampa.Select.show({
+                                title: '⚠️ Удалить полностью?',
+                                items: [
+                                    { title: '✅ Да, удалить всё', action: 'confirm' },
+                                    { title: '❌ Отмена', action: 'cancel' }
+                                ],
+                                onSelect: (opt2) => {
+                                    if (opt2.action === 'confirm') {
+                                        deleteCompletely(item);
+                                        showFavoritesByCategory(currentCategory, title.split(' - ')[0]);
+                                    }
+                                },
+                                onBack: () => Lampa.Controller.toggle('content')
+                            });
+                        }
+                    },
+                    onBack: () => Lampa.Controller.toggle('content')
+                });
+            }
+        };
+    });
+    
+    menuItems.push({ title: '──────────', separator: true });
+    menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesByCategory(items[0]?.category, title.split(' - ')[0]) });
+    menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
+    
+    Lampa.Select.show({ 
+        title: title, 
+        items: menuItems, 
+        onBack: () => showFavoritesByCategory(items[0]?.category, title.split(' - ')[0])
+    });
+}
     
     function showMoveMenu(item) {
         const categories = FAVORITE_CATEGORIES.filter(c => c.id !== item.category);
