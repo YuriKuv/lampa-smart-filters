@@ -99,7 +99,6 @@
             show_move_notifications: true,
             cleanup_older_days: 0,
             cleanup_completed: false,
-            // Новые настройки
             show_timeline_on_cards: true,
             timeline_position: 'bottom',
             show_ratings: true,
@@ -212,7 +211,7 @@
     }
 
     // ======================
-    // ЗАКЛАДКИ РАЗДЕЛОВ
+    // ЗАКЛАДКИ РАЗДЕЛОВ (ИСПРАВЛЕНО ДЛЯ ANDROID)
     // ======================
     
     const ICON_FLAG = '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6 2v20l6-4 6 4V2z"/></svg>';
@@ -254,31 +253,25 @@
         };
     }
 
-    let lock = false;
-    
-    function unlock() { setTimeout(() => { lock = false; }, 200); }
-
+    // ИСПРАВЛЕНО: Убраны lock и unlock для Android
     function saveBookmark() {
-        if (lock) return;
-        lock = true;
-
         const act = Lampa.Activity.active();
 
         if (!isAllowedForBookmark()) {
             notify('Здесь нельзя создать закладку');
-            return unlock();
+            return;
         }
 
         if (bookmarkExists(act)) {
             notify('Уже есть');
-            return unlock();
+            return;
         }
 
         Lampa.Input.edit({
             title: 'Название',
             value: act.title || act.name || 'Закладка'
         }, (val) => {
-            if (!val) return unlock();
+            if (!val) return;
 
             const l = getBookmarks();
             l.push({ ...normalizeBookmark(act), name: val.trim() });
@@ -290,8 +283,7 @@
             }
 
             notify('Сохранено');
-            unlock();
-        }, unlock);
+        }, () => {}); // Пустой колбэк для отмены
     }
 
     function removeBookmark(item) {
@@ -387,16 +379,23 @@
     }
 
     // ======================
-    // ИЗБРАННОЕ (С ЛОГИКОЙ ИСКЛЮЧИТЕЛЬНОСТИ)
+    // ИЗБРАННОЕ (ИСПРАВЛЕНО ДЛЯ СЕРИАЛОВ)
     // ======================
+
+    // Вспомогательная функция для получения базового ID (без суффикса серии)
+    function getBaseTmdbId(tmdbId) {
+        if (!tmdbId) return null;
+        return String(tmdbId).replace(/[_-].*$/, '');
+    }
 
     function applyCategoryRules(tmdbId, newCategory, favorites) {
         const rules = CATEGORY_RULES[newCategory];
         if (!rules || !rules.removeFrom.length) return false;
         
+        const baseId = getBaseTmdbId(tmdbId);
         let changed = false;
         for (const catToRemove of rules.removeFrom) {
-            const index = favorites.findIndex(f => f.tmdb_id === tmdbId && f.category === catToRemove);
+            const index = favorites.findIndex(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === catToRemove);
             if (index >= 0) {
                 favorites.splice(index, 1);
                 changed = true;
@@ -411,15 +410,16 @@
         const tmdbId = extractTmdbId(card);
         const mediaType = getMediaType(card);
         const favorites = getFavorites();
+        const baseId = getBaseTmdbId(tmdbId);
         
         // Проверяем, не в коллекции ли уже (коллекцию не трогаем)
-        const inCollection = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'collection');
+        const inCollection = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'collection');
         
         // Удаляем из других категорий согласно правилам
         applyCategoryRules(tmdbId, category, favorites);
         
         // Проверяем, есть ли уже в этой категории
-        const existingIndex = favorites.findIndex(f => f.tmdb_id === tmdbId && f.category === category);
+        const existingIndex = favorites.findIndex(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === category);
         
         const favoriteItem = {
             id: Date.now(),
@@ -443,7 +443,7 @@
         
         // Восстанавливаем коллекцию если была
         if (inCollection && category !== 'collection') {
-            if (!favorites.some(f => f.tmdb_id === tmdbId && f.category === 'collection')) {
+            if (!favorites.some(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'collection')) {
                 favorites.push(inCollection);
             }
         }
@@ -459,7 +459,8 @@
     function removeFromFavorites(card, category) {
         const tmdbId = extractTmdbId(card);
         const favorites = getFavorites();
-        const index = favorites.findIndex(f => f.tmdb_id === tmdbId && f.category === category);
+        const baseId = getBaseTmdbId(tmdbId);
+        const index = favorites.findIndex(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === category);
         
         if (index >= 0) {
             favorites.splice(index, 1);
@@ -475,7 +476,8 @@
     
     function isInFavorites(card, category) {
         const tmdbId = extractTmdbId(card);
-        return getFavorites().some(f => f.tmdb_id === tmdbId && f.category === category);
+        const baseId = getBaseTmdbId(tmdbId);
+        return getFavorites().some(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === category);
     }
     
     function getFavoritesByCategory(category) {
@@ -486,16 +488,16 @@
     function deleteCompletely(item) {
         const favorites = getFavorites();
         const timeline = getTimeline();
-        const tmdbId = item.tmdb_id;
+        const baseId = getBaseTmdbId(item.tmdb_id);
         const title = item.data?.title || item.data?.name || 'Без названия';
         
         // Удаляем из избранного
-        const newFavorites = favorites.filter(f => !(f.tmdb_id === tmdbId));
+        const newFavorites = favorites.filter(f => getBaseTmdbId(f.tmdb_id) !== baseId);
         saveFavorites(newFavorites);
         
         // Удаляем таймкоды
         for (const key in timeline) {
-            if (timeline[key].tmdb_id === tmdbId) {
+            if (getBaseTmdbId(timeline[key].tmdb_id) === baseId) {
                 delete timeline[key];
             }
         }
@@ -538,7 +540,8 @@
     // Возвращает фильм из брошенного/просмотрено в смотрю
     function returnToWatching(tmdbId) {
         const favorites = getFavorites();
-        const item = favorites.find(f => f.tmdb_id === tmdbId && (f.category === 'abandoned' || f.category === 'watched'));
+        const baseId = getBaseTmdbId(tmdbId);
+        const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && (f.category === 'abandoned' || f.category === 'watched'));
         
         if (item) {
             const oldCategory = item.category;
@@ -558,7 +561,7 @@
         return false;
     }
     
-    // Синхронизация таймкодов с категориями
+    // ИСПРАВЛЕНО: Синхронизация таймкодов с категориями (учёт сериалов)
     function syncTimelineWithCategories() {
         const c = cfg();
         if (!c.auto_watching && !c.auto_watched) return;
@@ -571,22 +574,27 @@
             const tmdbId = item.tmdb_id;
             if (!tmdbId) continue;
             
+            const baseId = getBaseTmdbId(tmdbId);
             const percent = item.percent || 0;
             
             // Не трогаем брошенное
-            const isAbandoned = favorites.some(f => f.tmdb_id === tmdbId && f.category === 'abandoned');
+            const isAbandoned = favorites.some(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'abandoned');
             if (isAbandoned) continue;
             
-            // Ищем существующие записи
-            const existingWatching = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'watching');
-            const existingWatched = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'watched');
-            const existingPlanned = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'planned');
-            const existingFavorite = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'favorite');
+            // Ищем существующие записи по базовому ID
+            const existingWatching = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watching');
+            const existingWatched = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watched');
+            const existingPlanned = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'planned');
+            const existingFavorite = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'favorite');
             
             // Получаем данные карточки из любой существующей записи
             const existingAny = existingWatching || existingWatched || existingPlanned || existingFavorite;
-            const cardData = existingAny?.data || { id: tmdbId, title: 'ID: ' + tmdbId };
-            const title = cardData.title || cardData.name || 'ID: ' + tmdbId;
+            const cardData = existingAny?.data || { id: tmdbId, title: 'ID: ' + baseId };
+            const title = cardData.title || cardData.name || 'ID: ' + baseId;
+            
+            // Определяем тип медиа
+            const isSeries = key.includes('_s') || key.includes('_e');
+            const mediaType = isSeries ? 'tv' : 'movie';
             
             // Авто в "Просмотрено"
             if (c.auto_watched && !existingWatched) {
@@ -610,12 +618,11 @@
                         logMove('auto_watched', title, 'favorite', 'watched');
                         changed = true;
                     } else {
-                        // Создаём новую запись с полными данными
                         favorites.push({
                             id: Date.now(),
-                            card_id: tmdbId,
-                            tmdb_id: tmdbId,
-                            media_type: key.includes('_s') ? 'tv' : 'movie',
+                            card_id: baseId,
+                            tmdb_id: baseId,
+                            media_type: mediaType,
                             category: 'watched',
                             data: cardData,
                             added: Date.now(),
@@ -646,9 +653,9 @@
                     } else {
                         favorites.push({
                             id: Date.now(),
-                            card_id: tmdbId,
-                            tmdb_id: tmdbId,
-                            media_type: key.includes('_s') ? 'tv' : 'movie',
+                            card_id: baseId,
+                            tmdb_id: baseId,
+                            media_type: mediaType,
                             category: 'watching',
                             data: cardData,
                             added: Date.now(),
@@ -904,9 +911,10 @@
         
         if (category === 'watching' && tmdbId) {
             const timeline = getTimeline();
+            const baseId = getBaseTmdbId(tmdbId);
             let timelineItem = null;
             for (const key in timeline) {
-                if (timeline[key].tmdb_id === tmdbId) {
+                if (getBaseTmdbId(timeline[key].tmdb_id) === baseId) {
                     timelineItem = timeline[key];
                     break;
                 }
@@ -920,7 +928,8 @@
         
         if (category === 'abandoned' && tmdbId) {
             const favorites = getFavorites();
-            const item = favorites.find(f => f.tmdb_id === tmdbId && f.category === 'abandoned');
+            const baseId = getBaseTmdbId(tmdbId);
+            const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'abandoned');
             if (item) {
                 const lastUpdate = item.updated || item.added;
                 const daysAgo = Math.floor((Date.now() - lastUpdate) / (1000 * 60 * 60 * 24));
@@ -949,8 +958,9 @@
         const tmdbId = extractTmdbId(movie);
         if (!tmdbId) return null;
         
+        const baseId = getBaseTmdbId(tmdbId);
         const favorites = getFavorites();
-        const movieCategories = favorites.filter(f => f.tmdb_id === tmdbId).map(f => f.category);
+        const movieCategories = favorites.filter(f => getBaseTmdbId(f.tmdb_id) === baseId).map(f => f.category);
         
         if (movieCategories.length === 0) return null;
         
@@ -1085,8 +1095,9 @@
         if (!button.length) return;
         
         const tmdbId = extractTmdbId(movie);
+        const baseId = getBaseTmdbId(tmdbId);
         const favorites = getFavorites();
-        const isAny = favorites.some(f => f.tmdb_id === tmdbId && f.category !== 'collection');
+        const isAny = favorites.some(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category !== 'collection');
         
         button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
     }
@@ -1182,7 +1193,7 @@
     }
 
     // ======================
-    // МЕНЮ
+    // МЕНЮ (ИСПРАВЛЕНО ОТКРЫТИЕ СЕРИАЛОВ)
     // ======================
     
     function addFavoritesToMenu() {
@@ -1247,6 +1258,7 @@
         });
     }
     
+    // ИСПРАВЛЕНО: Правильное открытие сериалов
     function showFavoritesList(items, title, currentCategory) {
         const timeline = getTimeline();
         
@@ -1254,9 +1266,10 @@
             let sub = '';
             
             if (item.category === 'watching') {
+                const baseId = getBaseTmdbId(item.tmdb_id);
                 let timelineItem = null;
                 for (const key in timeline) {
-                    if (timeline[key].tmdb_id === item.tmdb_id) {
+                    if (getBaseTmdbId(timeline[key].tmdb_id) === baseId) {
                         timelineItem = timeline[key];
                         break;
                     }
@@ -1272,7 +1285,21 @@
                 title: item.data?.title || item.data?.name || 'Без названия',
                 sub: sub,
                 item: item,
-                onSelect: () => Lampa.Router.call('full', { id: item.card_id, source: item.data?.source || 'tmdb' }),
+                onSelect: () => {
+                    // Правильное открытие сериалов
+                    const cardData = item.data || {};
+                    const params = {
+                        id: cardData.id || item.card_id || getBaseTmdbId(item.tmdb_id),
+                        source: cardData.source || 'tmdb'
+                    };
+                    
+                    // Если это сериал, добавляем method: 'tv'
+                    if (item.media_type === 'tv' || cardData.original_name || cardData.name) {
+                        params.method = 'tv';
+                    }
+                    
+                    Lampa.Router.call('full', params);
+                },
                 onLongPress: () => {
                     const actionItems = [
                         { title: `📋 Переместить в...`, action: 'move' },
@@ -1333,7 +1360,8 @@
             category: cat.id,
             onSelect: () => {
                 const favorites = getFavorites();
-                const targetItem = favorites.find(f => f.tmdb_id === item.tmdb_id && f.category === item.category);
+                const baseId = getBaseTmdbId(item.tmdb_id);
+                const targetItem = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === item.category);
                 
                 if (targetItem) {
                     const oldCategory = targetItem.category;
@@ -1504,12 +1532,10 @@
         const ratings = {};
         const c = cfg();
         
-        // TMDB рейтинг
         if (card.vote_average && (c.ratings_source === 'tmdb' || c.ratings_source === 'both')) {
             ratings.tmdb = parseFloat(card.vote_average).toFixed(1);
         }
         
-        // Кинопоиск рейтинг
         if ((c.ratings_source === 'kp' || c.ratings_source === 'both')) {
             if (card.kp_rating) {
                 ratings.kp = parseFloat(card.kp_rating).toFixed(1);
@@ -1525,7 +1551,6 @@
         const ratings = getCardRatings(card);
         const c = cfg();
         
-        // Приоритет: KP > TMDB если оба
         if (c.ratings_source === 'both') {
             return ratings.kp || ratings.tmdb || null;
         } else if (c.ratings_source === 'kp') {
@@ -1542,7 +1567,6 @@
         
         if (rating) {
             if (!voteEl) {
-                // Создаём элемент рейтинга если его нет
                 const viewEl = cardElement.querySelector('.card__view');
                 if (viewEl) {
                     voteEl = document.createElement('div');
@@ -1575,12 +1599,10 @@
         const c = cfg();
         if (!c.show_ratings || !c.ratings_on_cards) return;
         
-        // Наблюдаем за добавлением новых карточек
         ratingsObserver = new MutationObserver((mutations) => {
             for (const mutation of mutations) {
                 for (const node of mutation.addedNodes) {
                     if (node.nodeType === 1) {
-                        // Проверяем сам элемент
                         if (node.classList && node.classList.contains('card')) {
                             setTimeout(() => {
                                 if (node.card_data) {
@@ -1588,7 +1610,6 @@
                                 }
                             }, 100);
                         }
-                        // Проверяем вложенные карточки
                         const cards = node.querySelectorAll ? node.querySelectorAll('.card') : [];
                         cards.forEach(card => {
                             setTimeout(() => {
@@ -1607,13 +1628,11 @@
             subtree: true
         });
         
-        // Обрабатываем существующие карточки
         setTimeout(processExistingCards, 500);
         console.log('[NSL] Наблюдатель за рейтингами запущен');
     }
 
     function patchCardRender() {
-        // Перехватываем создание карточек через Lampa.Maker
         if (!Lampa.Maker || !Lampa.Maker.map) return;
         
         try {
@@ -1655,7 +1674,6 @@
             ratingsObserver.disconnect();
             ratingsObserver = null;
         }
-        // Скрываем все рейтинги
         document.querySelectorAll('.card__vote').forEach(el => {
             el.style.display = 'none';
         });
@@ -1733,28 +1751,25 @@
         return { merged, changes };
     }
 
-    // Очистка дубликатов и применение правил исключительности
     function cleanupDuplicateCategories() {
         const favorites = getFavorites();
         const tmdbMap = new Map();
         let changed = false;
         
-        // Группируем по tmdb_id
         for (const item of favorites) {
-            if (!tmdbMap.has(item.tmdb_id)) {
-                tmdbMap.set(item.tmdb_id, []);
+            const baseId = getBaseTmdbId(item.tmdb_id);
+            if (!tmdbMap.has(baseId)) {
+                tmdbMap.set(baseId, []);
             }
-            tmdbMap.get(item.tmdb_id).push(item);
+            tmdbMap.get(baseId).push(item);
         }
         
-        // Для каждого фильма оставляем только разрешённые комбинации
-        for (const [tmdbId, items] of tmdbMap) {
+        for (const [baseId, items] of tmdbMap) {
             if (items.length <= 1) continue;
             
             const categories = items.map(i => i.category);
             let keepCategories = [...categories];
             
-            // Применяем правила исключительности
             if (categories.includes('abandoned')) {
                 keepCategories = keepCategories.filter(c => c === 'abandoned' || c === 'collection');
             } else if (categories.includes('watched')) {
@@ -1767,7 +1782,6 @@
             
             const uniqueKeep = [...new Set(keepCategories)];
             
-            // Удаляем лишние записи
             for (const item of items) {
                 if (!uniqueKeep.includes(item.category)) {
                     const index = favorites.findIndex(f => f.id === item.id);
@@ -1778,7 +1792,6 @@
                 }
             }
             
-            // Удаляем дубликаты в одной категории (оставляем самый новый)
             for (const cat of uniqueKeep) {
                 const catItems = items.filter(i => i.category === cat);
                 if (catItems.length > 1) {
@@ -1831,8 +1844,8 @@
                     
                     const mergedFavorites = [...(remoteData.favorites || [])];
                     for (const localFav of localData.favorites) {
-                        const key = `${localFav.tmdb_id}_${localFav.category}`;
-                        const existingIndex = mergedFavorites.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
+                        const key = `${getBaseTmdbId(localFav.tmdb_id)}_${localFav.category}`;
+                        const existingIndex = mergedFavorites.findIndex(f => `${getBaseTmdbId(f.tmdb_id)}_${f.category}` === key);
                         
                         if (existingIndex === -1) {
                             mergedFavorites.push(localFav);
@@ -1978,8 +1991,8 @@
                         let changed = false;
                         
                         for (const remoteFav of remote.favorites) {
-                            const key = `${remoteFav.tmdb_id}_${remoteFav.category}`;
-                            const existingIndex = localFavs.findIndex(f => `${f.tmdb_id}_${f.category}` === key);
+                            const key = `${getBaseTmdbId(remoteFav.tmdb_id)}_${remoteFav.category}`;
+                            const existingIndex = localFavs.findIndex(f => `${getBaseTmdbId(f.tmdb_id)}_${f.category}` === key);
                             
                             if (existingIndex === -1) {
                                 localFavs.push(remoteFav);
@@ -2016,7 +2029,6 @@
                         }
                     }
 
-                    // Очищаем дубликаты после синхронизации
                     cleanupDuplicateCategories();
                     syncTimelineWithCategories();
                     
@@ -2511,7 +2523,6 @@
         startAutoSync();
         onAppStart();
         
-        // Новые функции
         const c = cfg();
         if (c.show_timeline_on_cards) {
             enableTimelineOnCards();
