@@ -1288,7 +1288,6 @@ function showFavoritesList(items, title, currentCategory) {
             onSelect: () => {
                 const cardData = item.data || {};
                 
-                // Определяем тип контента
                 let method = 'movie';
                 if (item.media_type === 'tv' || cardData.original_name) {
                     method = 'tv';
@@ -1297,7 +1296,6 @@ function showFavoritesList(items, title, currentCategory) {
                 const cardId = cardData.id || item.card_id || getBaseTmdbId(item.tmdb_id);
                 const source = cardData.source || 'tmdb';
                 
-                // Создаём полный объект card как в штатном избранном
                 const cardObject = {
                     id: cardId,
                     source: source,
@@ -1314,16 +1312,10 @@ function showFavoritesList(items, title, currentCategory) {
                     img: cardData.img
                 };
                 
-                // Удаляем undefined поля
                 Object.keys(cardObject).forEach(key => {
-                    if (cardObject[key] === undefined) {
-                        delete cardObject[key];
-                    }
+                    if (cardObject[key] === undefined) delete cardObject[key];
                 });
                 
-                console.log('[NSL] Opening card:', { id: cardId, method: method, card: cardObject });
-                
-                // ТОЧНО такой же формат, как в штатном избранном
                 Lampa.Activity.push({
                     id: cardId,
                     method: method,
@@ -1334,44 +1326,8 @@ function showFavoritesList(items, title, currentCategory) {
                     page: 1
                 });
             },
-            onLongPress: () => {
-                const actionItems = [
-                    { title: `📋 Переместить в...`, action: 'move' },
-                    { title: `🗑️ Удалить из категории`, action: 'remove' },
-                    { title: `💥 Удалить полностью (с таймкодами)`, action: 'delete_all' },
-                    { title: '❌ Отмена', action: 'cancel' }
-                ];
-                
-                Lampa.Select.show({
-                    title: `Действия с "${item.data?.title || item.data?.name || 'Без названия'}"`,
-                    items: actionItems,
-                    onSelect: (opt) => {
-                        if (opt.action === 'move') {
-                            showMoveMenu(item);
-                        } else if (opt.action === 'remove') {
-                            removeFromFavorites(item.data, item.category);
-                            showFavoritesByCategory(currentCategory, title.split(' - ')[0]);
-                            notify(`Удалено из "${FAVORITE_CATEGORIES.find(c => c.id === item.category)?.name}"`);
-                        } else if (opt.action === 'delete_all') {
-                            Lampa.Select.show({
-                                title: '⚠️ Удалить полностью?',
-                                items: [
-                                    { title: '✅ Да, удалить всё', action: 'confirm' },
-                                    { title: '❌ Отмена', action: 'cancel' }
-                                ],
-                                onSelect: (opt2) => {
-                                    if (opt2.action === 'confirm') {
-                                        deleteCompletely(item);
-                                        showFavoritesByCategory(currentCategory, title.split(' - ')[0]);
-                                    }
-                                },
-                                onBack: () => Lampa.Controller.toggle('content')
-                            });
-                        }
-                    },
-                    onBack: () => Lampa.Controller.toggle('content')
-                });
-            }
+            // ВАЖНО: onLongPress должен быть на уровне элемента, а не в items
+            onLongPress: null  // убираем, будем настраивать отдельно
         };
     });
     
@@ -1379,10 +1335,64 @@ function showFavoritesList(items, title, currentCategory) {
     menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesByCategory(items[0]?.category, title.split(' - ')[0]) });
     menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
     
+    // Настраиваем долгое нажатие через onFullDraw
     Lampa.Select.show({ 
         title: title, 
         items: menuItems, 
-        onBack: () => showFavoritesByCategory(items[0]?.category, title.split(' - ')[0])
+        onBack: () => showFavoritesByCategory(items[0]?.category, title.split(' - ')[0]),
+        onFullDraw: (scroll) => {
+            // Находим все элементы меню и добавляем обработчик долгого нажатия
+            const itemsElements = scroll.render().find('.selectbox-item');
+            
+            itemsElements.each((index, element) => {
+                const menuItem = menuItems[index];
+                if (!menuItem || !menuItem.item) return;
+                
+                const item = menuItem.item;
+                const el = $(element);
+                
+                el.on('hover:long', (e) => {
+                    e.stopPropagation();
+                    
+                    const actionItems = [
+                        { title: `📋 Переместить в...`, action: 'move' },
+                        { title: `🗑️ Удалить из категории`, action: 'remove' },
+                        { title: `💥 Удалить полностью (с таймкодами)`, action: 'delete_all' },
+                        { title: '❌ Отмена', action: 'cancel' }
+                    ];
+                    
+                    Lampa.Select.show({
+                        title: `Действия с "${item.data?.title || item.data?.name || 'Без названия'}"`,
+                        items: actionItems,
+                        onSelect: (opt) => {
+                            if (opt.action === 'move') {
+                                showMoveMenu(item);
+                            } else if (opt.action === 'remove') {
+                                removeFromFavorites(item.data, item.category);
+                                showFavoritesByCategory(currentCategory, title.split(' - ')[0]);
+                                notify(`Удалено из "${FAVORITE_CATEGORIES.find(c => c.id === item.category)?.name}"`);
+                            } else if (opt.action === 'delete_all') {
+                                Lampa.Select.show({
+                                    title: '⚠️ Удалить полностью?',
+                                    items: [
+                                        { title: '✅ Да, удалить всё', action: 'confirm' },
+                                        { title: '❌ Отмена', action: 'cancel' }
+                                    ],
+                                    onSelect: (opt2) => {
+                                        if (opt2.action === 'confirm') {
+                                            deleteCompletely(item);
+                                            showFavoritesByCategory(currentCategory, title.split(' - ')[0]);
+                                        }
+                                    },
+                                    onBack: () => Lampa.Controller.toggle('content')
+                                });
+                            }
+                        },
+                        onBack: () => Lampa.Controller.toggle('content')
+                    });
+                });
+            });
+        }
     });
 }
     
