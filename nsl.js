@@ -1289,32 +1289,49 @@ function showFavoritesList(items, title, currentCategory) {
                 const cardData = item.data || {};
                 
                 // Определяем тип контента
-                let mediaType = 'movie';
+                let method = 'movie';
                 if (item.media_type === 'tv' || cardData.original_name) {
-                    mediaType = 'tv';
+                    method = 'tv';
                 }
                 
                 const cardId = cardData.id || item.card_id || getBaseTmdbId(item.tmdb_id);
                 const source = cardData.source || 'tmdb';
                 
-                console.log('[NSL] Opening card:', { card: cardId, media: mediaType, source: source });
+                // Создаём полный объект card как в штатном избранном
+                const cardObject = {
+                    id: cardId,
+                    source: source,
+                    title: cardData.title,
+                    name: cardData.name,
+                    original_name: cardData.original_name,
+                    original_title: cardData.original_title,
+                    poster_path: cardData.poster_path,
+                    backdrop_path: cardData.backdrop_path,
+                    overview: cardData.overview,
+                    vote_average: cardData.vote_average,
+                    first_air_date: cardData.first_air_date,
+                    release_date: cardData.release_date,
+                    img: cardData.img
+                };
                 
-                // Используем Lampa.Activity.push с правильными параметрами
-                // Параметры должны быть ТОЧНО такими же, как в штатном избранном
+                // Удаляем undefined поля
+                Object.keys(cardObject).forEach(key => {
+                    if (cardObject[key] === undefined) {
+                        delete cardObject[key];
+                    }
+                });
+                
+                console.log('[NSL] Opening card:', { id: cardId, method: method, card: cardObject });
+                
+                // ТОЧНО такой же формат, как в штатном избранном
                 Lampa.Activity.push({
+                    id: cardId,
+                    method: method,
+                    card: cardObject,
                     url: '',
                     component: 'full',
-                    card: cardId,
-                    media: mediaType,
                     source: source,
-                    movie: {
-                        id: cardId,
-                        source: source,
-                        title: cardData.title,
-                        name: cardData.name,
-                        original_name: cardData.original_name,
-                        poster_path: cardData.poster_path
-                    }
+                    page: 1
                 });
             },
             onLongPress: () => {
