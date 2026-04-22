@@ -1286,7 +1286,6 @@ function showFavoritesList(items, title, currentCategory) {
             sub: sub,
             item: item,
             onSelect: () => {
-                // Правильное открытие карточки (как в штатном избранном)
                 const cardData = item.data || {};
                 
                 // Определяем тип контента
@@ -1300,9 +1299,21 @@ function showFavoritesList(items, title, currentCategory) {
                 
                 console.log('[NSL] Opening card:', { card: cardId, media: mediaType, source: source });
                 
-                // Используем push с правильными параметрами (без component)
-                Lampa.Activity.push({
-                    card: cardId,
+                // Формируем объект карточки как в штатном избранном
+                const movieObject = {
+                    id: cardId,
+                    source: source
+                };
+                
+                // Если есть данные карточки, добавляем их
+                if (cardData.title) movieObject.title = cardData.title;
+                if (cardData.name) movieObject.name = cardData.name;
+                if (cardData.original_name) movieObject.original_name = cardData.original_name;
+                if (cardData.poster_path) movieObject.poster_path = cardData.poster_path;
+                
+                // Используем Router.call как в штатном избранном
+                Lampa.Router.call('full', {
+                    card: movieObject,
                     media: mediaType,
                     source: source
                 });
