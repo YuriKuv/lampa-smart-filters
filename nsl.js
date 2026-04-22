@@ -1299,9 +1299,23 @@ function showFavoritesList(items, title, currentCategory) {
                 
                 console.log('[NSL] Opening card:', { card: cardId, media: mediaType, source: source });
                 
-                // Формируем URL как в штатном избранном и переходим
-                const url = `?card=${cardId}&media=${mediaType}&source=${source}`;
-                window.location.href = url;
+                // Используем Lampa.Activity.push с правильными параметрами
+                // Параметры должны быть ТОЧНО такими же, как в штатном избранном
+                Lampa.Activity.push({
+                    url: '',
+                    component: 'full',
+                    card: cardId,
+                    media: mediaType,
+                    source: source,
+                    movie: {
+                        id: cardId,
+                        source: source,
+                        title: cardData.title,
+                        name: cardData.name,
+                        original_name: cardData.original_name,
+                        poster_path: cardData.poster_path
+                    }
+                });
             },
             onLongPress: () => {
                 const actionItems = [
