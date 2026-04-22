@@ -1286,7 +1286,7 @@ function showFavoritesList(items, title, currentCategory) {
             sub: sub,
             item: item,
             onSelect: () => {
-                // Правильное открытие сериалов
+                // Правильное открытие карточки (как в штатном избранном)
                 const cardData = item.data || {};
                 
                 // Определяем тип контента
@@ -1295,17 +1295,16 @@ function showFavoritesList(items, title, currentCategory) {
                     mediaType = 'tv';
                 }
                 
-                const params = {
-                    card: cardData.id || item.card_id || getBaseTmdbId(item.tmdb_id),
-                    media: mediaType,
-                    source: cardData.source || 'tmdb'
-                };
+                const cardId = cardData.id || item.card_id || getBaseTmdbId(item.tmdb_id);
+                const source = cardData.source || 'tmdb';
                 
-                console.log('[NSL] Opening card:', params);
+                console.log('[NSL] Opening card:', { card: cardId, media: mediaType, source: source });
+                
+                // Используем push с правильными параметрами (без component)
                 Lampa.Activity.push({
-                    url: '',
-                    component: 'full',
-                    ...params
+                    card: cardId,
+                    media: mediaType,
+                    source: source
                 });
             },
             onLongPress: () => {
