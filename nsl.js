@@ -1424,6 +1424,31 @@ function registerNSLFavoritesComponent() {
     }
 }
 
+function addFavoritesToMenu() {
+    const menuList = $('.menu__list').eq(1);
+    if (!menuList.length) return;
+    if ($('.nsl-favorites-item').length) return;
+    
+    const el = $(`
+        <li class="menu__item selector nsl-favorites-item">
+            <div class="menu__text">⭐ Избранное</div>
+        </li>
+    `);
+    el.on('hover:enter', (e) => {
+        e.stopPropagation();
+        
+        // Открываем нашу страницу избранного
+        Lampa.Activity.push({
+            url: '',
+            title: 'Избранное',
+            component: 'nsl_favorites',
+            source: 'tmdb',
+            page: 1
+        });
+    });
+    menuList.append(el);
+}
+    
     // ======================
     // ТАЙМКОДЫ НА КАРТОЧКАХ
     // ======================
