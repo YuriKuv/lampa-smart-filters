@@ -1176,227 +1176,103 @@
 function registerNSLFavoritesComponent() {
     console.log('[NSL] Регистрация компонентов...');
     
-    // Создаём компонент как функцию (не объект)
-    function NSLFavoritesComponent(object) {
-        console.log('[NSL] Создание nsl_favorites');
-        
-        let comp = Lampa.Utils.createInstance(Lampa.Main, object, {
-            empty: { router: 'bookmarks' }
-        });
-        
-        if (Lampa.EmptyRouter) comp.use(Lampa.EmptyRouter, 0);
-        
-        comp.use({
-            onCreate: function() {
-                let lines = [];
-                
-                // Категории
-                let categoryLine = {
-                    results: [],
-                    params: {
-                        module: Lampa.LineModule ? Lampa.LineModule.toggle(Lampa.LineModule.MASK.base, 'More', 'Event') : {},
-                        items: { view: 20 }
-                    }
-                };
-                
-                FAVORITE_CATEGORIES.forEach(cat => {
-                    const count = getFavoritesByCategory(cat.id).length;
-                    if (count > 0) {
-                        categoryLine.results.push({
-                            title: cat.icon + ' ' + cat.name,
-                            count: count,
-                            params: {
-                                module: Lampa.RegisterModule ? Lampa.RegisterModule.only('Line', 'Callback') : {},
-                                createInstance: (item) => Lampa.Register ? new Lampa.Register(item) : item,
-                                emit: {
-                                    onEnter: () => Lampa.Activity.push({
-                                        url: '', title: cat.name,
-                                        component: 'nsl_category', source: 'tmdb',
-                                        category: cat.id, page: 1
-                                    })
-                                }
-                            }
-                        });
-                    }
-                });
-                
-                if (categoryLine.results.length > 0) lines.push(categoryLine);
-                
-                // Карточки
-                FAVORITE_CATEGORIES.forEach(cat => {
-                    const items = getFavoritesByCategory(cat.id);
-                    if (items.length > 0) {
-                        const movies = items.filter(i => i.media_type === 'movie' || (!i.media_type && !i.data?.original_name));
-                        const series = items.filter(i => i.media_type === 'tv' || i.data?.original_name);
-                        let cards = [];
-                        
-                        if (movies.length > 0 && series.length > 0) {
-                            cards.push({
-                                results: movies, media: 'movies', title: 'Фильмы', count: movies.length,
-                                params: {
-                                    module: Lampa.CardModule ? Lampa.CardModule.only('Folder', 'Callback') : {},
-                                    emit: { onEnter: () => Lampa.Activity.push({ url: '', title: cat.name + ' - Фильмы', component: 'nsl_category', source: 'tmdb', category: cat.id, filter: 'movie', page: 1 }) }
-                                }
-                            });
-                            cards.push({
-                                results: series, media: 'tv', title: 'Сериалы', count: series.length,
-                                params: {
-                                    module: Lampa.CardModule ? Lampa.CardModule.only('Folder', 'Callback') : {},
-                                    emit: { onEnter: () => Lampa.Activity.push({ url: '', title: cat.name + ' - Сериалы', component: 'nsl_category', source: 'tmdb', category: cat.id, filter: 'tv', page: 1 }) }
-                                }
-                            });
-                        }
-                        
-                        items.slice(0, 20).forEach(item => {
-                            const card = item.data || {};
-                            card.params = {
-                                emit: {
-                                    onEnter: () => {
-                                        let method = item.media_type === 'tv' || card.original_name ? 'tv' : 'movie';
-                                        const cardObject = {
-                                            id: card.id || item.card_id || getBaseTmdbId(item.tmdb_id),
-                                            source: card.source || 'tmdb',
-                                            title: card.title, name: card.name,
-                                            original_name: card.original_name,
-                                            poster_path: card.poster_path,
-                                            backdrop_path: card.backdrop_path,
-                                            overview: card.overview,
-                                            vote_average: card.vote_average,
-                                            first_air_date: card.first_air_date,
-                                            release_date: card.release_date,
-                                            img: card.img
-                                        };
-                                        Object.keys(cardObject).forEach(k => { if (cardObject[k] === undefined) delete cardObject[k]; });
-                                        Lampa.Activity.push({
-                                            id: cardObject.id, method: method,
-                                            card: cardObject, url: '',
-                                            component: 'full', source: cardObject.source, page: 1
-                                        });
-                                    },
-                                    onFocus: () => {
-                                        if (Lampa.Background && card.backdrop_path) {
-                                            Lampa.Background.change(Lampa.Utils.cardImgBackground(card));
-                                        }
-                                    }
-                                }
-                            };
-                            cards.push(card);
-                        });
-                        
-                        lines.push({
-                            title: cat.icon + ' ' + cat.name,
-                            results: cards, type: cat.id,
-                            total_pages: items.length > 20 ? Math.ceil(items.length / 20) : 1,
-                            params: {
-                                module: Lampa.LineModule ? Lampa.LineModule.toggle(Lampa.LineModule.MASK.base, 'Event') : {},
-                                emit: { onMore: () => Lampa.Activity.push({ url: '', title: cat.name, component: 'nsl_category', source: 'tmdb', category: cat.id, page: 2 }) }
-                            }
-                        });
-                    }
-                });
-                
-                if (Lampa.ContentRows) Lampa.ContentRows.call('bookmarks', {}, lines);
-                
-                if (lines.length > 0) {
-                    comp.build(lines);
-                } else {
-                    comp.empty();
-                }
-            }
-        });
-        
-        return comp;
-    }
+    // НЕ ИСПОЛЬЗУЕМ Lampa.Component.add — это не работает как ожидается
+    // Вместо этого перехватываем Activity.push
     
-    // Категория
-    function NSLCategoryComponent(object) {
-        let comp = Lampa.Utils.createInstance(Lampa.Category, object, {
-            module: Lampa.CategoryModule ? Lampa.CategoryModule.toggle(Lampa.CategoryModule.MASK.base, 'Pagination') : {},
-            empty: { type: object.category, router: 'favorites' }
-        });
-        if (Lampa.EmptyRouter) comp.use(Lampa.EmptyRouter, 0);
-        
-        comp.use({
-            onCreate: function() {
-                let items = getFavoritesByCategory(object.category);
-                if (object.filter === 'movie') items = items.filter(i => i.media_type === 'movie' || (!i.media_type && !i.data?.original_name));
-                else if (object.filter === 'tv') items = items.filter(i => i.media_type === 'tv' || i.data?.original_name);
-                
-                const page = object.page || 1, perPage = 20;
-                const start = (page - 1) * perPage;
-                const pageItems = items.slice(start, start + perPage);
-                
-                let cards = pageItems.map(item => {
-                    const card = item.data || {};
-                    card.params = {
-                        emit: {
-                            onEnter: () => {
-                                let method = item.media_type === 'tv' || card.original_name ? 'tv' : 'movie';
-                                const cardObject = {
-                                    id: card.id || item.card_id || getBaseTmdbId(item.tmdb_id),
-                                    source: card.source || 'tmdb',
-                                    title: card.title, name: card.name,
-                                    original_name: card.original_name,
-                                    poster_path: card.poster_path,
-                                    backdrop_path: card.backdrop_path,
-                                    overview: card.overview,
-                                    vote_average: card.vote_average,
-                                    first_air_date: card.first_air_date,
-                                    release_date: card.release_date,
-                                    img: card.img
-                                };
-                                Object.keys(cardObject).forEach(k => { if (cardObject[k] === undefined) delete cardObject[k]; });
-                                Lampa.Activity.push({
-                                    id: cardObject.id, method: method,
-                                    card: cardObject, url: '',
-                                    component: 'full', source: cardObject.source, page: 1
-                                });
-                            },
-                            onFocus: () => {
-                                if (Lampa.Background && card.backdrop_path) {
-                                    Lampa.Background.change(Lampa.Utils.cardImgBackground(card));
-                                }
-                            }
-                        }
-                    };
-                    return card;
-                });
-                
-                setTimeout(() => this.build({ results: cards, page, total_pages: Math.ceil(items.length / perPage) }), 10);
-            },
-            onNext: function(resolve) {
-                let items = getFavoritesByCategory(object.category);
-                if (object.filter === 'movie') items = items.filter(i => i.media_type === 'movie' || (!i.media_type && !i.data?.original_name));
-                else if (object.filter === 'tv') items = items.filter(i => i.media_type === 'tv' || i.data?.original_name);
-                
-                const page = object.page || 1, perPage = 20;
-                const start = (page - 1) * perPage;
-                const pageItems = items.slice(start, start + perPage);
-                
-                resolve({
-                    results: pageItems.map(item => {
-                        const card = item.data || {};
-                        card.params = { emit: { onEnter: () => { let method = item.media_type === 'tv' || card.original_name ? 'tv' : 'movie'; Lampa.Activity.push({ id: card.id || item.card_id || getBaseTmdbId(item.tmdb_id), method: method, card: card, url: '', component: 'full', source: card.source || 'tmdb', page: 1 }); } } };
-                        return card;
-                    }),
-                    page, total_pages: Math.ceil(items.length / perPage)
-                });
-            }
-        });
-        
-        return comp;
-    }
+    const originalPush = Lampa.Activity.push;
     
-    // Регистрируем компоненты
-    if (Lampa.Component && Lampa.Component.add) {
-        Lampa.Component.add('nsl_favorites', NSLFavoritesComponent);
-        Lampa.Component.add('nsl_category', NSLCategoryComponent);
-        console.log('[NSL] Компоненты NSL Favorites зарегистрированы');
-    } else {
-        console.warn('[NSL] Lampa.Component.add недоступен, используем меню');
-    }
+    Lampa.Activity.push = function(params) {
+        // Перехватываем наши компоненты
+        if (params.component === 'nsl_favorites') {
+            console.log('[NSL] Открываем наше избранное');
+            showNSLFavoritesPage(params);
+            return;
+        }
+        if (params.component === 'nsl_category') {
+            console.log('[NSL] Открываем категорию:', params.category);
+            showNSLCategoryPage(params);
+            return;
+        }
+        // Все остальные компоненты открываем как обычно
+        return originalPush.call(this, params);
+    };
+    
+    console.log('[NSL] Перехват Activity.push установлен');
 }
 
+// Наша страница избранного (используем штатные компоненты Lampa)
+function showNSLFavoritesPage(params) {
+    // Создаём объект как для штатного bookmarks
+    let object = {
+        url: '',
+        title: params.title || 'Избранное',
+        component: 'bookmarks', // Используем штатный компонент
+        source: params.source || 'tmdb',
+        page: params.page || 1,
+        nsl_data: true // Флаг что это наши данные
+    };
+    
+    // Перехватываем данные для штатного bookmarks
+    const originalFavoritesAll = Lampa.Favorite?.all;
+    
+    if (Lampa.Favorite) {
+        Lampa.Favorite.all = function() {
+            // Возвращаем наши данные в формате штатного избранного
+            let result = {};
+            let ourFavorites = getFavorites();
+            
+            // Конвертируем наши категории в формат Lampa
+            FAVORITE_CATEGORIES.forEach(cat => {
+                let catItems = ourFavorites.filter(f => f.category === cat.id);
+                let ids = catItems.map(f => f.card_id || getBaseTmdbId(f.tmdb_id));
+                result[cat.id] = ids;
+            });
+            
+            // Добавляем card данные
+            result.card = [];
+            let seenIds = new Set();
+            ourFavorites.forEach(f => {
+                let id = f.card_id || getBaseTmdbId(f.tmdb_id);
+                if (!seenIds.has(id) && f.data) {
+                    seenIds.add(id);
+                    result.card.push(f.data);
+                }
+            });
+            
+            return result;
+        };
+    }
+    
+    // Открываем страницу
+    Lampa.Activity.push(object);
+    
+    // Восстанавливаем оригинальную функцию
+    setTimeout(() => {
+        if (Lampa.Favorite && originalFavoritesAll) {
+            Lampa.Favorite.all = originalFavoritesAll;
+        }
+    }, 1000);
+}
+
+// Страница категории
+function showNSLCategoryPage(params) {
+    let items = getFavoritesByCategory(params.category);
+    
+    if (params.filter === 'movie') {
+        items = items.filter(i => i.media_type === 'movie' || (!i.media_type && !i.data?.original_name));
+    } else if (params.filter === 'tv') {
+        items = items.filter(i => i.media_type === 'tv' || i.data?.original_name);
+    }
+    
+    if (items.length === 0) {
+        notify(`В категории ничего нет`);
+        return;
+    }
+    
+    // Показываем список через Select (как раньше)
+    showFavoritesByCategory(params.category, params.title || FAVORITE_CATEGORIES.find(c => c.id === params.category)?.name || 'Категория');
+}
+    
 function addFavoritesToMenu() {
     const menuList = $('.menu__list').eq(1);
     if (!menuList.length) return;
