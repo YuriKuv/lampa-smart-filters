@@ -1386,7 +1386,6 @@ function showNewEpisodes() {
     
 function showFavoritesList(items, title, currentCategory) {
     const timeline = getTimeline();
-    const seriesCheck = getSeriesCheck();
     
     const menuItems = items.map(item => {
         let sub = '';
@@ -1396,18 +1395,15 @@ function showFavoritesList(items, title, currentCategory) {
         const yearStr = year ? ` (${year})` : '';
         const posterUrl = getPosterUrl(cardData);
         
-        // Проверяем информацию о сериях для ТВ-шоу
-        let episodeInfo = '';
+        // Информация о сериях (для ТВ-шоу)
+        let seriesInfo = '';
         if (item.media_type === 'tv' || cardData.original_name) {
             const baseId = getBaseTmdbId(item.tmdb_id);
-            const checkData = seriesCheck[baseId];
-            if (checkData && checkData.aired_episodes > 0 && checkData.total_episodes > 0) {
-                episodeInfo = `${checkData.aired_episodes} из ${checkData.total_episodes} серий`;
-            } else if (cardData.number_of_seasons) {
-                episodeInfo = `${cardData.number_of_seasons} сез.`;
-            }
+            const checkData = getSeriesCheck()[baseId];
+            seriesInfo = formatSeriesInfo(checkData, cardData);
         }
         
+        // Формируем подзаголовок в зависимости от категории
         if (item.category === 'watching') {
             const baseId = getBaseTmdbId(item.tmdb_id);
             let timelineItem = null;
@@ -1417,14 +1413,20 @@ function showFavoritesList(items, title, currentCategory) {
                     break;
                 }
             }
+            
+            const parts = [];
+            if (seriesInfo) parts.push(seriesInfo);
             if (timelineItem) {
-                sub = `${formatTime(timelineItem.time || 0)} / ${formatTime(timelineItem.duration || 0)} (${timelineItem.percent || 0}%)`;
+                parts.push(`${timelineItem.percent || 0}%`);
             }
-            if (episodeInfo) sub = sub ? sub + ' · ' + episodeInfo : episodeInfo;
+            sub = parts.join(' · ');
         } else if (item.category === 'watched') {
             sub = '✓ Просмотрено';
+            if (seriesInfo) sub += ' · ' + seriesInfo;
         } else if (item.category === 'planned') {
-            sub = episodeInfo || 'В планах';
+            sub = seriesInfo || 'В планах';
+        } else if (seriesInfo) {
+            sub = seriesInfo;
         }
         
         return {
@@ -1491,6 +1493,43 @@ function showFavoritesList(items, title, currentCategory) {
         onFullDraw: (scroll) => {
             const itemsElements = scroll.render().find('.selectbox-item');
             
+            // Сразу запускаем загрузку данных о сериях для ТВ-шоу
+            items.each((index) => {
+                const menuItem = menuItems[index];
+                if (!menuItem || !menuItem.item) return;
+                
+                const item = menuItem.item;
+                const cardData = item.data || {};
+                
+                if (item.media_type === 'tv' || cardData.original_name) {
+                    loadSeriesDataQuick(item.tmdb_id, (checkData) => {
+                        // После загрузки — обновляем элемент
+                        const el = $(itemsElements[index]);
+                        if (!el.length || !checkData) return;
+                        
+                        const seriesInfo = formatSeriesInfo(checkData, cardData);
+                        if (!seriesInfo) return;
+                        
+                        // Ищем или создаём строку с информацией
+                        let infoDiv = el.find('.nsl-series-info');
+                        if (infoDiv.length) {
+                            infoDiv.text(seriesInfo);
+                        } else {
+                            const subtitleDiv = el.find('.selectbox-item__subtitle');
+                            if (subtitleDiv.length) {
+                                subtitleDiv.text(seriesInfo);
+                            } else {
+                                const titleDiv = el.find('.selectbox-item__title');
+                                if (titleDiv.length) {
+                                    infoDiv = $(`<div class="selectbox-item__subtitle nsl-series-info" style="font-size:0.85em;opacity:0.8;line-height:1.2;">${seriesInfo}</div>`);
+                                    titleDiv.after(infoDiv);
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+            
             itemsElements.each((index, element) => {
                 const menuItem = menuItems[index];
                 if (!menuItem || !menuItem.item) return;
@@ -1498,7 +1537,6 @@ function showFavoritesList(items, title, currentCategory) {
                 const item = menuItem.item;
                 const el = $(element);
                 
-                // Увеличиваем высоту для элементов с постерами и длинными названиями
                 if (menuItem.title && menuItem.title.indexOf('<img') !== -1) {
                     el.css('min-height', '5em');
                     el.css('display', 'flex');
@@ -1797,6 +1835,116 @@ function showFavoritesList(items, title, currentCategory) {
         seriesCheckTimer = setInterval(() => checkNewEpisodes(false), 60 * 60 * 1000);
     }
 
+// Быстрая загрузка данных о сериале (сезоны + вышедшие серии)
+function loadSeriesDataQuick(tmdbId, callback) {
+    const baseId = getBaseTmdbId(tmdbId);
+    const seriesCheck = getSeriesCheck();
+    const now = Date.now();
+    
+    // Если данные уже есть и свежие (меньше часа) — возвращаем сразу
+    if (seriesCheck[baseId] && (now - seriesCheck[baseId].checked_at < 60 * 60 * 1000)) {
+        callback(seriesCheck[baseId]);
+        return;
+    }
+    
+    try {
+        if (typeof Lampa.TMDB !== 'undefined' && Lampa.TMDB.api) {
+            const url = Lampa.TMDB.api('tv/' + baseId + '?api_key=' + Lampa.TMDB.key());
+            
+            $.ajax({
+                url: url,
+                method: 'GET',
+                timeout: 5000,
+                success: (data) => {
+                    const seasonsCount = data.number_of_seasons || 0;
+                    const lastSeason = data.seasons ? data.seasons[data.seasons.length - 1] : null;
+                    const totalEpisodes = lastSeason ? lastSeason.episode_count || 0 : 0;
+                    const airedEpisodes = lastSeason ? countAiredEpisodes(lastSeason) : 0;
+                    
+                    const checkData = {
+                        checked_at: now,
+                        seasons_count: seasonsCount,
+                        old_seasons: seriesCheck[baseId]?.old_seasons || seasonsCount,
+                        new_seasons: seasonsCount,
+                        has_new: seriesCheck[baseId]?.has_new || false,
+                        last_air_date: data.last_air_date || '',
+                        title: data.name || '',
+                        total_episodes: totalEpisodes,
+                        aired_episodes: airedEpisodes,
+                        last_season_number: data.last_episode_to_air ? data.last_episode_to_air.season_number : (lastSeason ? lastSeason.season_number : 0)
+                    };
+                    
+                    seriesCheck[baseId] = checkData;
+                    saveSeriesCheck(seriesCheck);
+                    
+                    // Обновляем данные в избранном
+                    const favorites = getFavorites();
+                    const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
+                    if (item) {
+                        item.data.number_of_seasons = seasonsCount;
+                        item.data.number_of_episodes = data.number_of_episodes;
+                        item.data.last_air_date = data.last_air_date;
+                        saveFavorites(favorites);
+                    }
+                    
+                    callback(checkData);
+                },
+                error: () => {
+                    // Если API недоступен — используем данные из карточки
+                    const favorites = getFavorites();
+                    const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
+                    const cardData = item?.data || {};
+                    
+                    const fallbackData = {
+                        checked_at: now,
+                        seasons_count: cardData.number_of_seasons || 0,
+                        total_episodes: 0,
+                        aired_episodes: 0,
+                        last_season_number: 0,
+                        error: true
+                    };
+                    
+                    seriesCheck[baseId] = fallbackData;
+                    saveSeriesCheck(seriesCheck);
+                    
+                    callback(fallbackData);
+                }
+            });
+        } else {
+            callback(null);
+        }
+    } catch (e) {
+        callback(null);
+    }
+}
+
+// Вспомогательная: форматирование информации о сериях
+function formatSeriesInfo(checkData, cardData) {
+    if (!checkData) {
+        // Если данных нет — берём из карточки
+        if (cardData?.number_of_seasons) {
+            return `${cardData.number_of_seasons} сез.`;
+        }
+        return '';
+    }
+    
+    const parts = [];
+    
+    // Количество сезонов
+    if (checkData.seasons_count > 0) {
+        parts.push(`${checkData.seasons_count} сез.`);
+    }
+    
+    // Количество серий в последнем сезоне
+    if (checkData.aired_episodes > 0 && checkData.total_episodes > 0) {
+        parts.push(`${checkData.aired_episodes} из ${checkData.total_episodes} сер.`);
+    } else if (checkData.aired_episodes > 0) {
+        parts.push(`${checkData.aired_episodes} сер.`);
+    }
+    
+    return parts.join(' · ');
+}
+    
     // ======================
     // ТАЙМКОДЫ НА КАРТОЧКАХ
     // ======================
