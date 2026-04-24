@@ -69,7 +69,6 @@
 
     let timelineStylesInjected = false;
     let timelineModulePatched = false;
-    let ratingsObserver = null;
     let favoriteButtonTimer = null; // ДЛЯ ДЕБАУНСА
     let seriesCheckTimer = null; // ДЛЯ ПРОВЕРКИ НОВЫХ СЕРИЙ
     let gistSyncing = false; // Защита от повторной синхронизации
@@ -102,10 +101,6 @@
             cleanup_completed: false,
             show_timeline_on_cards: true,
             timeline_position: 'bottom',
-            show_ratings: true,
-            ratings_on_cards: true,
-            ratings_on_full: true,
-            ratings_source: 'both',
             check_new_episodes: true,
             new_episodes_notify: true,
             new_episodes_check_interval: 24
@@ -2187,171 +2182,6 @@ function formatSeriesInfo(checkData, cardData) {
         console.log('[NSL] Таймкоды на карточках выключены');
     }
 
-    // ======================
-    // РЕЙТИНГИ НА КАРТОЧКАХ
-    // ======================
-
-    function getCardRatings(card) {
-        const ratings = {};
-        const c = cfg();
-        
-        if (card.vote_average && (c.ratings_source === 'tmdb' || c.ratings_source === 'both')) {
-            ratings.tmdb = parseFloat(card.vote_average).toFixed(1);
-        }
-        
-        if ((c.ratings_source === 'kp' || c.ratings_source === 'both')) {
-            if (card.kp_rating) {
-                ratings.kp = parseFloat(card.kp_rating).toFixed(1);
-            } else if (card.rating) {
-                ratings.kp = parseFloat(card.rating).toFixed(1);
-            }
-        }
-        
-        return ratings;
-    }
-
-    function getDisplayRating(card) {
-        const ratings = getCardRatings(card);
-        const c = cfg();
-        
-        if (c.ratings_source === 'both') {
-            return ratings.kp || ratings.tmdb || null;
-        } else if (c.ratings_source === 'kp') {
-            return ratings.kp || null;
-        } else if (c.ratings_source === 'tmdb') {
-            return ratings.tmdb || null;
-        }
-        return null;
-    }
-
-    function updateCardRatingElement(cardElement, cardData) {
-        const rating = getDisplayRating(cardData);
-        let voteEl = cardElement.querySelector('.card__vote');
-        
-        if (rating) {
-            if (!voteEl) {
-                const viewEl = cardElement.querySelector('.card__view');
-                if (viewEl) {
-                    voteEl = document.createElement('div');
-                    voteEl.className = 'card__vote';
-                    viewEl.appendChild(voteEl);
-                }
-            }
-            if (voteEl) {
-                voteEl.textContent = rating;
-                voteEl.style.display = '';
-            }
-        } else {
-            if (voteEl) {
-                voteEl.style.display = 'none';
-            }
-        }
-    }
-
-    function processExistingCards() {
-        document.querySelectorAll('.card.card--loaded').forEach(card => {
-            if (card.card_data) {
-                updateCardRatingElement(card, card.card_data);
-            }
-        });
-    }
-
-    function setupRatingsObserver() {
-        if (ratingsObserver) ratingsObserver.disconnect();
-        
-        const c = cfg();
-        if (!c.show_ratings || !c.ratings_on_cards) return;
-        
-        ratingsObserver = new MutationObserver((mutations) => {
-            for (const mutation of mutations) {
-                for (const node of mutation.addedNodes) {
-                    if (node.nodeType === 1) {
-                        if (node.classList && node.classList.contains('card')) {
-                            setTimeout(() => {
-                                if (node.card_data) {
-                                    updateCardRatingElement(node, node.card_data);
-                                }
-                            }, 100);
-                        }
-                        const cards = node.querySelectorAll ? node.querySelectorAll('.card') : [];
-                        cards.forEach(card => {
-                            setTimeout(() => {
-                                if (card.card_data) {
-                                    updateCardRatingElement(card, card.card_data);
-                                }
-                            }, 100);
-                        });
-                    }
-                }
-            }
-        });
-        
-        ratingsObserver.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-        
-        setTimeout(processExistingCards, 500);
-        console.log('[NSL] Наблюдатель за рейтингами запущен');
-    }
-
-    function patchCardRender() {
-        if (!Lampa.Maker || !Lampa.Maker.map) return;
-        
-        try {
-            const cardMap = Lampa.Maker.map('Card');
-            if (cardMap && cardMap.Base) {
-                const originalOnCreate = cardMap.Base.onCreate;
-                
-                cardMap.Base.onCreate = function() {
-                    if (originalOnCreate) originalOnCreate.call(this);
-                    
-                    const c = cfg();
-                    if (!c.show_ratings || !c.ratings_on_cards) return;
-                    
-                    setTimeout(() => {
-                        const cardData = this.data;
-                        const cardElement = this.render().get(0);
-                        if (cardData && cardElement) {
-                            updateCardRatingElement(cardElement, cardData);
-                        }
-                    }, 50);
-                };
-                
-                console.log('[NSL] Модуль карточек пропатчен для рейтингов');
-            }
-        } catch(e) {
-            console.warn('[NSL] Не удалось пропатчить модуль карточек:', e);
-        }
-    }
-
-    function enableRatings() {
-        patchCardRender();
-        setupRatingsObserver();
-        processExistingCards();
-        console.log('[NSL] Рейтинги включены');
-    }
-
-    function disableRatings() {
-        if (ratingsObserver) {
-            ratingsObserver.disconnect();
-            ratingsObserver = null;
-        }
-        document.querySelectorAll('.card__vote').forEach(el => {
-            el.style.display = 'none';
-        });
-        console.log('[NSL] Рейтинги выключены');
-    }
-
-    function refreshRatingsSettings() {
-        const c = cfg();
-        
-        if (c.show_ratings && c.ratings_on_cards) {
-            enableRatings();
-        } else {
-            disableRatings();
-        }
-    }
 
     // ======================
     // GITHUB GIST СИНХРОНИЗАЦИЯ
@@ -2622,11 +2452,6 @@ function syncFromGist(showNotify) {
                 { title: `🎬 Таймкоды на карточках: ${c.show_timeline_on_cards ? 'Вкл' : 'Выкл'}`, action: 'toggle_timeline_cards' },
                 { title: `📍 Позиция таймкодов: ${timelinePosName}`, action: 'timeline_position' },
                 { title: '──────────', separator: true },
-                { title: `⭐ Рейтинги: ${c.show_ratings ? 'Вкл' : 'Выкл'}`, action: 'toggle_ratings' },
-                { title: `📊 Источник рейтингов: ${ratingsSourceName}`, action: 'ratings_source' },
-                { title: `🖼️ На карточках: ${c.ratings_on_cards ? 'Вкл' : 'Выкл'}`, action: 'toggle_ratings_cards' },
-                { title: `📄 На странице: ${c.ratings_on_full ? 'Вкл' : 'Выкл'}`, action: 'toggle_ratings_full' },
-                { title: '──────────', separator: true },
                 { title: `🔔 Новые серии: ${c.check_new_episodes ? 'Вкл' : 'Выкл'}`, action: 'toggle_new_episodes' },
                 { title: `📢 Уведомления о сериях: ${c.new_episodes_notify ? 'Вкл' : 'Выкл'}`, action: 'toggle_new_episodes_notify' },
                 { title: `⏱️ Проверка серий: ${c.new_episodes_check_interval} ч.`, action: 'set_episodes_check_interval' },
@@ -2679,47 +2504,7 @@ function syncFromGist(showNotify) {
                         onBack: () => showMainMenu()
                     });
                 }
-                else if (item.action === 'toggle_ratings') {
-                    c.show_ratings = !c.show_ratings;
-                    saveCfg(c);
-                    refreshRatingsSettings();
-                    notify('Рейтинги ' + (c.show_ratings ? 'включены' : 'выключены'));
-                    showMainMenu();
-                }
-                else if (item.action === 'ratings_source') {
-                    Lampa.Select.show({
-                        title: 'Источник рейтингов',
-                        items: [
-                            { title: 'Кинопоиск', action: 'kp' },
-                            { title: 'TMDB', action: 'tmdb' },
-                            { title: 'КП + TMDB', action: 'both' }
-                        ],
-                        onSelect: (subItem) => {
-                            if (subItem.action) {
-                                c.ratings_source = subItem.action;
-                                saveCfg(c);
-                                refreshRatingsSettings();
-                                const sourceName = subItem.action === 'both' ? 'КП + TMDB' : (subItem.action === 'kp' ? 'Кинопоиск' : 'TMDB');
-                                notify('Источник: ' + sourceName);
-                            }
-                            showMainMenu();
-                        },
-                        onBack: () => showMainMenu()
-                    });
-                }
-                else if (item.action === 'toggle_ratings_cards') {
-                    c.ratings_on_cards = !c.ratings_on_cards;
-                    saveCfg(c);
-                    refreshRatingsSettings();
-                    notify('Рейтинги на карточках ' + (c.ratings_on_cards ? 'включены' : 'выключены'));
-                    showMainMenu();
-                }
-                else if (item.action === 'toggle_ratings_full') {
-                    c.ratings_on_full = !c.ratings_on_full;
-                    saveCfg(c);
-                    notify('Рейтинги на странице ' + (c.ratings_on_full ? 'включены' : 'выключены'));
-                    showMainMenu();
-                }
+
                 else if (item.action === 'toggle_new_episodes') {
                     c.check_new_episodes = !c.check_new_episodes;
                     saveCfg(c);
@@ -3099,9 +2884,7 @@ function syncFromGist(showNotify) {
         if (c.show_timeline_on_cards) {
             enableTimelineOnCards();
         }
-        if (c.show_ratings) {
-            refreshRatingsSettings();
-        }
+        
         if (c.check_new_episodes) {
             startSeriesCheckTimer();
         }
