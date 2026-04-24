@@ -1304,6 +1304,7 @@ function addFavoriteButtonToCard() {
                 });
             });
             
+            // Вставляем после кнопки "Смотреть"
             const playButton = buttonsContainer.find('.button--play').first();
             if (playButton.length) {
                 playButton.after(button);
@@ -1322,12 +1323,15 @@ function addFavoriteButtonToCard() {
         }
     }
     
-    // Подписка на событие (для обычных переходов)
+    // Подписка на обычное событие загрузки страницы фильма
     Lampa.Listener.follow('full', (e) => {
         if (e.type === 'complite') {
             setTimeout(insertButton, 500);
         }
     });
+    
+    window.nslInsertButton = insertButton;
+}
     
     // Постоянная проверка каждые 300 мс — для переходов из избранного
     setInterval(() => {
@@ -3381,63 +3385,77 @@ function syncFromGist(showNotify) {
         }
     }
 
-    function init() {
-        if (!cfg().enabled) return;
+function init() {
+    if (!cfg().enabled) return;
+
+    console.log('[NSL] Init v25 for profile:', PROFILE_ID);
+
+    setTimeout(() => {
+        addBookmarkButton();
+        addFavoritesToMenu();
+        addSettingsButton();
+        renderBookmarks();
+    }, 1000);
+
+    addFavoriteButtonToCard();
+    addStatusToCard();
+    initPlayerHandler();
     
-        console.log('[NSL] Init v25 for profile:', PROFILE_ID);
+    startAutoSync();
+    onAppStart();
     
-        setTimeout(() => {
-            addBookmarkButton();
-            addFavoritesToMenu();
-            addSettingsButton();
-            renderBookmarks();
-        }, 1000);
-    
-        addFavoriteButtonToCard();
-        addStatusToCard();
-        initPlayerHandler();
-        
-        startAutoSync();
-        onAppStart();
-        
-        const c = cfg();
-        if (c.show_timeline_on_cards) {
-            enableTimelineOnCards();
-        }
-        
-        if (c.check_new_episodes) {
-            startSeriesCheckTimer();
-        }
-        
-        setTimeout(() => {
-            cleanupDuplicateCategories();
-            syncTimelineWithCategories();
-            checkNewEpisodes(false);
-            checkAutoRemoveWatched();
-        }, 3000);
-        
-        Lampa.Listener.follow('state:changed', (e) => {
-            if (e.target === 'nsl_favorites' || e.target === 'timeline') {
-                setTimeout(() => {
-                    refreshCardStatus();
-                    refreshFavoriteButton();
-                    refreshNewEpisodesBadge();
-                }, 100);
-            }
-        });
-        
-        window.addEventListener('beforeunload', onAppClose);
-        
-        window.NSL = {
-            cfg, getFavorites, getBookmarks, getTimeline,
-            syncToGist, syncFromGist, addToFavorites, toggleFavorite,
-            getMoveLog, getMovieStatus, refreshCardStatus,
-            cleanupDuplicateCategories, enableTimelineOnCards,
-            checkNewEpisodes, getNewEpisodesCount, getNewEpisodesList
-        };
-        
-        console.log('[NSL] Init complete');
+    const c = cfg();
+    if (c.show_timeline_on_cards) {
+        enableTimelineOnCards();
     }
+    
+    if (c.check_new_episodes) {
+        startSeriesCheckTimer();
+    }
+    
+    setTimeout(() => {
+        cleanupDuplicateCategories();
+        syncTimelineWithCategories();
+        checkNewEpisodes(false);
+        checkAutoRemoveWatched();
+    }, 3000);
+    
+    Lampa.Listener.follow('state:changed', (e) => {
+        if (e.target === 'nsl_favorites' || e.target === 'timeline') {
+            setTimeout(() => {
+                refreshCardStatus();
+                refreshFavoriteButton();
+                refreshNewEpisodesBadge();
+            }, 100);
+        }
+    });
+    
+    // НОВОЕ: Отслеживаем ЛЮБОЙ переход на страницу фильма
+    Lampa.Listener.follow('activity', (e) => {
+        if (e.type === 'push' && e.component === 'full') {
+            setTimeout(() => {
+                window.nslInsertButton();
+                refreshCardStatus();
+            }, 1000);
+            setTimeout(() => {
+                window.nslInsertButton();
+                refreshCardStatus();
+            }, 2500);
+        }
+    });
+    
+    window.addEventListener('beforeunload', onAppClose);
+    
+    window.NSL = {
+        cfg, getFavorites, getBookmarks, getTimeline,
+        syncToGist, syncFromGist, addToFavorites, toggleFavorite,
+        getMoveLog, getMovieStatus, refreshCardStatus,
+        cleanupDuplicateCategories, enableTimelineOnCards,
+        checkNewEpisodes, getNewEpisodesCount, getNewEpisodesList
+    };
+    
+    console.log('[NSL] Init complete');
+}
     
     if (window.appready) init();
     else Lampa.Listener.follow('app', e => { if (e.type === 'ready') init(); });
