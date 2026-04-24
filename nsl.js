@@ -1395,12 +1395,19 @@ function showFavoritesList(items, title, currentCategory) {
         const yearStr = year ? ` (${year})` : '';
         const posterUrl = getPosterUrl(cardData);
         
-        // Информация о сериях (для ТВ-шоу)
+        // Информация о сериях (для ТВ-шоу) — сначала из cardData, потом дополнится через loadSeriesDataQuick
         let seriesInfo = '';
         if (item.media_type === 'tv' || cardData.original_name) {
             const baseId = getBaseTmdbId(item.tmdb_id);
             const checkData = getSeriesCheck()[baseId];
-            seriesInfo = formatSeriesInfo(checkData, cardData);
+            
+            if (checkData && (checkData.seasons_count > 0 || checkData.aired_episodes > 0)) {
+                // Есть данные из seriesCheck
+                seriesInfo = formatSeriesInfo(checkData, cardData);
+            } else if (cardData.number_of_seasons) {
+                // Берём из данных карточки
+                seriesInfo = `${cardData.number_of_seasons} сез.`;
+            }
         }
         
         // Формируем подзаголовок в зависимости от категории
