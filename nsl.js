@@ -2629,7 +2629,6 @@ function syncFromGist(showNotify) {
     function showMainMenu() {
         const c = cfg();
         const timelinePosName = c.timeline_position === 'bottom' ? 'снизу' : (c.timeline_position === 'center' ? 'по центру' : 'сверху');
-        const ratingsSourceName = c.ratings_source === 'both' ? 'КП + TMDB' : (c.ratings_source === 'kp' ? 'Кинопоиск' : 'TMDB');
         const newEpisodesCount = getNewEpisodesCount();
         
         Lampa.Select.show({
