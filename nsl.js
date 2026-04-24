@@ -3029,6 +3029,22 @@ function syncFromGist(showNotify) {
         });
     }
 
+    function addSettingsButton() {
+        setTimeout(() => {
+            let menuList = $('.menu__list').last();
+            if (!menuList.length) menuList = $('.menu__list').eq(1);
+            if (menuList.length && !$('.nsl-settings-item').length) {
+                const el = $(`
+                    <li class="menu__item selector nsl-settings-item">
+                        <div class="menu__text">⚙️ NSL Sync</div>
+                    </li>
+                `);
+                el.on('hover:enter', (e) => { e.stopPropagation(); showMainMenu(); });
+                menuList.append(el);
+            }
+        }, 2000);
+    }
+    
     // ======================
     // ИНИЦИАЛИЗАЦИЯ
     // ======================
@@ -3105,4 +3121,4 @@ function syncFromGist(showNotify) {
     if (window.appready) init();
     else Lampa.Listener.follow('app', e => { if (e.type === 'ready') init(); });
     
-})();
+    })();
