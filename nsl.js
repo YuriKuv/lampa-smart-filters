@@ -3471,10 +3471,6 @@ function syncFromGist(showNotify) {
         
         setTimeout(() => {
             cleanupDuplicateCategories();
-            // Принудительно пробуем добавить кнопку на текущую карточку (если она открыта)
-            setTimeout(() => tryAddFavoriteButtonToCard(), 2000);
-            setTimeout(() => tryAddFavoriteButtonToCard(), 4000);
-            setTimeout(() => tryAddFavoriteButtonToCard(), 6000);
             syncTimelineWithCategories();
             checkNewEpisodes(false);
             checkAutoRemoveWatched();
