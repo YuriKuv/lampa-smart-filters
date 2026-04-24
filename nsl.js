@@ -1236,7 +1236,7 @@ function saveProgress(timeInSeconds, force) {
     
     function addFavoriteButtonToCard() {
         // Функция для непосредственного добавления кнопки
-        function insertButton() {
+        window.nslInsertButton = function() {
             try {
                 const activity = Lampa.Activity.active();
                 if (!activity || activity.component !== 'full') return;
@@ -1322,13 +1322,13 @@ function saveProgress(timeInSeconds, force) {
             } catch (err) {
                 console.error('[NSL] Error adding button:', err);
             }
-        }
+        };
         
         // Подписываемся на событие загрузки
         Lampa.Listener.follow('full', (e) => {
             if (e.type === 'complite') {
                 if (favoriteButtonTimer) clearTimeout(favoriteButtonTimer);
-                favoriteButtonTimer = setTimeout(insertButton, 500);
+                favoriteButtonTimer = setTimeout(window.nslInsertButton, 500);
             }
         });
     }
@@ -1537,14 +1537,7 @@ function saveProgress(timeInSeconds, force) {
                         });
                         
                         // Принудительно добавляем кнопку после открытия из избранного
-                        setTimeout(() => {
-                            const activity = Lampa.Activity.active();
-                            if (activity && activity.component === 'full') {
-                                // Принудительно вызываем вставку кнопки
-                                $('.nsl-favorite-button').remove(); // удаляем старую
-                                Lampa.Listener.send('full', { type: 'complite', data: { movie: activity.movie } });
-                            }
-                        }, 1000);
+                        setTimeout(() => window.nslInsertButton(), 1000);
                     }
                 };
             });
@@ -1646,14 +1639,7 @@ function extractYear(cardData) {
                     markNewEpisodesSeen(item.tmdb_id);
                     
                     // Принудительно добавляем кнопку после открытия из избранного
-                    setTimeout(() => {
-                        const activity = Lampa.Activity.active();
-                        if (activity && activity.component === 'full') {
-                            // Принудительно вызываем вставку кнопки
-                            $('.nsl-favorite-button').remove(); // удаляем старую
-                            Lampa.Listener.send('full', { type: 'complite', data: { movie: activity.movie } });
-                        }
-                    }, 1000);
+                    setTimeout(() => window.nslInsertButton(), 1000);
                 }
             };
         });
@@ -1781,14 +1767,7 @@ function extractYear(cardData) {
                     });
                     
                     // Принудительно добавляем кнопку после открытия из избранного
-                    setTimeout(() => {
-                        const activity = Lampa.Activity.active();
-                        if (activity && activity.component === 'full') {
-                            // Принудительно вызываем вставку кнопки
-                            $('.nsl-favorite-button').remove(); // удаляем старую
-                            Lampa.Listener.send('full', { type: 'complite', data: { movie: activity.movie } });
-                        }
-                    }, 1000);
+                    setTimeout(() => window.nslInsertButton(), 1000);
                 },
                 onLongPress: null
             };
@@ -2888,14 +2867,7 @@ function syncFromGist(showNotify) {
                         });
                         
                         // Принудительно добавляем кнопку после открытия из избранного
-                        setTimeout(() => {
-                            const activity = Lampa.Activity.active();
-                            if (activity && activity.component === 'full') {
-                                // Принудительно вызываем вставку кнопки
-                                $('.nsl-favorite-button').remove(); // удаляем старую
-                                Lampa.Listener.send('full', { type: 'complite', data: { movie: activity.movie } });
-                            }
-                        }, 1000);
+                        setTimeout(() => window.nslInsertButton(), 1000);
                     }
                 });
             });
