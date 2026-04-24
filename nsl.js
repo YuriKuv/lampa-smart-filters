@@ -616,164 +616,183 @@ function forceSyncToGist(favorites, timeline) {
     });
 }
         
-    function checkAutoAbandoned() {
-        const c = cfg();
-        if (!c.auto_abandoned) return;
-        
-        const now = Date.now();
-        const abandonedAfter = c.abandoned_days * 24 * 60 * 60 * 1000;
-        const favorites = getFavorites();
-        let changed = false;
-        
-        for (const item of favorites.filter(f => f.category === 'watching')) {
-            const lastUpdate = item.updated || item.added;
-            if (lastUpdate > 0 && (now - lastUpdate) > abandonedAfter) {
-                const oldCategory = item.category;
-                const title = item.data?.title || item.data?.name || 'Без названия';
-                
-                item.category = 'abandoned';
-                item.updated = now;
-                
-                applyCategoryRules(item.tmdb_id, 'abandoned', favorites);
-                logMove('auto_abandoned', title, oldCategory, 'abandoned');
-                
-                changed = true;
-            }
-        }
-        
-        if (changed) {
-            setTimeout(() => saveFavorites(favorites), 50);
-        }
-    }
+function checkAutoAbandoned() {
+    const c = cfg();
+    if (!c.auto_abandoned) return;
     
-    function returnToWatching(tmdbId) {
-        const favorites = getFavorites();
-        const baseId = getBaseTmdbId(tmdbId);
-        const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && (f.category === 'abandoned' || f.category === 'watched'));
-        
-        if (item) {
+    const now = Date.now();
+    const abandonedAfter = c.abandoned_days * 24 * 60 * 60 * 1000;
+    const favorites = getFavorites();
+    let changed = false;
+    
+    for (const item of favorites.filter(f => f.category === 'watching')) {
+        const lastUpdate = item.updated || item.added;
+        if (lastUpdate > 0 && (now - lastUpdate) > abandonedAfter) {
             const oldCategory = item.category;
             const title = item.data?.title || item.data?.name || 'Без названия';
             
-            item.category = 'watching';
-            item.updated = Date.now();
+            item.category = 'abandoned';
+            item.updated = now;
             
-            applyCategoryRules(tmdbId, 'watching', favorites);
+            applyCategoryRules(item.tmdb_id, 'abandoned', favorites);
+            logMove('auto_abandoned', title, oldCategory, 'abandoned');
             
-            const action = oldCategory === 'abandoned' ? 'return_abandoned' : 'return_watched';
-            logMove(action, title, oldCategory, 'watching');
-            
-            saveFavorites(favorites);
-            return true;
+            changed = true;
         }
-        return false;
     }
     
-    function syncTimelineWithCategories() {
+    if (changed) {
+        saveFavorites(favorites);
+        
+        // НОВОЕ: Синхронизируем с Gist
         const c = cfg();
-        if (!c.auto_watching && !c.auto_watched) return;
-        
-        const timeline = getTimeline();
-        const favorites = getFavorites();
-        let changed = false;
-        
-        for (const [key, item] of Object.entries(timeline)) {
-            const tmdbId = item.tmdb_id;
-            if (!tmdbId) continue;
-            
-            const baseId = getBaseTmdbId(tmdbId);
-            const percent = item.percent || 0;
-            
-            const isAbandoned = favorites.some(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'abandoned');
-            if (isAbandoned) continue;
-            
-            const existingWatching = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watching');
-            const existingWatched = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watched');
-            const existingPlanned = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'planned');
-            const existingFavorite = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'favorite');
-            
-            const existingAny = existingWatching || existingWatched || existingPlanned || existingFavorite;
-            const cardData = existingAny?.data || { id: tmdbId, title: 'ID: ' + baseId };
-            const title = cardData.title || cardData.name || 'ID: ' + baseId;
-            
-            const isSeries = key.includes('_s') || key.includes('_e');
-            const mediaType = isSeries ? 'tv' : 'movie';
-            
-            if (c.auto_watched && !existingWatched) {
-                if (percent >= c.watched_min_progress) {
-                    if (existingWatching) {
-                        existingWatching.category = 'watched';
-                        existingWatching.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watched', favorites);
-                        logMove('auto_watched', title, 'watching', 'watched');
-                        changed = true;
-                    } else if (existingPlanned) {
-                        existingPlanned.category = 'watched';
-                        existingPlanned.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watched', favorites);
-                        logMove('auto_watched', title, 'planned', 'watched');
-                        changed = true;
-                    } else if (existingFavorite) {
-                        existingFavorite.category = 'watched';
-                        existingFavorite.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watched', favorites);
-                        logMove('auto_watched', title, 'favorite', 'watched');
-                        changed = true;
-                    } else {
-                        favorites.push({
-                            id: Date.now(),
-                            card_id: baseId,
-                            tmdb_id: baseId,
-                            media_type: mediaType,
-                            category: 'watched',
-                            data: cardData,
-                            added: Date.now(),
-                            updated: Date.now()
-                        });
-                        logMove('auto_watched', title, null, 'watched');
-                        changed = true;
-                    }
-                    continue;
-                }
-            }
-            
-            if (c.auto_watching && !existingWatching && !existingWatched) {
-                if (percent >= c.watching_min_progress && percent <= c.watching_max_progress) {
-                    if (existingPlanned) {
-                        existingPlanned.category = 'watching';
-                        existingPlanned.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watching', favorites);
-                        logMove('auto_watching', title, 'planned', 'watching');
-                        changed = true;
-                    } else if (existingFavorite) {
-                        existingFavorite.category = 'watching';
-                        existingFavorite.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watching', favorites);
-                        logMove('auto_watching', title, 'favorite', 'watching');
-                        changed = true;
-                    } else {
-                        favorites.push({
-                            id: Date.now(),
-                            card_id: baseId,
-                            tmdb_id: baseId,
-                            media_type: mediaType,
-                            category: 'watching',
-                            data: cardData,
-                            added: Date.now(),
-                            updated: Date.now()
-                        });
-                        logMove('auto_watching', title, null, 'watching');
-                        changed = true;
-                    }
-                }
-            }
-        }
-        
-        if (changed) {
-            saveFavorites(favorites);
-            refreshNewEpisodesBadge();
+        if (c.gist_token && c.gist_id) {
+            setTimeout(() => syncToGist(false), 200);
         }
     }
+}
+    
+function returnToWatching(tmdbId) {
+    const favorites = getFavorites();
+    const baseId = getBaseTmdbId(tmdbId);
+    const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && (f.category === 'abandoned' || f.category === 'watched'));
+    
+    if (item) {
+        const oldCategory = item.category;
+        const title = item.data?.title || item.data?.name || 'Без названия';
+        
+        item.category = 'watching';
+        item.updated = Date.now();
+        
+        applyCategoryRules(tmdbId, 'watching', favorites);
+        
+        const action = oldCategory === 'abandoned' ? 'return_abandoned' : 'return_watched';
+        logMove(action, title, oldCategory, 'watching');
+        
+        saveFavorites(favorites);
+        
+        // НОВОЕ: Синхронизируем с Gist
+        const c = cfg();
+        if (c.gist_token && c.gist_id) {
+            setTimeout(() => syncToGist(false), 200);
+        }
+        
+        return true;
+    }
+    return false;
+}
+    
+function syncTimelineWithCategories() {
+    const c = cfg();
+    if (!c.auto_watching && !c.auto_watched) return;
+    
+    const timeline = getTimeline();
+    const favorites = getFavorites();
+    let changed = false;
+    
+    for (const [key, item] of Object.entries(timeline)) {
+        const tmdbId = item.tmdb_id;
+        if (!tmdbId) continue;
+        
+        const baseId = getBaseTmdbId(tmdbId);
+        const percent = item.percent || 0;
+        
+        const isAbandoned = favorites.some(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'abandoned');
+        if (isAbandoned) continue;
+        
+        const existingWatching = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watching');
+        const existingWatched = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watched');
+        const existingPlanned = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'planned');
+        const existingFavorite = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'favorite');
+        
+        const existingAny = existingWatching || existingWatched || existingPlanned || existingFavorite;
+        const cardData = existingAny?.data || { id: tmdbId, title: 'ID: ' + baseId };
+        const title = cardData.title || cardData.name || 'ID: ' + baseId;
+        
+        const isSeries = key.includes('_s') || key.includes('_e');
+        const mediaType = isSeries ? 'tv' : 'movie';
+        
+        if (c.auto_watched && !existingWatched) {
+            if (percent >= c.watched_min_progress) {
+                if (existingWatching) {
+                    existingWatching.category = 'watched';
+                    existingWatching.updated = Date.now();
+                    applyCategoryRules(tmdbId, 'watched', favorites);
+                    logMove('auto_watched', title, 'watching', 'watched');
+                    changed = true;
+                } else if (existingPlanned) {
+                    existingPlanned.category = 'watched';
+                    existingPlanned.updated = Date.now();
+                    applyCategoryRules(tmdbId, 'watched', favorites);
+                    logMove('auto_watched', title, 'planned', 'watched');
+                    changed = true;
+                } else if (existingFavorite) {
+                    existingFavorite.category = 'watched';
+                    existingFavorite.updated = Date.now();
+                    applyCategoryRules(tmdbId, 'watched', favorites);
+                    logMove('auto_watched', title, 'favorite', 'watched');
+                    changed = true;
+                } else {
+                    favorites.push({
+                        id: Date.now(),
+                        card_id: baseId,
+                        tmdb_id: baseId,
+                        media_type: mediaType,
+                        category: 'watched',
+                        data: cardData,
+                        added: Date.now(),
+                        updated: Date.now()
+                    });
+                    logMove('auto_watched', title, null, 'watched');
+                    changed = true;
+                }
+                continue;
+            }
+        }
+        
+        if (c.auto_watching && !existingWatching && !existingWatched) {
+            if (percent >= c.watching_min_progress && percent <= c.watching_max_progress) {
+                if (existingPlanned) {
+                    existingPlanned.category = 'watching';
+                    existingPlanned.updated = Date.now();
+                    applyCategoryRules(tmdbId, 'watching', favorites);
+                    logMove('auto_watching', title, 'planned', 'watching');
+                    changed = true;
+                } else if (existingFavorite) {
+                    existingFavorite.category = 'watching';
+                    existingFavorite.updated = Date.now();
+                    applyCategoryRules(tmdbId, 'watching', favorites);
+                    logMove('auto_watching', title, 'favorite', 'watching');
+                    changed = true;
+                } else {
+                    favorites.push({
+                        id: Date.now(),
+                        card_id: baseId,
+                        tmdb_id: baseId,
+                        media_type: mediaType,
+                        category: 'watching',
+                        data: cardData,
+                        added: Date.now(),
+                        updated: Date.now()
+                    });
+                    logMove('auto_watching', title, null, 'watching');
+                    changed = true;
+                }
+            }
+        }
+    }
+    
+    if (changed) {
+        saveFavorites(favorites);
+        refreshNewEpisodesBadge();
+        
+        // НОВОЕ: Синхронизируем с Gist после авто-перемещения
+        const c = cfg();
+        if (c.gist_token && c.gist_id) {
+            setTimeout(() => syncToGist(false), 200);
+        }
+    }
+}
     
 function clearAllFavorites() {
     Lampa.Select.show({
