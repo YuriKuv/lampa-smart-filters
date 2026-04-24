@@ -297,6 +297,12 @@
         const l = getBookmarks().filter(i => i.id !== item.id);
         saveBookmarks(l);
         notify('Удалено');
+        
+        // Синхронизируем с Gist
+        const c = cfg();
+        if (c.sync_on_remove && c.gist_token && c.gist_id) {
+            setTimeout(() => syncToGist(false), 200);
+        }
     }
 
     function openBookmark(item) {
@@ -555,72 +561,6 @@ function deleteCompletely(item) {
     if (c.sync_on_remove && c.gist_token && c.gist_id) {
         setTimeout(() => syncToGist(false), 300);
     }
-}function deleteCompletely(item) {
-    const baseId = getBaseTmdbId(item.tmdb_id);
-    const title = item.data?.title || item.data?.name || 'Без названия';
-    
-    // Удаляем из избранного
-    let favorites = getFavorites();
-    favorites = favorites.filter(f => getBaseTmdbId(f.tmdb_id) !== baseId);
-    saveFavorites(favorites);
-    
-    // Удаляем таймкоды
-    const timeline = getTimeline();
-    for (const key in timeline) {
-        if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
-            delete timeline[key];
-        }
-    }
-    saveTimeline(timeline);
-    
-    notify(`🗑️ "${title}" удалён полностью`);
-    logMove('delete', title, item.category, null);
-    refreshNewEpisodesBadge();
-    
-    // Отправляем изменения на Gist
-    const c = cfg();
-    if (c.sync_on_remove && c.gist_token && c.gist_id) {
-        setTimeout(() => syncToGist(false), 300);
-    }
-}
-
-    // Принудительная синхронизация — отправляет ТОЛЬКО локальные данные, без слияния
-function forceSyncToGist(favorites, timeline) {
-    const gist = getGistData();
-    if (!gist) return;
-    
-    const syncData = {
-        version: 5,
-        profile_id: PROFILE_ID,
-        updated: new Date().toISOString(),
-        bookmarks: getBookmarks(),
-        favorites: favorites || getFavorites(),
-        timeline: timeline || getTimeline()
-    };
-    
-    $.ajax({
-        url: `https://api.github.com/gists/${gist.id}`,
-        method: 'PATCH',
-        headers: {
-            'Authorization': `token ${gist.token}`,
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json'
-        },
-        data: JSON.stringify({
-            description: 'NSL Sync Data',
-            public: false,
-            files: { 'nsl_sync.json': { content: JSON.stringify(syncData) } }
-        }),
-        timeout: 15000,
-        crossDomain: true,
-        success: () => {
-            Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
-            console.log('[NSL] Force sync to Gist OK');
-        },
-        error: () => {
-            console.log('[NSL] Force sync to Gist failed');
-        }
-    });
 }
         
 function checkAutoAbandoned() {
@@ -659,6 +599,8 @@ function checkAutoAbandoned() {
     }
 }
     
+let returnedToWatchingMap = {};
+
 function returnToWatching(tmdbId) {
     const favorites = getFavorites();
     const baseId = getBaseTmdbId(tmdbId);
@@ -678,7 +620,10 @@ function returnToWatching(tmdbId) {
         
         saveFavorites(favorites);
         
-        // НОВОЕ: Синхронизируем с Gist
+        // Отмечаем что уже возвращали — чтобы не дёргать каждый раз
+        returnedToWatchingMap[baseId] = true;
+        
+        // Синхронизируем с Gist только при реальном изменении
         const c = cfg();
         if (c.gist_token && c.gist_id) {
             setTimeout(() => syncToGist(false), 200);
@@ -876,50 +821,51 @@ function clearAllFavorites() {
         return 0;
     }
     
-    function saveProgress(timeInSeconds, force) {
-        const c = cfg();
-        if (!c.auto_save && !force) return false;
+function saveProgress(timeInSeconds, force) {
+    const c = cfg();
+    if (!c.auto_save && !force) return false;
+    
+    const movieKey = getCurrentMovieKey();
+    if (!movieKey) return false;
+    
+    const currentTime = Math.floor(timeInSeconds);
+    const timeline = getTimeline();
+    const savedTime = timeline[movieKey]?.time || 0;
+    
+    if (force || Math.abs(currentTime - savedTime) >= 10) {
+        let duration = getVideoDuration();
+        if (!duration && timeline[movieKey]?.duration) duration = timeline[movieKey].duration;
         
-        const movieKey = getCurrentMovieKey();
-        if (!movieKey) return false;
+        const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
+        const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
         
-        const currentTime = Math.floor(timeInSeconds);
-        const timeline = getTimeline();
-        const savedTime = timeline[movieKey]?.time || 0;
+        timeline[movieKey] = {
+            time: currentTime,
+            percent: percent,
+            duration: duration,
+            updated: Date.now(),
+            tmdb_id: tmdbId
+        };
         
-        if (force || Math.abs(currentTime - savedTime) >= 10) {
-            let duration = getVideoDuration();
-            if (!duration && timeline[movieKey]?.duration) duration = timeline[movieKey].duration;
-            
-            const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
-            const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
-            
-            timeline[movieKey] = {
-                time: currentTime,
-                percent: percent,
-                duration: duration,
-                updated: Date.now(),
-                tmdb_id: tmdbId
-            };
-            
-            saveTimeline(timeline);
-            lastSavedProgress = currentTime;
-            currentMovieTime = currentTime;
-            
-            if (tmdbId && currentTime > 60) {
-                returnToWatching(tmdbId);
-            }
-            
-            syncTimelineWithCategories();
-            
-            if (Lampa.Timeline?.update) {
-                Lampa.Timeline.update({ hash: movieKey, percent: percent, time: currentTime, duration: duration });
-            }
-            
-            return true;
+        saveTimeline(timeline);
+        lastSavedProgress = currentTime;
+        currentMovieTime = currentTime;
+        
+        // Только если ещё не возвращали
+        if (tmdbId && currentTime > 60 && !returnedToWatchingMap[getBaseTmdbId(tmdbId)]) {
+            returnToWatching(tmdbId);
         }
-        return false;
+        
+        syncTimelineWithCategories();
+        
+        if (Lampa.Timeline?.update) {
+            Lampa.Timeline.update({ hash: movieKey, percent: percent, time: currentTime, duration: duration });
+        }
+        
+        return true;
     }
+    return false;
+}
     
     function initPlayerHandler() {
         let wasPlayerOpen = false;
@@ -935,6 +881,7 @@ function clearAllFavorites() {
             const currentTime = getCurrentPlayerTime();
             
             if (isPlayerOpen && !wasPlayerOpen) {
+                returnedToWatchingMap = {}; // Сброс флагов для нового фильма
                 setTimeout(() => { videoDuration = getVideoDuration(); }, 2000);
             }
             
@@ -2035,20 +1982,19 @@ function loadSeriesDataQuick(tmdbId, callback) {
                     seriesCheck[baseId] = checkData;
                     saveSeriesCheck(seriesCheck);
                     
-                    // Обновляем данные в избранном
+                    // Обновляем данные в избранном БЕЗ saveFavorites (только в памяти)
                     const favorites = getFavorites();
                     const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
                     if (item) {
                         item.data.number_of_seasons = seasonsCount;
                         item.data.number_of_episodes = data.number_of_episodes;
                         item.data.last_air_date = data.last_air_date;
-                        saveFavorites(favorites);
+                        // НЕ вызываем saveFavorites здесь — сохраним один раз при выходе из списка
                     }
                     
                     callback(checkData);
                 },
                 error: () => {
-                    // Если API недоступен — используем данные из карточки
                     const favorites = getFavorites();
                     const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
                     const cardData = item?.data || {};
