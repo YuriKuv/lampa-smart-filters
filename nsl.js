@@ -486,28 +486,34 @@ function addToFavorites(card, category) {
     return true;
 }
     
-    function removeFromFavorites(card, category) {
-        const tmdbId = extractTmdbId(card);
-        const favorites = getFavorites();
-        const baseId = getBaseTmdbId(tmdbId);
-        const index = favorites.findIndex(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === category);
+function removeFromFavorites(card, category) {
+    const tmdbId = extractTmdbId(card);
+    const favorites = getFavorites();
+    const baseId = getBaseTmdbId(tmdbId);
+    const index = favorites.findIndex(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === category);
+    
+    if (index >= 0) {
+        favorites.splice(index, 1);
+        Lampa.Storage.set(STORE_FAVORITES, favorites, true); // НАПРЯМУЮ
         
-        if (index >= 0) {
-            favorites.splice(index, 1);
-            setTimeout(() => {
-                saveFavorites(favorites);
-                refreshNewEpisodesBadge();
-                
-                // Отправляем изменения на Gist
-                const c = cfg();
-                if (c.sync_on_remove && c.gist_token && c.gist_id) {
-                    setTimeout(() => syncToGist(false), 200);
-                }
-            }, 50);
-            return true;
-        }
-        return false;
+        setTimeout(() => {
+            Lampa.Listener.send('state:changed', { target: 'nsl_favorites', reason: 'update' });
+        }, 50);
+        
+        refreshNewEpisodesBadge();
+        
+        // Отправляем на Gist
+        const c = cfg();
+        setTimeout(() => {
+            if (c.sync_on_remove && c.gist_token && c.gist_id) {
+                forceSyncToGist(favorites, null);
+            }
+        }, 500);
+        
+        return true;
     }
+    return false;
+}
     
     function toggleFavorite(card, category) {
         return isInFavorites(card, category) ? removeFromFavorites(card, category) : addToFavorites(card, category);
@@ -523,34 +529,95 @@ function addToFavorites(card, category) {
         return getFavorites().filter(f => f.category === category);
     }
     
-    function deleteCompletely(item) {
-        const favorites = getFavorites();
-        const timeline = getTimeline();
-        const baseId = getBaseTmdbId(item.tmdb_id);
-        const title = item.data?.title || item.data?.name || 'Без названия';
-        
-        // Удаляем из избранного
-        const newFavorites = favorites.filter(f => getBaseTmdbId(f.tmdb_id) !== baseId);
-        saveFavorites(newFavorites);
-        
-        // Удаляем таймкоды
-        for (const key in timeline) {
-            if (getBaseTmdbId(timeline[key].tmdb_id) === baseId) {
-                delete timeline[key];
-            }
-        }
-        saveTimeline(timeline);
-        
-        notify(`🗑️ "${title}" удалён полностью`);
-        logMove('delete', title, item.category, null);
-        refreshNewEpisodesBadge();
-        
-        // Отправляем изменения на Gist
-        const c = cfg();
-        if (c.sync_on_remove && c.gist_token && c.gist_id) {
-            setTimeout(() => syncToGist(false), 200);
+function deleteCompletely(item) {
+    const baseId = getBaseTmdbId(item.tmdb_id);
+    const title = item.data?.title || item.data?.name || 'Без названия';
+    
+    // БЛОКИРУЕМ авто-действия на время удаления
+    const c = cfg();
+    const savedAutoWatching = c.auto_watching;
+    const savedAutoWatched = c.auto_watched;
+    c.auto_watching = false;
+    c.auto_watched = false;
+    saveCfg(c);
+    
+    // Удаляем из избранного
+    let favorites = getFavorites();
+    favorites = favorites.filter(f => getBaseTmdbId(f.tmdb_id) !== baseId);
+    Lampa.Storage.set(STORE_FAVORITES, favorites, true); // НАПРЯМУЮ, без saveFavorites
+    
+    // Удаляем таймкоды
+    const timeline = getTimeline();
+    for (const key in timeline) {
+        if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
+            delete timeline[key];
         }
     }
+    Lampa.Storage.set(STORE_TIMELINE, timeline, true); // НАПРЯМУЮ, без saveTimeline
+    
+    // Отправляем события
+    setTimeout(() => {
+        Lampa.Listener.send('state:changed', { target: 'nsl_favorites', reason: 'update' });
+        Lampa.Listener.send('state:changed', { target: 'timeline', reason: 'update', data: {} });
+    }, 50);
+    
+    notify(`🗑️ "${title}" удалён полностью`);
+    logMove('delete', title, item.category, null);
+    refreshNewEpisodesBadge();
+    
+    // Отправляем на Gist с ЗАДЕРЖКОЙ, чтобы локальные изменения точно сохранились
+    setTimeout(() => {
+        if (c.sync_on_remove && c.gist_token && c.gist_id) {
+            forceSyncToGist(favorites, timeline);
+        }
+    }, 500);
+    
+    // Восстанавливаем авто-действия
+    setTimeout(() => {
+        c.auto_watching = savedAutoWatching;
+        c.auto_watched = savedAutoWatched;
+        saveCfg(c);
+    }, 1000);
+}
+
+    // Принудительная синхронизация — отправляет ТОЛЬКО локальные данные, без слияния
+function forceSyncToGist(favorites, timeline) {
+    const gist = getGistData();
+    if (!gist) return;
+    
+    const syncData = {
+        version: 5,
+        profile_id: PROFILE_ID,
+        updated: new Date().toISOString(),
+        bookmarks: getBookmarks(),
+        favorites: favorites || getFavorites(),
+        timeline: timeline || getTimeline()
+    };
+    
+    $.ajax({
+        url: `https://api.github.com/gists/${gist.id}`,
+        method: 'PATCH',
+        headers: {
+            'Authorization': `token ${gist.token}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
+        },
+        data: JSON.stringify({
+            description: 'NSL Sync Data',
+            public: false,
+            files: { 'nsl_sync.json': { content: JSON.stringify(syncData) } }
+        }),
+        timeout: 15000,
+        crossDomain: true,
+        success: () => {
+            Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
+            console.log('[NSL] Force sync to Gist OK');
+        },
+        error: () => {
+            console.log('[NSL] Force sync to Gist failed');
+        }
+    });
+}
         
     function checkAutoAbandoned() {
         const c = cfg();
