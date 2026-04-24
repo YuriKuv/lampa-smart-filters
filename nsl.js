@@ -85,6 +85,7 @@
             sync_on_remove: true,
             sync_auto_interval: true,
             sync_interval_minutes: 60,
+            sync_on_remove: true,
             auto_save: true,
             auto_sync: true,
             sync_interval: 30,
@@ -496,6 +497,12 @@ function addToFavorites(card, category) {
             setTimeout(() => {
                 saveFavorites(favorites);
                 refreshNewEpisodesBadge();
+                
+                // Отправляем изменения на Gist
+                const c = cfg();
+                if (c.sync_on_remove && c.gist_token && c.gist_id) {
+                    setTimeout(() => syncToGist(false), 200);
+                }
             }, 50);
             return true;
         }
@@ -522,9 +529,11 @@ function addToFavorites(card, category) {
         const baseId = getBaseTmdbId(item.tmdb_id);
         const title = item.data?.title || item.data?.name || 'Без названия';
         
+        // Удаляем из избранного
         const newFavorites = favorites.filter(f => getBaseTmdbId(f.tmdb_id) !== baseId);
         saveFavorites(newFavorites);
         
+        // Удаляем таймкоды
         for (const key in timeline) {
             if (getBaseTmdbId(timeline[key].tmdb_id) === baseId) {
                 delete timeline[key];
@@ -535,8 +544,14 @@ function addToFavorites(card, category) {
         notify(`🗑️ "${title}" удалён полностью`);
         logMove('delete', title, item.category, null);
         refreshNewEpisodesBadge();
+        
+        // Отправляем изменения на Gist
+        const c = cfg();
+        if (c.sync_on_remove && c.gist_token && c.gist_id) {
+            setTimeout(() => syncToGist(false), 200);
+        }
     }
-    
+        
     function checkAutoAbandoned() {
         const c = cfg();
         if (!c.auto_abandoned) return;
@@ -709,6 +724,12 @@ function addToFavorites(card, category) {
                     notify('🗑️ Избранное очищено'); 
                     logMove('clear_all', 'Все фильмы', null, null);
                     refreshNewEpisodesBadge();
+                    
+                    // Отправляем изменения на Gist
+                    const c = cfg();
+                    if (c.sync_on_remove && c.gist_token && c.gist_id) {
+                        setTimeout(() => syncToGist(false), 200);
+                    }
                 } 
             },
             onBack: () => Lampa.Controller.toggle('content')
