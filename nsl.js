@@ -1249,7 +1249,9 @@ function saveProgress(timeInSeconds, force) {
                         const movie = e.data.movie;
                         if (!movie || !movie.id) return;
                         
-                        const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').first();
+                        const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').filter(function() {
+                            return $(this).is(':visible') && $(this).find('.button--play, .full-start__button').length > 0;
+                        }).first();
                         if (!buttonsContainer.length) return;
                         if (buttonsContainer.find('.nsl-favorite-button').length) return;
                         
@@ -1905,7 +1907,9 @@ function extractYear(cardData) {
                     const movie = activity.movie;
                     if (!movie || !movie.id) return;
                     
-                    const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').first();
+                    const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').filter(function() {
+                        return $(this).is(':visible') && $(this).find('.button--play, .full-start__button').length > 0;
+                    }).first();
                     if (!buttonsContainer.length) return;
                     if (buttonsContainer.find('.nsl-favorite-button').length) return;
                     
