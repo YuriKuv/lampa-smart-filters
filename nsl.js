@@ -1887,9 +1887,14 @@ function extractYear(cardData) {
             }
         });
     }
+    
     function tryAddFavoriteButtonToCard() {
         try {
-            const movie = Lampa.Activity.active()?.movie;
+            // Проверяем что мы на странице фильма
+            const activity = Lampa.Activity.active();
+            if (!activity || activity.component !== 'full') return;
+            
+            const movie = activity.movie;
             if (!movie || !movie.id) return;
             
             const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').first();
@@ -3452,6 +3457,10 @@ function syncFromGist(showNotify) {
         
         setTimeout(() => {
             cleanupDuplicateCategories();
+            // Принудительно пробуем добавить кнопку на текущую карточку (если она открыта)
+            setTimeout(() => tryAddFavoriteButtonToCard(), 2000);
+            setTimeout(() => tryAddFavoriteButtonToCard(), 4000);
+            setTimeout(() => tryAddFavoriteButtonToCard(), 6000);
             syncTimelineWithCategories();
             checkNewEpisodes(false);
             checkAutoRemoveWatched();
