@@ -1236,24 +1236,36 @@ function saveProgress(timeInSeconds, force) {
     
     function addFavoriteButtonToCard() {
         function insertButton() {
+            console.log('[NSL] insertButton called');
             try {
                 const activity = Lampa.Activity.active();
-                if (!activity || activity.component !== 'full') return;
+                console.log('[NSL] activity:', activity?.component);
+                if (!activity || activity.component !== 'full') {
+                    console.log('[NSL] not full component, skipping');
+                    return;
+                }
                 
                 const movie = activity.movie;
-                if (!movie || !movie.id) return;
+                console.log('[NSL] movie:', movie?.title || movie?.name, movie?.id);
+                if (!movie || !movie.id) {
+                    console.log('[NSL] no movie, skipping');
+                    return;
+                }
                 
-                // Берём ПЕРВЫЙ видимый контейнер (без проверки на play)
                 const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').filter(function() {
                     return $(this).is(':visible');
                 }).first();
                 
-                if (!buttonsContainer.length) return;
+                console.log('[NSL] container found:', buttonsContainer.length, buttonsContainer.attr('class'));
+                if (!buttonsContainer.length) {
+                    console.log('[NSL] no container, skipping');
+                    return;
+                }
                 
-                // Удаляем старую кнопку если есть
                 buttonsContainer.find('.nsl-favorite-button').remove();
                 
                 const isFavorite = isInFavorites(movie, 'favorite');
+                console.log('[NSL] isFavorite:', isFavorite);
                 
                 const button = $(`
                     <div class="full-start__button selector nsl-favorite-button" tabindex="0" role="button">
@@ -1306,8 +1318,8 @@ function saveProgress(timeInSeconds, force) {
                     });
                 });
                 
-                // Вставляем в начало контейнера
                 buttonsContainer.prepend(button);
+                console.log('[NSL] button prepended successfully');
                 
                 if (isAndroid && Lampa.Controller) {
                     setTimeout(() => {
@@ -1316,19 +1328,17 @@ function saveProgress(timeInSeconds, force) {
                 }
                 
             } catch (err) {
-                console.error('[NSL] Error adding button:', err);
+                console.error('[NSL] insertButton error:', err.message, err.stack);
             }
         }
         
-        // Подписываемся на событие загрузки
         Lampa.Listener.follow('full', (e) => {
             if (e.type === 'complite') {
-                if (favoriteButtonTimer) clearTimeout(favoriteButtonTimer);
-                favoriteButtonTimer = setTimeout(insertButton, 500);
+                console.log('[NSL] full complite event');
+                setTimeout(insertButton, 500);
             }
         });
         
-        // Сохраняем функцию для ручного вызова
         window.nslInsertButton = insertButton;
     }
 
