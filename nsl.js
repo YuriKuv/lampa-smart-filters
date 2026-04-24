@@ -1305,29 +1305,194 @@ function saveProgress(timeInSeconds, force) {
         badgeEl.html(`⭐ Избранное${newEpisodesCount > 0 ? ` <span style="background:#f44336;color:#fff;border-radius:50%;padding:0 0.3em;font-size:0.8em;margin-left:0.5em;">🔔${newEpisodesCount}</span>` : ''}`);
     }
     
-    function showFavoritesMenu() {
-        const newEpisodesCount = getNewEpisodesCount();
-        const items = FAVORITE_CATEGORIES.map(cat => {
-            const count = getFavoritesByCategory(cat.id).length;
-            return { title: `${cat.icon} ${cat.name} (${count})`, onSelect: () => showFavoritesByCategory(cat.id, cat.name) };
-        });
-        
+function showFavoritesMenu() {
+    const newEpisodesCount = getNewEpisodesCount();
+    const items = FAVORITE_CATEGORIES.map(cat => {
+        const count = getFavoritesByCategory(cat.id).length;
+        return { title: `${cat.icon} ${cat.name} (${count})`, onSelect: () => showFavoritesByCategory(cat.id, cat.name) };
+    });
+    
+    items.push({ title: '──────────', separator: true });
+    items.push({ title: '🔍 Поиск по избранному', onSelect: () => searchFavorites() });
+    
+    if (newEpisodesCount > 0) {
+        items.push({ title: `🔔 Новые серии (${newEpisodesCount})`, onSelect: () => showNewEpisodes() });
         items.push({ title: '──────────', separator: true });
+    }
+    
+    items.push({ title: '🗑️ Очистить всё', onSelect: () => clearAllFavorites() });
+    items.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
+    
+    Lampa.Select.show({ 
+        title: '⭐ Избранное', 
+        items: items, 
+        onBack: () => Lampa.Controller.toggle('content')
+    });
+}
+
+    function showFavoritesByCategory(category, categoryName) {
+        const items = getFavoritesByCategory(category);
+        if (items.length === 0) { notify(`В "${categoryName}" ничего нет`); return; }
         
-        if (newEpisodesCount > 0) {
-            items.push({ title: `🔔 Новые серии (${newEpisodesCount})`, onSelect: () => showNewEpisodes() });
-            items.push({ title: '──────────', separator: true });
+        const grouped = {};
+        for (const type in MEDIA_TYPES) {
+            grouped[type] = items.filter(item => item.media_type === type);
         }
         
-        items.push({ title: '🗑️ Очистить всё', onSelect: () => clearAllFavorites() });
-        items.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
+        const menuItems = [];
+        
+        // Опции сортировки
+        menuItems.push({
+            title: '📋 Сортировка: по названию',
+            onSelect: () => showSortedFavoritesList(items, `${categoryName} (по названию)`, category, 'title')
+        });
+        menuItems.push({
+            title: '📋 Сортировка: по дате добавления',
+            onSelect: () => showSortedFavoritesList(items, `${categoryName} (по дате добавления)`, category, 'added')
+        });
+        menuItems.push({
+            title: '📋 Сортировка: по дате выхода',
+            onSelect: () => showSortedFavoritesList(items, `${categoryName} (по дате выхода)`, category, 'year')
+        });
+        
+        menuItems.push({ title: '──────────', separator: true });
+        
+        // Группировка по типам
+        for (const [type, typeItems] of Object.entries(grouped)) {
+            if (typeItems.length > 0) {
+                const typeInfo = MEDIA_TYPES[type];
+                menuItems.push({
+                    title: `${typeInfo.icon} ${typeInfo.name} (${typeItems.length})`,
+                    onSelect: () => showFavoritesList(typeItems, `${categoryName} - ${typeInfo.name}`, category)
+                });
+            }
+        }
+        
+        menuItems.push({ title: '──────────', separator: true });
+        menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesMenu() });
+        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
         
         Lampa.Select.show({ 
-            title: '⭐ Избранное', 
-            items: items, 
-            onBack: () => Lampa.Controller.toggle('content')
+            title: categoryName, 
+            items: menuItems, 
+            onBack: () => showFavoritesMenu()
         });
     }
+    
+    // Новая функция для сортированного списка
+    function showSortedFavoritesList(items, categoryName, category, sortMode) {
+        let sorted = [...items];
+        
+        if (sortMode === 'added') {
+            sorted.sort((a, b) => (b.added || 0) - (a.added || 0));
+        } else if (sortMode === 'year') {
+            sorted.sort((a, b) => {
+                const ya = a.data?.release_date || a.data?.first_air_date || '0000';
+                const yb = b.data?.release_date || b.data?.first_air_date || '0000';
+                return yb.localeCompare(ya);
+            });
+        } else {
+            sorted.sort((a, b) => {
+                const ta = (a.data?.title || a.data?.name || '').toLowerCase();
+                const tb = (b.data?.title || b.data?.name || '').toLowerCase();
+                return ta.localeCompare(tb);
+            });
+        }
+        
+        showFavoritesList(sorted, categoryName, category);
+    }
+
+    function searchFavorites() {
+        Lampa.Input.edit({
+            title: 'Поиск по избранному',
+            value: '',
+            free: true
+        }, (query) => {
+            if (!query || !query.trim()) {
+                notify('Введите название для поиска');
+                return;
+            }
+            
+            const q = query.toLowerCase().trim();
+            const allItems = getFavorites().filter(item => {
+                const title = (item.data?.title || item.data?.name || '').toLowerCase();
+                return title.includes(q);
+            });
+            
+            if (allItems.length === 0) {
+                notify('Ничего не найдено');
+                return;
+            }
+            
+            const menuItems = allItems.map(item => {
+                const cardData = item.data || {};
+                const itemTitle = cardData.title || cardData.name || 'Без названия';
+                const year = extractYear(cardData);
+                const posterUrl = getPosterUrl(cardData);
+                
+                let sub = '';
+                if (item.media_type === 'tv' || cardData.original_name) {
+                    const checkData = getSeriesCheck()[getBaseTmdbId(item.tmdb_id)];
+                    sub = checkData?.seasons_count ? `${checkData.seasons_count} сез.` : '';
+                }
+                
+                return {
+                    title: `<div style="display:flex;align-items:center;gap:0.6em;min-height:3.8em;padding:0.2em 0;">
+                        ${posterUrl ? `<img src="${posterUrl}" style="width:2.8em;height:4em;object-fit:cover;border-radius:0.3em;flex-shrink:0;">` : '<div style="width:2.8em;height:4em;background:#333;border-radius:0.3em;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.5em;">🎬</div>'}
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-size:1.1em;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${itemTitle}${year ? ` (${year})` : ''}</div>
+                            <div style="font-size:0.85em;opacity:0.7;">${FAVORITE_CATEGORIES.find(c => c.id === item.category)?.name || ''}${sub ? ' · ' + sub : ''}</div>
+                        </div>
+                    </div>`,
+                    item: item,
+                    onSelect: () => {
+                        const method = (item.media_type === 'tv' || cardData.original_name) ? 'tv' : 'movie';
+                        const cardId = cardData.id || item.card_id || getBaseTmdbId(item.tmdb_id);
+                        const source = cardData.source || 'tmdb';
+                        
+                        Lampa.Activity.push({
+                            id: cardId,
+                            method: method,
+                            card: {
+                                id: cardId,
+                                source: source,
+                                title: cardData.title,
+                                name: cardData.name,
+                                original_name: cardData.original_name,
+                                original_title: cardData.original_title,
+                                poster_path: cardData.poster_path,
+                                backdrop_path: cardData.backdrop_path,
+                                overview: cardData.overview,
+                                vote_average: cardData.vote_average,
+                                first_air_date: cardData.first_air_date,
+                                release_date: cardData.release_date,
+                                img: cardData.img
+                            },
+                            url: '',
+                            component: 'full',
+                            source: source,
+                            page: 1
+                        });
+                    }
+                };
+            });
+            
+            menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
+            
+            Lampa.Select.show({
+                title: `🔍 Найдено: ${allItems.length}`,
+                items: menuItems,
+                onBack: () => Lampa.Controller.toggle('content')
+            });
+        }, () => {});
+    }
+
+// Вспомогательная функция
+function extractYear(cardData) {
+    if (cardData.release_date) return cardData.release_date.slice(0,4);
+    if (cardData.first_air_date) return cardData.first_air_date.slice(0,4);
+    return '';
+}
     
 function showNewEpisodes() {
     const newEpisodes = getNewEpisodesList();
@@ -1430,36 +1595,6 @@ function showNewEpisodes() {
         return null;
     }
     
-    function showFavoritesByCategory(category, categoryName) {
-        const items = getFavoritesByCategory(category);
-        if (items.length === 0) { notify(`В "${categoryName}" ничего нет`); return; }
-        
-        const grouped = {};
-        for (const type in MEDIA_TYPES) {
-            grouped[type] = items.filter(item => item.media_type === type);
-        }
-        
-        const menuItems = [];
-        for (const [type, typeItems] of Object.entries(grouped)) {
-            if (typeItems.length > 0) {
-                const typeInfo = MEDIA_TYPES[type];
-                menuItems.push({
-                    title: `${typeInfo.icon} ${typeInfo.name} (${typeItems.length})`,
-                    onSelect: () => showFavoritesList(typeItems, `${categoryName} - ${typeInfo.name}`, category)
-                });
-            }
-        }
-        
-        menuItems.push({ title: '──────────', separator: true });
-        menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesMenu() });
-        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
-        
-        Lampa.Select.show({ 
-            title: categoryName, 
-            items: menuItems, 
-            onBack: () => showFavoritesMenu()
-        });
-    }
     
 function showFavoritesList(items, title, currentCategory) {
     const timeline = getTimeline();
@@ -2431,6 +2566,62 @@ function syncFromGist(showNotify) {
         syncTimer = setInterval(() => checkAutoSync(), 5 * 60 * 1000);
     }
 
+    function exportToFile() {
+        const data = getAllSyncData();
+        const jsonStr = JSON.stringify(data, null, 2);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `nsl_backup_${new Date().toISOString().slice(0,10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        notify('📤 Данные сохранены в файл');
+    }
+    
+    function importFromFile() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.style.display = 'none';
+        document.body.appendChild(input);
+        
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) {
+                document.body.removeChild(input);
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    
+                    if (data.timeline) saveTimeline(data.timeline);
+                    if (data.favorites) saveFavorites(data.favorites);
+                    if (data.bookmarks) saveBookmarks(data.bookmarks);
+                    
+                    cleanupDuplicateCategories();
+                    syncTimelineWithCategories();
+                    
+                    notify('📥 Данные загружены из файла');
+                } catch (err) {
+                    console.error('[NSL] Import error:', err);
+                    notify('❌ Ошибка чтения файла');
+                }
+                
+                document.body.removeChild(input);
+            };
+            
+            reader.readAsText(file);
+        };
+        
+        input.click();
+    }
+    
     // ======================
     // НАСТРОЙКИ
     // ======================
@@ -2804,6 +2995,9 @@ function syncFromGist(showNotify) {
                 { title: '📤 Экспорт на Gist', action: 'upload' },
                 { title: '📥 Импорт с Gist', action: 'download' },
                 { title: '──────────', separator: true },
+                { title: '💾 Экспорт в файл', action: 'export_file' },
+                { title: '📂 Импорт из файла', action: 'import_file' },
+                { title: '──────────', separator: true },
                 { title: '◀ Назад', action: 'back' }
             ],
             onSelect: (item) => {
@@ -2821,28 +3015,18 @@ function syncFromGist(showNotify) {
                     notify('📤 Отправка...'); syncToGist(true); setTimeout(() => showGistSetup(), 1500);
                 } else if (item.action === 'download') {
                     notify('📥 Загрузка...'); syncFromGist(true); setTimeout(() => showGistSetup(), 1500);
+                } else if (item.action === 'export_file') {
+                    exportToFile();
+                    setTimeout(() => showGistSetup(), 500);
+                } else if (item.action === 'import_file') {
+                    importFromFile();
+                    setTimeout(() => showGistSetup(), 500);
                 } else if (item.action === 'back') {
                     showMainMenu();
                 }
             },
             onBack: () => showMainMenu()
         });
-    }
-
-    function addSettingsButton() {
-        setTimeout(() => {
-            let menuList = $('.menu__list').last();
-            if (!menuList.length) menuList = $('.menu__list').eq(1);
-            if (menuList.length && !$('.nsl-settings-item').length) {
-                const el = $(`
-                    <li class="menu__item selector nsl-settings-item">
-                        <div class="menu__text">⚙️ NSL Sync</div>
-                    </li>
-                `);
-                el.on('hover:enter', (e) => { e.stopPropagation(); showMainMenu(); });
-                menuList.append(el);
-            }
-        }, 2000);
     }
 
     // ======================
