@@ -3047,16 +3047,16 @@ function syncFromGist(showNotify) {
 
     function init() {
         if (!cfg().enabled) return;
-
+    
         console.log('[NSL] Init v25 for profile:', PROFILE_ID);
-
+    
         setTimeout(() => {
             addBookmarkButton();
             addFavoritesToMenu();
             addSettingsButton();
             renderBookmarks();
         }, 1000);
-
+    
         addFavoriteButtonToCard();
         addStatusToCard();
         initPlayerHandler();
@@ -3095,14 +3095,14 @@ function syncFromGist(showNotify) {
             cfg, getFavorites, getBookmarks, getTimeline,
             syncToGist, syncFromGist, addToFavorites, toggleFavorite,
             getMoveLog, getMovieStatus, refreshCardStatus,
-            cleanupDuplicateCategories, enableTimelineOnCards, refreshRatingsSettings,
+            cleanupDuplicateCategories, enableTimelineOnCards,
             checkNewEpisodes, getNewEpisodesCount, getNewEpisodesList
         };
         
         console.log('[NSL] Init complete');
     }
-
+    
     if (window.appready) init();
     else Lampa.Listener.follow('app', e => { if (e.type === 'ready') init(); });
-
-})();
+    
+    })();
