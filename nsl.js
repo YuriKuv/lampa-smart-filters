@@ -1536,13 +1536,15 @@ function saveProgress(timeInSeconds, force) {
                         });
                         
                         // Принудительно добавляем кнопку после открытия из избранного
-                        const checkInterval = setInterval(() => {
-                            const activity = Lampa.Activity.active();
-                            if (activity && activity.component === 'full' && activity.movie && activity.movie.id) {
-                                clearInterval(checkInterval);
-                                window.nslInsertButton();
-                            }
-                        }, 200);
+                        setTimeout(() => {
+                            const checkInterval = setInterval(() => {
+                                const act = Lampa.Activity.active();
+                                if (act && act.component === 'full' && act.movie && (act.movie.title || act.movie.name)) {
+                                    clearInterval(checkInterval);
+                                    setTimeout(() => window.nslInsertButton(), 300);
+                                }
+                            }, 300);
+                        }, 500);
                     }
                 };
             });
@@ -1644,13 +1646,15 @@ function extractYear(cardData) {
                     markNewEpisodesSeen(item.tmdb_id);
                     
                     // Принудительно добавляем кнопку после открытия из избранного
-                    const checkInterval = setInterval(() => {
-                        const activity = Lampa.Activity.active();
-                        if (activity && activity.component === 'full' && activity.movie && activity.movie.id) {
-                            clearInterval(checkInterval);
-                            window.nslInsertButton();
-                        }
-                    }, 200);
+                    setTimeout(() => {
+                        const checkInterval = setInterval(() => {
+                            const act = Lampa.Activity.active();
+                            if (act && act.component === 'full' && act.movie && (act.movie.title || act.movie.name)) {
+                                clearInterval(checkInterval);
+                                setTimeout(() => window.nslInsertButton(), 300);
+                            }
+                        }, 300);
+                    }, 500);
                 }
             };
         });
@@ -1778,13 +1782,15 @@ function extractYear(cardData) {
                     });
                     
                     // Принудительно добавляем кнопку после открытия из избранного
-                    const checkInterval = setInterval(() => {
-                        const activity = Lampa.Activity.active();
-                        if (activity && activity.component === 'full' && activity.movie && activity.movie.id) {
-                            clearInterval(checkInterval);
-                            window.nslInsertButton();
-                        }
-                    }, 200);
+                    setTimeout(() => {
+                        const checkInterval = setInterval(() => {
+                            const act = Lampa.Activity.active();
+                            if (act && act.component === 'full' && act.movie && (act.movie.title || act.movie.name)) {
+                                clearInterval(checkInterval);
+                                setTimeout(() => window.nslInsertButton(), 300);
+                            }
+                        }, 300);
+                    }, 500);
                 },
                 onLongPress: null
             };
@@ -2884,13 +2890,15 @@ function syncFromGist(showNotify) {
                         });
                         
                         // Принудительно добавляем кнопку после открытия из избранного
-                        const checkInterval = setInterval(() => {
-                            const activity = Lampa.Activity.active();
-                            if (activity && activity.component === 'full' && activity.movie && activity.movie.id) {
-                                clearInterval(checkInterval);
-                                window.nslInsertButton();
-                            }
-                        }, 200);
+                        setTimeout(() => {
+                            const checkInterval = setInterval(() => {
+                                const act = Lampa.Activity.active();
+                                if (act && act.component === 'full' && act.movie && (act.movie.title || act.movie.name)) {
+                                    clearInterval(checkInterval);
+                                    setTimeout(() => window.nslInsertButton(), 300);
+                                }
+                            }, 300);
+                        }, 500);
                     }
                 });
             });
