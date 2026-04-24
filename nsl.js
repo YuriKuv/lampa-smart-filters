@@ -96,6 +96,8 @@
             watching_max_progress: 95,
             auto_watched: true,
             watched_min_progress: 95,
+            auto_remove_watched: false,
+            auto_remove_watched_days: 90, 
             show_move_notifications: true,
             cleanup_older_days: 0,
             cleanup_completed: false,
@@ -558,41 +560,93 @@ function deleteCompletely(item) {
     }
 }
         
-function checkAutoAbandoned() {
-    const c = cfg();
-    if (!c.auto_abandoned) return;
-    
-    const now = Date.now();
-    const abandonedAfter = c.abandoned_days * 24 * 60 * 60 * 1000;
-    const favorites = getFavorites();
-    let changed = false;
-    
-    for (const item of favorites.filter(f => f.category === 'watching')) {
-        const lastUpdate = item.updated || item.added;
-        if (lastUpdate > 0 && (now - lastUpdate) > abandonedAfter) {
-            const oldCategory = item.category;
+    function checkAutoAbandoned() {
+        const c = cfg();
+        if (!c.auto_abandoned) return;
+        
+        const now = Date.now();
+        const abandonedAfter = c.abandoned_days * 24 * 60 * 60 * 1000;
+        const favorites = getFavorites();
+        let changed = false;
+        
+        for (const item of favorites.filter(f => f.category === 'watching')) {
+            const lastUpdate = item.updated || item.added;
+            if (lastUpdate > 0 && (now - lastUpdate) > abandonedAfter) {
+                const oldCategory = item.category;
+                const title = item.data?.title || item.data?.name || 'Без названия';
+                
+                item.category = 'abandoned';
+                item.updated = now;
+                
+                applyCategoryRules(item.tmdb_id, 'abandoned', favorites);
+                logMove('auto_abandoned', title, oldCategory, 'abandoned');
+                
+                changed = true;
+            }
+        }
+        
+        if (changed) {
+            saveFavorites(favorites);
+            
+            // НОВОЕ: Синхронизируем с Gist
+            const c = cfg();
+            if (c.gist_token && c.gist_id) {
+                setTimeout(() => syncToGist(false), 200);
+            }
+        }
+    }
+
+    function checkAutoRemoveWatched() {
+        const c = cfg();
+        if (!c.auto_remove_watched) return;
+        
+        const now = Date.now();
+        const removeAfter = c.auto_remove_watched_days * 24 * 60 * 60 * 1000;
+        const timeline = getTimeline();
+        let favorites = getFavorites();
+        let changed = false;
+        
+        // Находим просмотренные, которые старше N дней
+        const toRemove = favorites.filter(f => {
+            if (f.category !== 'watched') return false;
+            
+            const lastUpdate = f.updated || f.added;
+            return lastUpdate > 0 && (now - lastUpdate) > removeAfter;
+        });
+        
+        if (toRemove.length === 0) return;
+        
+        toRemove.forEach(item => {
+            const baseId = getBaseTmdbId(item.tmdb_id);
             const title = item.data?.title || item.data?.name || 'Без названия';
             
-            item.category = 'abandoned';
-            item.updated = now;
+            // Удаляем из избранного
+            favorites = favorites.filter(f => getBaseTmdbId(f.tmdb_id) !== baseId || f.category !== 'watched');
             
-            applyCategoryRules(item.tmdb_id, 'abandoned', favorites);
-            logMove('auto_abandoned', title, oldCategory, 'abandoned');
+            // Удаляем таймкоды
+            for (const key in timeline) {
+                if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
+                    delete timeline[key];
+                }
+            }
             
+            logMove('auto_remove_watched', title, 'watched', null);
             changed = true;
-        }
-    }
-    
-    if (changed) {
-        saveFavorites(favorites);
+        });
         
-        // НОВОЕ: Синхронизируем с Gist
-        const c = cfg();
-        if (c.gist_token && c.gist_id) {
-            setTimeout(() => syncToGist(false), 200);
+        if (changed) {
+            saveFavorites(favorites);
+            saveTimeline(timeline);
+            refreshNewEpisodesBadge();
+            
+            notify(`🧹 Авто-удалено просмотренных: ${toRemove.length}`);
+            
+            // Синхронизируем с Gist
+            if (c.gist_token && c.gist_id) {
+                setTimeout(() => syncToGist(false), 200);
+            }
         }
     }
-}
     
 let returnedToWatchingMap = {};
 
@@ -2972,6 +3026,8 @@ function syncFromGist(showNotify) {
                 text = `🗑️ Всё избранное очищено`;
             } else if (entry.action === 'cleanup') {
                 text = `🧹 Системная очистка дубликатов`;
+            } else if (entry.action === 'auto_remove_watched') {
+                text = `🧹 "${entry.title}" авто-удалён из Просмотрено`;
             } else {
                 text = `${entry.action}: ${entry.title}`;
             }
@@ -3128,8 +3184,13 @@ function syncFromGist(showNotify) {
                 { title: `✅ Автосинхронизация: ${c.auto_sync ? 'Вкл' : 'Выкл'}`, action: 'toggle_auto_sync' },
                 { title: `⏱️ Интервал синхр.: ${c.sync_interval} сек`, action: 'set_interval' },
                 { title: `📊 Стратегия: ${strategyName}`, action: 'toggle_strategy' },
-                { title: `🗑️ Удалять старше: ${c.cleanup_older_days || 'никогда'} дней`, action: 'set_cleanup_days' },
-                { title: `✅ Удалять завершённые: ${c.cleanup_completed ? 'Вкл' : 'Выкл'}`, action: 'toggle_cleanup_completed' },
+                { title: '──────────', separator: true },
+                { title: `🗑️ Удалять старые таймкоды старше: ${c.cleanup_older_days || 'никогда'} дней`, action: 'set_cleanup_days' },
+                { title: `✅ Удалять завершённые таймкоды: ${c.cleanup_completed ? 'Вкл' : 'Выкл'}`, action: 'toggle_cleanup_completed' },
+                { title: '──────────', separator: true },
+                { title: `🗑️ Авто-удаление просмотренных: ${c.auto_remove_watched ? 'Вкл' : 'Выкл'}`, action: 'toggle_auto_remove_watched' },
+                { title: `📅 Удалять просмотренное через: ${c.auto_remove_watched_days} дн.`, action: 'set_auto_remove_watched_days' },
+                { title: '──────────', separator: true },
                 { title: `🗑️ Очистить все таймкоды`, action: 'clear_timeline' },
                 { title: `🧹 Очистить старые сейчас`, action: 'cleanup_now' },
                 { title: '◀ Назад', action: 'back' }
@@ -3160,6 +3221,19 @@ function syncFromGist(showNotify) {
                     });
                 } else if (item.action === 'toggle_cleanup_completed') {
                     c.cleanup_completed = !c.cleanup_completed; saveCfg(c); showTimelineSettings();
+                } else if (item.action === 'toggle_auto_remove_watched') {
+                    c.auto_remove_watched = !c.auto_remove_watched;
+                    saveCfg(c);
+                    notify('Авто-удаление просмотренных ' + (c.auto_remove_watched ? 'включено' : 'выключено'));
+                    showTimelineSettings();
+                } else if (item.action === 'set_auto_remove_watched_days') {
+                    Lampa.Input.edit({ title: 'Удалять через (дней)', value: String(c.auto_remove_watched_days), free: true, number: true }, (val) => {
+                        if (val !== null && !isNaN(val) && val > 0) {
+                            c.auto_remove_watched_days = parseInt(val);
+                            saveCfg(c);
+                        }
+                        showTimelineSettings();
+                    });
                 } else if (item.action === 'clear_timeline') {
                     clearAllTimeline(); showTimelineSettings();
                 } else if (item.action === 'cleanup_now') {
@@ -3282,6 +3356,7 @@ function syncFromGist(showNotify) {
             cleanupDuplicateCategories();
             syncTimelineWithCategories();
             checkNewEpisodes(false);
+            checkAutoRemoveWatched();
         }, 3000);
         
         Lampa.Listener.follow('state:changed', (e) => {
