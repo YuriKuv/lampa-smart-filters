@@ -1420,18 +1420,20 @@ function showFavoritesList(items, title, currentCategory) {
         const yearStr = year ? ` (${year})` : '';
         const posterUrl = getPosterUrl(cardData);
         
-        // Информация о сериях (для ТВ-шоу) — сначала из cardData, потом дополнится через loadSeriesDataQuick
+        // Информация о сериях (для ТВ-шоу)
         let seriesInfo = '';
         if (item.media_type === 'tv' || cardData.original_name) {
             const baseId = getBaseTmdbId(item.tmdb_id);
             const checkData = getSeriesCheck()[baseId];
             
-            if (checkData && (checkData.seasons_count > 0 || checkData.aired_episodes > 0)) {
-                // Есть данные из seriesCheck
-                seriesInfo = formatSeriesInfo(checkData, cardData);
+            if (checkData && checkData.seasons_count > 0) {
+                seriesInfo = `${checkData.seasons_count} сез.`;
+                if (checkData.total_episodes > 0) {
+                    seriesInfo += ` · ${checkData.total_episodes} сер.`;
+                }
             } else if (cardData.number_of_seasons) {
-                // Берём из данных карточки
                 seriesInfo = `${cardData.number_of_seasons} сез.`;
+                // Не показываем total_episodes из cardData — там нет данных о вышедших
             }
         }
         
@@ -1466,7 +1468,7 @@ function showFavoritesList(items, title, currentCategory) {
                 ${posterUrl ? `<img src="${posterUrl}" style="width:2.8em;height:4em;object-fit:cover;border-radius:0.3em;flex-shrink:0;" onerror="this.style.display='none'">` : '<div style="width:2.8em;height:4em;background:#333;border-radius:0.3em;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.5em;">🎬</div>'}
                 <div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:0.2em;">
                     <div style="font-size:1.1em;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word;">${itemTitle}${yearStr}</div>
-                    ${sub ? `<div style="font-size:0.85em;opacity:0.8;line-height:1.2;">${sub}</div>` : ''}
+                    ${sub ? `<div class="nsl-subtitle-line" style="font-size:0.85em;opacity:0.8;line-height:1.2;">${sub}</div>` : '<div class="nsl-subtitle-line" style="font-size:0.85em;opacity:0.8;line-height:1.2;"></div>'}
                 </div>
             </div>`,
             sub: '',
@@ -1537,24 +1539,36 @@ function showFavoritesList(items, title, currentCategory) {
                         const el = $(itemsElements[index]);
                         if (!el.length || !checkData) return;
                         
-                        const seriesInfo = formatSeriesInfo(checkData, cardData);
-                        if (!seriesInfo) return;
-                        
-                        // Ищем уже существующий subtitle
-                        const subtitleDiv = el.find('.selectbox-item__subtitle');
-                        if (subtitleDiv.length) {
-                            // Обновляем ТОЛЬКО если есть aired_episodes (более точные данные)
-                            if (checkData.aired_episodes > 0 || checkData.seasons_count > (cardData.number_of_seasons || 0)) {
-                                subtitleDiv.text(seriesInfo);
-                            }
-                        } else {
-                            // Создаём новый только если его нет
-                            const titleDiv = el.find('.selectbox-item__title');
-                            if (titleDiv.length) {
-                                const infoDiv = $(`<div class="selectbox-item__subtitle nsl-series-info" style="font-size:0.85em;opacity:0.8;line-height:1.2;">${seriesInfo}</div>`);
-                                titleDiv.after(infoDiv);
+                        // Формируем обновлённую информацию
+                        let newSeriesInfo = '';
+                        if (checkData.seasons_count > 0) {
+                            newSeriesInfo = `${checkData.seasons_count} сез.`;
+                            if (checkData.total_episodes > 0) {
+                                newSeriesInfo += ` · ${checkData.total_episodes} сер.`;
                             }
                         }
+                        
+                        if (!newSeriesInfo) return;
+                        
+                        // Обновляем ТОЛЬКО нижнюю строку
+                        const subtitleLine = el.find('.nsl-subtitle-line');
+                        if (!subtitleLine.length) return;
+                        
+                        // Сохраняем часть с процентом если есть
+                        const currentText = subtitleLine.text().trim();
+                        const percentMatch = currentText.match(/(\d+%)/);
+                        
+                        let finalText = newSeriesInfo;
+                        if (percentMatch) {
+                            finalText += ' · ' + percentMatch[1];
+                        }
+                        
+                        // Для просмотренных
+                        if (item.category === 'watched') {
+                            finalText = '✓ Просмотрено · ' + newSeriesInfo;
+                        }
+                        
+                        subtitleLine.text(finalText);
                     });
                 }
             });
