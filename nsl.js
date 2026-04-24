@@ -1537,6 +1537,7 @@ function saveProgress(timeInSeconds, force) {
                         
                         // Принудительно добавляем кнопку после открытия из избранного
                         setTimeout(() => window.nslInsertButton(), 1000);
+                        setTimeout(() => window.nslInsertButton(), 2500);
                     }
                 };
             });
@@ -1639,6 +1640,7 @@ function extractYear(cardData) {
                     
                     // Принудительно добавляем кнопку после открытия из избранного
                     setTimeout(() => window.nslInsertButton(), 1000);
+                    setTimeout(() => window.nslInsertButton(), 2500);
                 }
             };
         });
@@ -1767,6 +1769,7 @@ function extractYear(cardData) {
                     
                     // Принудительно добавляем кнопку после открытия из избранного
                     setTimeout(() => window.nslInsertButton(), 1000);
+                    setTimeout(() => window.nslInsertButton(), 2500);
                 },
                 onLongPress: null
             };
@@ -2867,6 +2870,7 @@ function syncFromGist(showNotify) {
                         
                         // Принудительно добавляем кнопку после открытия из избранного
                         setTimeout(() => window.nslInsertButton(), 1000);
+                        setTimeout(() => window.nslInsertButton(), 2500);
                     }
                 });
             });
