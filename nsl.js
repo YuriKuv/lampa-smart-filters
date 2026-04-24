@@ -1536,8 +1536,13 @@ function saveProgress(timeInSeconds, force) {
                         });
                         
                         // Принудительно добавляем кнопку после открытия из избранного
-                        setTimeout(() => window.nslInsertButton(), 1000);
-                        setTimeout(() => window.nslInsertButton(), 2500);
+                        const checkInterval = setInterval(() => {
+                            const activity = Lampa.Activity.active();
+                            if (activity && activity.component === 'full' && activity.movie && activity.movie.id) {
+                                clearInterval(checkInterval);
+                                window.nslInsertButton();
+                            }
+                        }, 200);
                     }
                 };
             });
@@ -1639,8 +1644,13 @@ function extractYear(cardData) {
                     markNewEpisodesSeen(item.tmdb_id);
                     
                     // Принудительно добавляем кнопку после открытия из избранного
-                    setTimeout(() => window.nslInsertButton(), 1000);
-                    setTimeout(() => window.nslInsertButton(), 2500);
+                    const checkInterval = setInterval(() => {
+                        const activity = Lampa.Activity.active();
+                        if (activity && activity.component === 'full' && activity.movie && activity.movie.id) {
+                            clearInterval(checkInterval);
+                            window.nslInsertButton();
+                        }
+                    }, 200);
                 }
             };
         });
@@ -1768,8 +1778,13 @@ function extractYear(cardData) {
                     });
                     
                     // Принудительно добавляем кнопку после открытия из избранного
-                    setTimeout(() => window.nslInsertButton(), 1000);
-                    setTimeout(() => window.nslInsertButton(), 2500);
+                    const checkInterval = setInterval(() => {
+                        const activity = Lampa.Activity.active();
+                        if (activity && activity.component === 'full' && activity.movie && activity.movie.id) {
+                            clearInterval(checkInterval);
+                            window.nslInsertButton();
+                        }
+                    }, 200);
                 },
                 onLongPress: null
             };
@@ -2869,8 +2884,13 @@ function syncFromGist(showNotify) {
                         });
                         
                         // Принудительно добавляем кнопку после открытия из избранного
-                        setTimeout(() => window.nslInsertButton(), 1000);
-                        setTimeout(() => window.nslInsertButton(), 2500);
+                        const checkInterval = setInterval(() => {
+                            const activity = Lampa.Activity.active();
+                            if (activity && activity.component === 'full' && activity.movie && activity.movie.id) {
+                                clearInterval(checkInterval);
+                                window.nslInsertButton();
+                            }
+                        }, 200);
                     }
                 });
             });
