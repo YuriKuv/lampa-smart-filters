@@ -409,34 +409,38 @@
         return changed;
     }
 
-    function addToFavorites(card, category) {
-        if (!card || !card.id) return false;
-        
-        const tmdbId = extractTmdbId(card);
-        const mediaType = getMediaType(card);
-        const favorites = getFavorites();
-        const baseId = getBaseTmdbId(tmdbId);
-        
-        const inCollection = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'collection');
-        
-        applyCategoryRules(tmdbId, category, favorites);
-        
-        const existingIndex = favorites.findIndex(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === category);
-        
-        const cardData = cleanCardData(card);
-        
+function addToFavorites(card, category) {
+    if (!card || !card.id) return false;
+    
+    const tmdbId = extractTmdbId(card);
+    const mediaType = getMediaType(card);
+    const favorites = getFavorites();
+    const baseId = getBaseTmdbId(tmdbId);
+    
+    const inCollection = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'collection');
+    
+    applyCategoryRules(tmdbId, category, favorites);
+    
+    const existingIndex = favorites.findIndex(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === category);
+    
+    const cardData = cleanCardData(card);
+    
+    // Если сериал — дополняем данные через TMDB API
+    const needSeriesData = (mediaType === 'tv' || cardData.original_name) && !cardData.number_of_seasons;
+    
+    const saveItem = (finalCardData) => {
         const favoriteItem = {
             id: Date.now(),
             card_id: card.id,
             tmdb_id: tmdbId,
             media_type: mediaType,
             category: category,
-            data: cardData,
+            data: finalCardData,
             added: Date.now(),
             updated: Date.now()
         };
         
-        const title = card.title || card.name || 'Без названия';
+        const title = finalCardData.title || finalCardData.name || 'Без названия';
         
         if (existingIndex >= 0) {
             favorites[existingIndex] = favoriteItem;
@@ -451,14 +455,35 @@
             }
         }
         
-        setTimeout(() => {
-            saveFavorites(favorites);
-            checkAutoAbandoned();
-            refreshNewEpisodesBadge();
-        }, 50);
+        saveFavorites(favorites);
+        checkAutoAbandoned();
+        refreshNewEpisodesBadge();
+    };
+    
+    if (needSeriesData && typeof Lampa.TMDB !== 'undefined' && Lampa.TMDB.api) {
+        // Запрашиваем данные о сериале
+        const url = Lampa.TMDB.api('tv/' + baseId + '?api_key=' + Lampa.TMDB.key());
         
-        return true;
+        $.ajax({
+            url: url,
+            method: 'GET',
+            timeout: 5000,
+            success: (data) => {
+                cardData.number_of_seasons = data.number_of_seasons || 0;
+                cardData.number_of_episodes = data.number_of_episodes || 0;
+                cardData.last_air_date = data.last_air_date || '';
+                saveItem(cardData);
+            },
+            error: () => {
+                saveItem(cardData);
+            }
+        });
+    } else {
+        saveItem(cardData);
     }
+    
+    return true;
+}
     
     function removeFromFavorites(card, category) {
         const tmdbId = extractTmdbId(card);
@@ -1509,18 +1534,21 @@ function showFavoritesList(items, title, currentCategory) {
                 
                 if (item.media_type === 'tv' || cardData.original_name) {
                     loadSeriesDataQuick(item.tmdb_id, (checkData) => {
-                        // После загрузки — обновляем элемент
                         const el = $(itemsElements[index]);
                         if (!el.length || !checkData) return;
                         
                         const seriesInfo = formatSeriesInfo(checkData, cardData);
                         if (!seriesInfo) return;
                         
-                        // Ищем или создаём строку с информацией
+                        // Ищем уже существующий subtitle
                         const subtitleDiv = el.find('.selectbox-item__subtitle');
                         if (subtitleDiv.length) {
-                            subtitleDiv.text(seriesInfo);
+                            // Обновляем ТОЛЬКО если есть aired_episodes (более точные данные)
+                            if (checkData.aired_episodes > 0 || checkData.seasons_count > (cardData.number_of_seasons || 0)) {
+                                subtitleDiv.text(seriesInfo);
+                            }
                         } else {
+                            // Создаём новый только если его нет
                             const titleDiv = el.find('.selectbox-item__title');
                             if (titleDiv.length) {
                                 const infoDiv = $(`<div class="selectbox-item__subtitle nsl-series-info" style="font-size:0.85em;opacity:0.8;line-height:1.2;">${seriesInfo}</div>`);
@@ -1921,7 +1949,7 @@ function loadSeriesDataQuick(tmdbId, callback) {
 
 // Вспомогательная: форматирование информации о сериях
 function formatSeriesInfo(checkData, cardData) {
-    if (!checkData) {
+    if (!checkData || checkData.error) {
         // Если данных нет — берём из карточки
         if (cardData?.number_of_seasons) {
             return `${cardData.number_of_seasons} сез.`;
@@ -1936,11 +1964,13 @@ function formatSeriesInfo(checkData, cardData) {
         parts.push(`${checkData.seasons_count} сез.`);
     }
     
-    // Количество серий в последнем сезоне
-    if (checkData.aired_episodes > 0 && checkData.total_episodes > 0) {
-        parts.push(`${checkData.aired_episodes} из ${checkData.total_episodes} сер.`);
-    } else if (checkData.aired_episodes > 0) {
-        parts.push(`${checkData.aired_episodes} сер.`);
+    // Количество серий в последнем сезоне — показываем даже если 0 вышедших
+    if (checkData.total_episodes > 0) {
+        if (checkData.aired_episodes > 0) {
+            parts.push(`${checkData.aired_episodes} из ${checkData.total_episodes} сер.`);
+        } else {
+            parts.push(`${checkData.total_episodes} сер.`);
+        }
     }
     
     return parts.join(' · ');
