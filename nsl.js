@@ -72,6 +72,7 @@
     let ratingsObserver = null;
     let favoriteButtonTimer = null; // ДЛЯ ДЕБАУНСА
     let seriesCheckTimer = null; // ДЛЯ ПРОВЕРКИ НОВЫХ СЕРИЙ
+    let gistSyncing = false; // Защита от повторной синхронизации
 
     function cfg() {
         return Lampa.Storage.get(CFG, {
@@ -458,6 +459,12 @@ function addToFavorites(card, category) {
         saveFavorites(favorites);
         checkAutoAbandoned();
         refreshNewEpisodesBadge();
+        
+        // Синхронизируем с Gist
+        const c = cfg();
+        if (c.sync_on_add && c.gist_token && c.gist_id) {
+            setTimeout(() => syncToGist(false), 200);
+        }
     };
     
     if (needSeriesData && typeof Lampa.TMDB !== 'undefined' && Lampa.TMDB.api) {
@@ -1734,42 +1741,47 @@ function showFavoritesList(items, title, currentCategory) {
     });
 }
     
-    function showMoveMenu(item) {
-        const categories = FAVORITE_CATEGORIES.filter(c => c.id !== item.category);
-        
-        const items = categories.map(cat => ({
-            title: `${cat.icon} ${cat.name}`,
-            category: cat.id,
-            onSelect: () => {
-                const favorites = getFavorites();
-                const baseId = getBaseTmdbId(item.tmdb_id);
-                const targetItem = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === item.category);
+function showMoveMenu(item) {
+    const categories = FAVORITE_CATEGORIES.filter(c => c.id !== item.category);
+    
+    const items = categories.map(cat => ({
+        title: `${cat.icon} ${cat.name}`,
+        category: cat.id,
+        onSelect: () => {
+            const favorites = getFavorites();
+            const baseId = getBaseTmdbId(item.tmdb_id);
+            const targetItem = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === item.category);
+            
+            if (targetItem) {
+                const oldCategory = targetItem.category;
+                const title = targetItem.data?.title || targetItem.data?.name || 'Без названия';
                 
-                if (targetItem) {
-                    const oldCategory = targetItem.category;
-                    const title = targetItem.data?.title || targetItem.data?.name || 'Без названия';
-                    
-                    targetItem.category = cat.id;
-                    targetItem.updated = Date.now();
-                    
-                    applyCategoryRules(item.tmdb_id, cat.id, favorites);
-                    saveFavorites(favorites);
-                    
-                    logMove('move', title, oldCategory, cat.id);
-                    notify(`📦 "${title}" → ${cat.name}`);
+                targetItem.category = cat.id;
+                targetItem.updated = Date.now();
+                
+                applyCategoryRules(item.tmdb_id, cat.id, favorites);
+                saveFavorites(favorites);
+                
+                logMove('move', title, oldCategory, cat.id);
+                notify(`📦 "${title}" → ${cat.name}`);
+                
+                // Синхронизируем с Gist
+                const c = cfg();
+                if (c.gist_token && c.gist_id) {
+                    setTimeout(() => syncToGist(false), 200);
                 }
             }
-        }));
-        
-        items.push({ title: '❌ Отмена', action: 'cancel' });
-        
-        Lampa.Select.show({
-            title: `Переместить "${item.data?.title || item.data?.name}"`,
-            items: items,
-            onBack: () => Lampa.Controller.toggle('content')
-        });
-    }
-
+        }
+    }));
+    
+    items.push({ title: '❌ Отмена', action: 'cancel' });
+    
+    Lampa.Select.show({
+        title: `Переместить "${item.data?.title || item.data?.name}"`,
+        items: items,
+        onBack: () => Lampa.Controller.toggle('content')
+    });
+}
     // ======================
     // ОТСЛЕЖИВАНИЕ НОВЫХ СЕРИЙ
     // ======================
@@ -2521,13 +2533,20 @@ function formatSeriesInfo(checkData, cardData) {
         return changed;
     }
 
+
 function syncToGist(showNotify) {
+    if (gistSyncing) {
+        console.log('[NSL] Sync already in progress, skipping');
+        return;
+    }
+    
     const gist = getGistData();
     if (!gist) { 
         if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
         return; 
     }
 
+    gistSyncing = true;
     const localData = getAllSyncData();
 
     $.ajax({
@@ -2547,10 +2566,12 @@ function syncToGist(showNotify) {
             Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
             if (showNotify) notify('✅ Отправлено в Gist');
             console.log('[NSL] Synced to Gist OK');
+            gistSyncing = false;
         },
         error: (xhr) => {
             console.error('[NSL] Send error:', xhr.status);
             if (showNotify) notify('❌ Ошибка отправки в Gist');
+            gistSyncing = false;
         },
         timeout: 15000,
         crossDomain: true
