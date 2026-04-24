@@ -1235,8 +1235,7 @@ function saveProgress(timeInSeconds, force) {
     // ======================
     
     function addFavoriteButtonToCard() {
-        // Функция для непосредственного добавления кнопки
-        window.nslInsertButton = function() {
+        function insertButton() {
             try {
                 const activity = Lampa.Activity.active();
                 if (!activity || activity.component !== 'full') return;
@@ -1244,8 +1243,9 @@ function saveProgress(timeInSeconds, force) {
                 const movie = activity.movie;
                 if (!movie || !movie.id) return;
                 
+                // Берём ПЕРВЫЙ видимый контейнер (без проверки на play)
                 const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').filter(function() {
-                    return $(this).is(':visible') && $(this).find('.button--play, .full-start__button').length > 0;
+                    return $(this).is(':visible');
                 }).first();
                 
                 if (!buttonsContainer.length) return;
@@ -1306,12 +1306,8 @@ function saveProgress(timeInSeconds, force) {
                     });
                 });
                 
-                const playButton = buttonsContainer.find('.button--play, .full-start__button').first();
-                if (playButton.length) {
-                    playButton.before(button);
-                } else {
-                    buttonsContainer.prepend(button);
-                }
+                // Вставляем в начало контейнера
+                buttonsContainer.prepend(button);
                 
                 if (isAndroid && Lampa.Controller) {
                     setTimeout(() => {
@@ -1322,15 +1318,18 @@ function saveProgress(timeInSeconds, force) {
             } catch (err) {
                 console.error('[NSL] Error adding button:', err);
             }
-        };
+        }
         
         // Подписываемся на событие загрузки
         Lampa.Listener.follow('full', (e) => {
             if (e.type === 'complite') {
                 if (favoriteButtonTimer) clearTimeout(favoriteButtonTimer);
-                favoriteButtonTimer = setTimeout(window.nslInsertButton, 500);
+                favoriteButtonTimer = setTimeout(insertButton, 500);
             }
         });
+        
+        // Сохраняем функцию для ручного вызова
+        window.nslInsertButton = insertButton;
     }
 
     // ======================
