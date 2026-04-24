@@ -125,7 +125,7 @@
     function getTimeline() { return Lampa.Storage.get(STORE_TIMELINE, {}) || {}; }
     function saveTimeline(t) { 
         Lampa.Storage.set(STORE_TIMELINE, t, true); 
-        setTimeout(() => Lampa.Listener.send('state:changed', { target: 'timeline', reason: 'update' }), 100);
+        setTimeout(() => Lampa.Listener.send('state:changed', { target: 'timeline', reason: 'update', data: {} }), 100);
     }
     
     function getMoveLog() { return Lampa.Storage.get(STORE_MOVE_LOG, []) || []; }
