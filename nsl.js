@@ -1243,18 +1243,37 @@ function addFavoriteButtonToCard() {
             const movie = activity.movie || activity.card;
             if (!movie || !movie.id) return;
             
-            const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').filter(function() {
-                return $(this).is(':visible');
-            }).first();
+            // Находим кнопку "Смотреть"
+            const playButton = $('.button--play').first();
+            if (!playButton.length) return;
             
-            if (!buttonsContainer.length) return;
-            
-            buttonsContainer.find('.nsl-favorite-button').remove();
+            // Удаляем старую
+            $('.nsl-favorite-button').remove();
             
             const isFavorite = isInFavorites(movie, 'favorite');
             
+            // Получаем позицию кнопки "Смотреть"
+            const playOffset = playButton.offset();
+            const playWidth = playButton.outerWidth();
+            
             const button = $(`
-                <div class="full-start__button selector nsl-favorite-button" tabindex="0" role="button">
+                <div class="nsl-favorite-button" tabindex="0" role="button" style="
+                    position: fixed;
+                    top: ${playOffset.top}px;
+                    left: ${playOffset.left + playWidth + 8}px;
+                    z-index: 50;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 8px;
+                    padding: 6px 22px;
+                    background: rgba(255,255,255,0.1);
+                    border-radius: 4px;
+                    cursor: pointer;
+                    color: #fff;
+                    font-size: 22px;
+                    white-space: nowrap;
+                ">
                     <svg viewBox="0 0 24 24" width="20" height="20">
                         <path fill="${isFavorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" 
                               d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
@@ -1304,18 +1323,7 @@ function addFavoriteButtonToCard() {
                 });
             });
             
-            const playButton = buttonsContainer.find('.button--play').first();
-            if (playButton.length) {
-                playButton.after(button);
-            } else {
-                buttonsContainer.prepend(button);
-            }
-            
-            if (isAndroid && Lampa.Controller) {
-                setTimeout(() => {
-                    Lampa.Controller.collectionSet(buttonsContainer);
-                }, 100);
-            }
+            $('body').append(button);
             
         } catch (err) {
             // тихо
