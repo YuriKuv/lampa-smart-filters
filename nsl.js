@@ -1304,7 +1304,6 @@ function addFavoriteButtonToCard() {
                 });
             });
             
-            // Вставляем после кнопки "Смотреть"
             const playButton = buttonsContainer.find('.button--play').first();
             if (playButton.length) {
                 playButton.after(button);
@@ -1323,23 +1322,11 @@ function addFavoriteButtonToCard() {
         }
     }
     
-    // Подписка на обычное событие загрузки страницы фильма
     Lampa.Listener.follow('full', (e) => {
         if (e.type === 'complite') {
             setTimeout(insertButton, 500);
         }
     });
-    
-    window.nslInsertButton = insertButton;
-}
-    
-    // Постоянная проверка каждые 300 мс — для переходов из избранного
-    setInterval(() => {
-        if ($('.full-start-new__buttons:visible, .full-start__buttons:visible').length > 0 && 
-            !$('.nsl-favorite-button').length) {
-            insertButton();
-        }
-    }, 300);
     
     window.nslInsertButton = insertButton;
 }
