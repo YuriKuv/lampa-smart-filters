@@ -1305,30 +1305,32 @@ function saveProgress(timeInSeconds, force) {
         badgeEl.html(`⭐ Избранное${newEpisodesCount > 0 ? ` <span style="background:#f44336;color:#fff;border-radius:50%;padding:0 0.3em;font-size:0.8em;margin-left:0.5em;">🔔${newEpisodesCount}</span>` : ''}`);
     }
     
-function showFavoritesMenu() {
-    const newEpisodesCount = getNewEpisodesCount();
-    const items = FAVORITE_CATEGORIES.map(cat => {
-        const count = getFavoritesByCategory(cat.id).length;
-        return { title: `${cat.icon} ${cat.name} (${count})`, onSelect: () => showFavoritesByCategory(cat.id, cat.name) };
-    });
-    
-    items.push({ title: '──────────', separator: true });
-    items.push({ title: '🔍 Поиск по избранному', onSelect: () => searchFavorites() });
-    
-    if (newEpisodesCount > 0) {
-        items.push({ title: `🔔 Новые серии (${newEpisodesCount})`, onSelect: () => showNewEpisodes() });
+    function showFavoritesMenu() {
+        const newEpisodesCount = getNewEpisodesCount();
+        const items = FAVORITE_CATEGORIES.map(cat => {
+            const count = getFavoritesByCategory(cat.id).length;
+            return { title: `${cat.icon} ${cat.name} (${count})`, onSelect: () => showFavoritesByCategory(cat.id, cat.name) };
+        });
+        
         items.push({ title: '──────────', separator: true });
+        items.push({ title: '🔍 Поиск по избранному', onSelect: () => searchFavorites() });
+        items.push({ title: '📊 Статистика просмотров', onSelect: () => showWatchStats() });
+        
+        if (newEpisodesCount > 0) {
+            items.push({ title: '──────────', separator: true });
+            items.push({ title: `🔔 Новые серии (${newEpisodesCount})`, onSelect: () => showNewEpisodes() });
+        }
+        
+        items.push({ title: '──────────', separator: true });
+        items.push({ title: '🗑️ Очистить всё', onSelect: () => clearAllFavorites() });
+        items.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
+        
+        Lampa.Select.show({ 
+            title: '⭐ Избранное', 
+            items: items, 
+            onBack: () => Lampa.Controller.toggle('content')
+        });
     }
-    
-    items.push({ title: '🗑️ Очистить всё', onSelect: () => clearAllFavorites() });
-    items.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
-    
-    Lampa.Select.show({ 
-        title: '⭐ Избранное', 
-        items: items, 
-        onBack: () => Lampa.Controller.toggle('content')
-    });
-}
 
     function showFavoritesByCategory(category, categoryName) {
         const items = getFavoritesByCategory(category);
@@ -2716,7 +2718,7 @@ function syncFromGist(showNotify) {
         const items = [];
         
         // Общая информация
-        items.push({ title: `⏱️ Общее время просмотра: ${stats.totalTimeFormatted}`, separator: true });
+        items.push({ title: `⏱️ Общее время просмотра: ${stats.totalTimeFormatted}` });
         items.push({ title: `🎬 Просмотрено фильмов: ${stats.totalMovies}` });
         items.push({ title: `📺 Просмотрено эпизодов: ${stats.totalEpisodes}` });
         items.push({ title: `⭐ В избранном: ${stats.favoritesCount}` });
@@ -2736,9 +2738,7 @@ function syncFromGist(showNotify) {
             }
         });
         
-        items.push({ title: '──────────', separator: true });
-        
-        // Топ-5 по времени просмотра
+        // Топ-5 по времени просмотра (кликабельный)
         const timeline = getTimeline();
         const topItems = Object.entries(timeline)
             .filter(([key, item]) => item.time > 0)
@@ -2746,6 +2746,7 @@ function syncFromGist(showNotify) {
             .slice(0, 5);
         
         if (topItems.length > 0) {
+            items.push({ title: '──────────', separator: true });
             items.push({ title: '🏆 Топ-5 по времени:', separator: true });
             
             topItems.forEach(([key, item], index) => {
@@ -2753,20 +2754,61 @@ function syncFromGist(showNotify) {
                 const fav = getFavorites().find(f => getBaseTmdbId(f.tmdb_id) === baseId);
                 const title = fav?.data?.title || fav?.data?.name || `ID: ${baseId}`;
                 const timeStr = formatTotalTime(item.time);
+                const posterUrl = fav?.data ? getPosterUrl(fav.data) : null;
+                
+                const cardData = fav?.data || {};
                 
                 items.push({
-                    title: `${index + 1}. ${title} — ${timeStr}`
+                    title: `<div style="display:flex;align-items:center;gap:0.6em;min-height:3em;padding:0.2em 0;">
+                        ${posterUrl ? `<img src="${posterUrl}" style="width:2.8em;height:4em;object-fit:cover;border-radius:0.3em;flex-shrink:0;">` : '<div style="width:2.8em;height:4em;background:#333;border-radius:0.3em;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.2em;">🎬</div>'}
+                        <div style="flex:1;min-width:0;">
+                            <div style="font-size:1.1em;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${index + 1}. ${title}</div>
+                            <div style="font-size:0.85em;opacity:0.7;">${timeStr}${fav ? ` · ${FAVORITE_CATEGORIES.find(c => c.id === fav.category)?.icon || ''} ${FAVORITE_CATEGORIES.find(c => c.id === fav.category)?.name || ''}` : ''}</div>
+                        </div>
+                    </div>`,
+                    onSelect: () => {
+                        if (!fav) return;
+                        
+                        const method = (fav.media_type === 'tv' || cardData.original_name) ? 'tv' : 'movie';
+                        const cardId = cardData.id || fav.card_id || baseId;
+                        const source = cardData.source || 'tmdb';
+                        
+                        Lampa.Activity.push({
+                            id: cardId,
+                            method: method,
+                            card: {
+                                id: cardId,
+                                source: source,
+                                title: cardData.title,
+                                name: cardData.name,
+                                original_name: cardData.original_name,
+                                original_title: cardData.original_title,
+                                poster_path: cardData.poster_path,
+                                backdrop_path: cardData.backdrop_path,
+                                overview: cardData.overview,
+                                vote_average: cardData.vote_average,
+                                first_air_date: cardData.first_air_date,
+                                release_date: cardData.release_date,
+                                img: cardData.img
+                            },
+                            url: '',
+                            component: 'full',
+                            source: source,
+                            page: 1
+                        });
+                    }
                 });
             });
         }
         
         items.push({ title: '──────────', separator: true });
+        items.push({ title: '◀ Назад', onSelect: () => showFavoritesMenu() });
         items.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
         
         Lampa.Select.show({
             title: '📊 Статистика просмотров',
             items: items,
-            onBack: () => showMainMenu()
+            onBack: () => showFavoritesMenu()
         });
     }
     
@@ -2794,8 +2836,6 @@ function syncFromGist(showNotify) {
                 { title: `📢 Уведомления о сериях: ${c.new_episodes_notify ? 'Вкл' : 'Выкл'}`, action: 'toggle_new_episodes_notify' },
                 { title: `⏱️ Проверка серий: ${c.new_episodes_check_interval} ч.`, action: 'set_episodes_check_interval' },
                 { title: `🔍 Проверить сейчас${newEpisodesCount > 0 ? ` (${newEpisodesCount})` : ''}`, action: 'check_episodes_now' },
-                { title: '──────────', separator: true },
-                { title: `📊 Статистика просмотров`, action: 'show_stats' },
                 { title: '──────────', separator: true },
                 { title: `🔄 Синхронизировать сейчас`, action: 'sync_now' },
                 { title: `🧹 Очистить дубликаты`, action: 'cleanup_duplicates' },
@@ -2894,10 +2934,6 @@ function syncFromGist(showNotify) {
                 }
                 else if (item.action === 'show_log') {
                     showMoveLog();
-                }
-
-                else if (item.action === 'show_stats') {
-                    showWatchStats();
                 }
             },
             onBack: () => Lampa.Controller.toggle('content')
