@@ -1235,24 +1235,13 @@ function saveProgress(timeInSeconds, force) {
     // ======================
     
 function addFavoriteButtonToCard() {
-    let insertAttempts = 0;
-    
     function insertButton() {
         try {
             const activity = Lampa.Activity.active();
             if (!activity || activity.component !== 'full') return;
             
-            // ПРОБУЕМ movie, ЕСЛИ НЕТ — ИСПОЛЬЗУЕМ card
             const movie = activity.movie || activity.card;
-            if (!movie || !movie.id) {
-                if (insertAttempts < 10) {
-                    insertAttempts++;
-                    setTimeout(insertButton, 500);
-                }
-                return;
-            }
-            
-            insertAttempts = 0;
+            if (!movie || !movie.id) return;
             
             const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').filter(function() {
                 return $(this).is(':visible');
@@ -1324,16 +1313,24 @@ function addFavoriteButtonToCard() {
             }
             
         } catch (err) {
-            console.error('[NSL] insertButton error:', err.message);
+            // тихо
         }
     }
     
+    // Подписка на событие (для обычных переходов)
     Lampa.Listener.follow('full', (e) => {
         if (e.type === 'complite') {
-            insertAttempts = 0;
             setTimeout(insertButton, 500);
         }
     });
+    
+    // Постоянная проверка каждые 300 мс — для переходов из избранного
+    setInterval(() => {
+        if ($('.full-start-new__buttons:visible, .full-start__buttons:visible').length > 0 && 
+            !$('.nsl-favorite-button').length) {
+            insertButton();
+        }
+    }, 300);
     
     window.nslInsertButton = insertButton;
 }
