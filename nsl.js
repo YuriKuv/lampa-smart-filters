@@ -3478,6 +3478,9 @@ function syncFromGist(showNotify) {
             checkNewEpisodes(false);
             checkAutoRemoveWatched();
         }, 3000);
+
+        setTimeout(() => tryAddFavoriteButtonToCard(), 1500);
+        setTimeout(() => tryAddFavoriteButtonToCard(), 3000);
         
         Lampa.Listener.follow('state:changed', (e) => {
             if (e.target === 'nsl_favorites' || e.target === 'timeline') {
