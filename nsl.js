@@ -1242,9 +1242,9 @@ function addFavoriteButtonToCard() {
             const activity = Lampa.Activity.active();
             if (!activity || activity.component !== 'full') return;
             
-            const movie = activity.movie;
+            // ПРОБУЕМ movie, ЕСЛИ НЕТ — ИСПОЛЬЗУЕМ card
+            const movie = activity.movie || activity.card;
             if (!movie || !movie.id) {
-                // Пробуем ещё раз, но не больше 10 попыток
                 if (insertAttempts < 10) {
                     insertAttempts++;
                     setTimeout(insertButton, 500);
@@ -1252,7 +1252,6 @@ function addFavoriteButtonToCard() {
                 return;
             }
             
-            // Сброс счётчика при успешном нахождении movie
             insertAttempts = 0;
             
             const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').filter(function() {
