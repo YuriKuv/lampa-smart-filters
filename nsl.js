@@ -3105,4 +3105,4 @@ function syncFromGist(showNotify) {
     if (window.appready) init();
     else Lampa.Listener.follow('app', e => { if (e.type === 'ready') init(); });
     
-    })();
+})();
