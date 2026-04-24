@@ -1493,9 +1493,8 @@ function showFavoritesList(items, title, currentCategory) {
         onFullDraw: (scroll) => {
             const itemsElements = scroll.render().find('.selectbox-item');
             
-            // Сразу запускаем загрузку данных о сериях для ТВ-шоу
-            items.each((index) => {
-                const menuItem = menuItems[index];
+            // Запускаем загрузку данных о сериях для ТВ-шоу
+            menuItems.forEach((menuItem, index) => {
                 if (!menuItem || !menuItem.item) return;
                 
                 const item = menuItem.item;
@@ -1511,19 +1510,14 @@ function showFavoritesList(items, title, currentCategory) {
                         if (!seriesInfo) return;
                         
                         // Ищем или создаём строку с информацией
-                        let infoDiv = el.find('.nsl-series-info');
-                        if (infoDiv.length) {
-                            infoDiv.text(seriesInfo);
+                        const subtitleDiv = el.find('.selectbox-item__subtitle');
+                        if (subtitleDiv.length) {
+                            subtitleDiv.text(seriesInfo);
                         } else {
-                            const subtitleDiv = el.find('.selectbox-item__subtitle');
-                            if (subtitleDiv.length) {
-                                subtitleDiv.text(seriesInfo);
-                            } else {
-                                const titleDiv = el.find('.selectbox-item__title');
-                                if (titleDiv.length) {
-                                    infoDiv = $(`<div class="selectbox-item__subtitle nsl-series-info" style="font-size:0.85em;opacity:0.8;line-height:1.2;">${seriesInfo}</div>`);
-                                    titleDiv.after(infoDiv);
-                                }
+                            const titleDiv = el.find('.selectbox-item__title');
+                            if (titleDiv.length) {
+                                const infoDiv = $(`<div class="selectbox-item__subtitle nsl-series-info" style="font-size:0.85em;opacity:0.8;line-height:1.2;">${seriesInfo}</div>`);
+                                titleDiv.after(infoDiv);
                             }
                         }
                     });
