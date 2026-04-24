@@ -1234,113 +1234,110 @@ function saveProgress(timeInSeconds, force) {
     // КНОПКА НА КАРТОЧКЕ (С ДЕБАУНСОМ)
     // ======================
     
-    function addFavoriteButtonToCard() {
-        function insertButton() {
-            console.log('[NSL] insertButton called');
-            try {
-                const activity = Lampa.Activity.active();
-                console.log('[NSL] activity:', activity?.component);
-                if (!activity || activity.component !== 'full') {
-                    console.log('[NSL] not full component, skipping');
-                    return;
+function addFavoriteButtonToCard() {
+    let insertAttempts = 0;
+    
+    function insertButton() {
+        try {
+            const activity = Lampa.Activity.active();
+            if (!activity || activity.component !== 'full') return;
+            
+            const movie = activity.movie;
+            if (!movie || !movie.id) {
+                // Пробуем ещё раз, но не больше 10 попыток
+                if (insertAttempts < 10) {
+                    insertAttempts++;
+                    setTimeout(insertButton, 500);
                 }
+                return;
+            }
+            
+            // Сброс счётчика при успешном нахождении movie
+            insertAttempts = 0;
+            
+            const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').filter(function() {
+                return $(this).is(':visible');
+            }).first();
+            
+            if (!buttonsContainer.length) return;
+            
+            buttonsContainer.find('.nsl-favorite-button').remove();
+            
+            const isFavorite = isInFavorites(movie, 'favorite');
+            
+            const button = $(`
+                <div class="full-start__button selector nsl-favorite-button" tabindex="0" role="button">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="${isFavorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" 
+                              d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
+                    </svg>
+                    <span>В избранное</span>
+                </div>
+            `);
+            
+            button.on('hover:enter', () => {
+                const categories = [
+                    { id: 'favorite', name: 'Избранное', checked: isInFavorites(movie, 'favorite') },
+                    { id: 'watching', name: 'Смотрю', checked: isInFavorites(movie, 'watching') },
+                    { id: 'planned', name: 'Буду смотреть', checked: isInFavorites(movie, 'planned') },
+                    { id: 'watched', name: 'Просмотрено', checked: isInFavorites(movie, 'watched') },
+                    { id: 'abandoned', name: 'Брошено', checked: isInFavorites(movie, 'abandoned') },
+                    { id: 'collection', name: 'Коллекция', checked: isInFavorites(movie, 'collection') }
+                ];
                 
-                const movie = activity.movie;
-                console.log('[NSL] movie:', movie?.title || movie?.name, movie?.id);
-                if (!movie || !movie.id) {
-                    console.log('[NSL] no movie, skipping');
-                    return;
-                }
+                const items = categories.map(cat => ({
+                    title: cat.name, checkbox: true, checked: cat.checked, category: cat.id
+                }));
                 
-                const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').filter(function() {
-                    return $(this).is(':visible');
-                }).first();
+                items.push({ title: '──────────', separator: true });
+                items.push({ title: '❌ Закрыть', action: 'close' });
                 
-                console.log('[NSL] container found:', buttonsContainer.length, buttonsContainer.attr('class'));
-                if (!buttonsContainer.length) {
-                    console.log('[NSL] no container, skipping');
-                    return;
-                }
-                
-                buttonsContainer.find('.nsl-favorite-button').remove();
-                
-                const isFavorite = isInFavorites(movie, 'favorite');
-                console.log('[NSL] isFavorite:', isFavorite);
-                
-                const button = $(`
-                    <div class="full-start__button selector nsl-favorite-button" tabindex="0" role="button">
-                        <svg viewBox="0 0 24 24" width="20" height="20">
-                            <path fill="${isFavorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" 
-                                  d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
-                        </svg>
-                        <span>В избранное</span>
-                    </div>
-                `);
-                
-                button.on('hover:enter', () => {
-                    const categories = [
-                        { id: 'favorite', name: 'Избранное', checked: isInFavorites(movie, 'favorite') },
-                        { id: 'watching', name: 'Смотрю', checked: isInFavorites(movie, 'watching') },
-                        { id: 'planned', name: 'Буду смотреть', checked: isInFavorites(movie, 'planned') },
-                        { id: 'watched', name: 'Просмотрено', checked: isInFavorites(movie, 'watched') },
-                        { id: 'abandoned', name: 'Брошено', checked: isInFavorites(movie, 'abandoned') },
-                        { id: 'collection', name: 'Коллекция', checked: isInFavorites(movie, 'collection') }
-                    ];
-                    
-                    const items = categories.map(cat => ({
-                        title: cat.name, checkbox: true, checked: cat.checked, category: cat.id
-                    }));
-                    
-                    items.push({ title: '──────────', separator: true });
-                    items.push({ title: '❌ Закрыть', action: 'close' });
-                    
-                    Lampa.Select.show({
-                        title: 'Добавить в избранное',
-                        items: items,
-                        onCheck: (item) => {
-                            setTimeout(() => {
-                                toggleFavorite(movie, item.category);
-                                const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
-                                button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
-                                refreshCardStatus();
-                            }, 50);
-                        },
-                        onSelect: (item) => {
-                            if (item.action === 'close') return;
-                            setTimeout(() => {
-                                toggleFavorite(movie, item.category);
-                                const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
-                                button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
-                                refreshCardStatus();
-                            }, 50);
-                        },
-                        onBack: () => Lampa.Controller.toggle('content')
-                    });
+                Lampa.Select.show({
+                    title: 'Добавить в избранное',
+                    items: items,
+                    onCheck: (item) => {
+                        setTimeout(() => {
+                            toggleFavorite(movie, item.category);
+                            const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
+                            button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
+                            refreshCardStatus();
+                        }, 50);
+                    },
+                    onSelect: (item) => {
+                        if (item.action === 'close') return;
+                        setTimeout(() => {
+                            toggleFavorite(movie, item.category);
+                            const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
+                            button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
+                            refreshCardStatus();
+                        }, 50);
+                    },
+                    onBack: () => Lampa.Controller.toggle('content')
                 });
-                
-                buttonsContainer.prepend(button);
-                console.log('[NSL] button prepended successfully');
-                
-                if (isAndroid && Lampa.Controller) {
-                    setTimeout(() => {
-                        Lampa.Controller.collectionSet(buttonsContainer);
-                    }, 100);
-                }
-                
-            } catch (err) {
-                console.error('[NSL] insertButton error:', err.message, err.stack);
+            });
+            
+            buttonsContainer.prepend(button);
+            
+            if (isAndroid && Lampa.Controller) {
+                setTimeout(() => {
+                    Lampa.Controller.collectionSet(buttonsContainer);
+                }, 100);
             }
+            
+        } catch (err) {
+            console.error('[NSL] insertButton error:', err.message);
         }
-        
-        Lampa.Listener.follow('full', (e) => {
-            if (e.type === 'complite') {
-                console.log('[NSL] full complite event');
-                setTimeout(insertButton, 500);
-            }
-        });
-        
-        window.nslInsertButton = insertButton;
     }
+    
+    Lampa.Listener.follow('full', (e) => {
+        if (e.type === 'complite') {
+            insertAttempts = 0;
+            setTimeout(insertButton, 500);
+        }
+    });
+    
+    window.nslInsertButton = insertButton;
+}
 
     // ======================
     // МЕНЮ (С ПОСТЕРАМИ И ГОДОМ)
