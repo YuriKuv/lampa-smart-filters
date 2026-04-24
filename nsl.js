@@ -2621,6 +2621,154 @@ function syncFromGist(showNotify) {
         
         input.click();
     }
+
+    // ======================
+    // Функция сбора статистики
+    // ======================
+
+    function getWatchStats() {
+        const timeline = getTimeline();
+        const favorites = getFavorites();
+        
+        let totalTime = 0; // общее время в секундах
+        let totalMovies = 0;
+        let totalSeries = 0;
+        let totalEpisodes = 0;
+        
+        // Считаем время из таймкодов
+        for (const key in timeline) {
+            const item = timeline[key];
+            if (item.time && item.time > 0) {
+                totalTime += item.time;
+                
+                // Считаем эпизоды (есть _s или _e в ключе)
+                if (key.includes('_s') || key.includes('_e')) {
+                    totalEpisodes++;
+                } else {
+                    totalMovies++;
+                }
+            }
+        }
+        
+        // Считаем по категориям
+        const categoryStats = {};
+        FAVORITE_CATEGORIES.forEach(cat => {
+            categoryStats[cat.id] = {
+                name: cat.name,
+                icon: cat.icon,
+                count: 0,
+                time: 0
+            };
+        });
+        
+        favorites.forEach(fav => {
+            if (categoryStats[fav.category]) {
+                categoryStats[fav.category].count++;
+            }
+            
+            // Считаем время для каждой категории
+            const baseId = getBaseTmdbId(fav.tmdb_id);
+            for (const key in timeline) {
+                if (getBaseTmdbId(timeline[key].tmdb_id) === baseId && timeline[key].time > 0) {
+                    if (categoryStats[fav.category]) {
+                        categoryStats[fav.category].time += timeline[key].time;
+                    }
+                }
+            }
+        });
+        
+        // Считаем сериалы отдельно
+        const seriesCount = favorites.filter(f => f.media_type === 'tv' || f.data?.original_name).length;
+        const moviesCount = favorites.filter(f => f.media_type === 'movie' || (!f.data?.original_name && f.media_type !== 'tv')).length;
+        
+        return {
+            totalTime,
+            totalTimeFormatted: formatTotalTime(totalTime),
+            totalMovies,
+            totalEpisodes,
+            seriesCount,
+            moviesCount,
+            favoritesCount: favorites.length,
+            timelineCount: Object.keys(timeline).length,
+            categoryStats
+        };
+    }
+    
+    function formatTotalTime(seconds) {
+        if (seconds < 60) return `${seconds} сек`;
+        
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        
+        if (hours > 0) {
+            return `${hours} ч ${minutes} мин`;
+        }
+        return `${minutes} мин`;
+    }
+
+    // ======================
+    // Функция отображения статистики
+    // ======================
+
+    function showWatchStats() {
+        const stats = getWatchStats();
+        
+        const items = [];
+        
+        // Общая информация
+        items.push({ title: `⏱️ Общее время просмотра: ${stats.totalTimeFormatted}`, separator: true });
+        items.push({ title: `🎬 Просмотрено фильмов: ${stats.totalMovies}` });
+        items.push({ title: `📺 Просмотрено эпизодов: ${stats.totalEpisodes}` });
+        items.push({ title: `⭐ В избранном: ${stats.favoritesCount}` });
+        items.push({ title: `📊 Всего таймкодов: ${stats.timelineCount}` });
+        
+        items.push({ title: '──────────', separator: true });
+        items.push({ title: '📋 По категориям:', separator: true });
+        
+        // Статистика по категориям
+        FAVORITE_CATEGORIES.forEach(cat => {
+            const stat = stats.categoryStats[cat.id];
+            if (stat.count > 0) {
+                const timeStr = stat.time > 0 ? ` | ${formatTotalTime(stat.time)}` : '';
+                items.push({ 
+                    title: `${stat.icon} ${stat.name}: ${stat.count} шт.${timeStr}` 
+                });
+            }
+        });
+        
+        items.push({ title: '──────────', separator: true });
+        
+        // Топ-5 по времени просмотра
+        const timeline = getTimeline();
+        const topItems = Object.entries(timeline)
+            .filter(([key, item]) => item.time > 0)
+            .sort((a, b) => b[1].time - a[1].time)
+            .slice(0, 5);
+        
+        if (topItems.length > 0) {
+            items.push({ title: '🏆 Топ-5 по времени:', separator: true });
+            
+            topItems.forEach(([key, item], index) => {
+                const baseId = getBaseTmdbId(item.tmdb_id);
+                const fav = getFavorites().find(f => getBaseTmdbId(f.tmdb_id) === baseId);
+                const title = fav?.data?.title || fav?.data?.name || `ID: ${baseId}`;
+                const timeStr = formatTotalTime(item.time);
+                
+                items.push({
+                    title: `${index + 1}. ${title} — ${timeStr}`
+                });
+            });
+        }
+        
+        items.push({ title: '──────────', separator: true });
+        items.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
+        
+        Lampa.Select.show({
+            title: '📊 Статистика просмотров',
+            items: items,
+            onBack: () => showMainMenu()
+        });
+    }
     
     // ======================
     // НАСТРОЙКИ
@@ -2646,6 +2794,8 @@ function syncFromGist(showNotify) {
                 { title: `📢 Уведомления о сериях: ${c.new_episodes_notify ? 'Вкл' : 'Выкл'}`, action: 'toggle_new_episodes_notify' },
                 { title: `⏱️ Проверка серий: ${c.new_episodes_check_interval} ч.`, action: 'set_episodes_check_interval' },
                 { title: `🔍 Проверить сейчас${newEpisodesCount > 0 ? ` (${newEpisodesCount})` : ''}`, action: 'check_episodes_now' },
+                { title: '──────────', separator: true },
+                { title: `📊 Статистика просмотров`, action: 'show_stats' },
                 { title: '──────────', separator: true },
                 { title: `🔄 Синхронизировать сейчас`, action: 'sync_now' },
                 { title: `🧹 Очистить дубликаты`, action: 'cleanup_duplicates' },
@@ -2744,6 +2894,10 @@ function syncFromGist(showNotify) {
                 }
                 else if (item.action === 'show_log') {
                     showMoveLog();
+                }
+
+                else if (item.action === 'show_stats') {
+                    showWatchStats();
                 }
             },
             onBack: () => Lampa.Controller.toggle('content')
