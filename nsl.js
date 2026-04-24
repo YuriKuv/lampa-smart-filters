@@ -1304,7 +1304,12 @@ function addFavoriteButtonToCard() {
                 });
             });
             
-            buttonsContainer.prepend(button);
+            const playButton = buttonsContainer.find('.button--play').first();
+            if (playButton.length) {
+                playButton.after(button);
+            } else {
+                buttonsContainer.prepend(button);
+            }
             
             if (isAndroid && Lampa.Controller) {
                 setTimeout(() => {
