@@ -1127,17 +1127,22 @@ function saveProgress(timeInSeconds, force) {
     }
 
     function addStatusToCard() {
-        Lampa.Listener.follow('full', (e) => {
-            if (e.type === 'complite') {
+        Lampa.Listener.follow('full', function (e) {
+            if (e.type == 'complite') {
                 setTimeout(() => {
                     try {
                         const movie = e.data.movie || e.data.card;
                         if (!movie || !movie.id) return;
                         
-                        const statusContainer = $('.full-start__status').first();
+                        // Используем e.object.activity.render() как для кнопки
+                        if (!e.object || !e.object.activity) return;
+                        
+                        const render = e.object.activity.render();
+                        const statusContainer = render.find('.full-start__status').first();
+                        
                         if (!statusContainer.length) return;
                         
-                        $('.nsl-movie-status').remove();
+                        render.find('.nsl-movie-status').remove();
                         
                         const status = getMovieStatus(movie);
                         if (!status) return;
