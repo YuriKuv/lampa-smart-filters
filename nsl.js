@@ -1249,25 +1249,15 @@ function addFavoriteButtonToCard() {
             
             if (!buttonsContainer.length) return;
             
-            buttonsContainer.find('.nsl-favorite-button').remove();
+            // Проверяем есть ли уже
+            if (buttonsContainer.find('.nsl-favorite-button').length) return;
+            
+            console.log('[NSL] Вставляем кнопку. Контейнер детей:', buttonsContainer.children().length);
             
             const isFavorite = isInFavorites(movie, 'favorite');
             
             const button = $(`
-                <div class="full-start__button selector nsl-favorite-button" tabindex="0" role="button" style="
-                    display: inline-flex !important;
-                    align-items: center;
-                    justify-content: center;
-                    gap: 8px;
-                    padding: 6px 22px;
-                    cursor: pointer;
-                    color: #fff;
-                    font-size: 22px;
-                    white-space: nowrap;
-                    pointer-events: auto !important;
-                    visibility: visible !important;
-                    opacity: 1 !important;
-                ">
+                <div class="full-start__button selector nsl-favorite-button" tabindex="0" role="button">
                     <svg viewBox="0 0 24 24" width="20" height="20">
                         <path fill="${isFavorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" 
                               d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
@@ -1277,56 +1267,20 @@ function addFavoriteButtonToCard() {
             `);
             
             button.on('hover:enter', () => {
-                const categories = [
-                    { id: 'favorite', name: 'Избранное', checked: isInFavorites(movie, 'favorite') },
-                    { id: 'watching', name: 'Смотрю', checked: isInFavorites(movie, 'watching') },
-                    { id: 'planned', name: 'Буду смотреть', checked: isInFavorites(movie, 'planned') },
-                    { id: 'watched', name: 'Просмотрено', checked: isInFavorites(movie, 'watched') },
-                    { id: 'abandoned', name: 'Брошено', checked: isInFavorites(movie, 'abandoned') },
-                    { id: 'collection', name: 'Коллекция', checked: isInFavorites(movie, 'collection') }
-                ];
-                
-                const items = categories.map(cat => ({
-                    title: cat.name, checkbox: true, checked: cat.checked, category: cat.id
-                }));
-                
-                items.push({ title: '──────────', separator: true });
-                items.push({ title: '❌ Закрыть', action: 'close' });
-                
-                Lampa.Select.show({
-                    title: 'Добавить в избранное',
-                    items: items,
-                    onCheck: (item) => {
-                        setTimeout(() => {
-                            toggleFavorite(movie, item.category);
-                            const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
-                            button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
-                            refreshCardStatus();
-                        }, 50);
-                    },
-                    onSelect: (item) => {
-                        if (item.action === 'close') return;
-                        setTimeout(() => {
-                            toggleFavorite(movie, item.category);
-                            const isAny = categories.some(c => c.id !== 'collection' && isInFavorites(movie, c.id));
-                            button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
-                            refreshCardStatus();
-                        }, 50);
-                    },
-                    onBack: () => Lampa.Controller.toggle('content')
-                });
+                console.log('[NSL] Кнопка нажата!');
+                // ... остальной код
             });
             
             buttonsContainer.prepend(button);
+            console.log('[NSL] Кнопка вставлена, сейчас детей:', buttonsContainer.children().length);
             
-            if (isAndroid && Lampa.Controller) {
-                setTimeout(() => {
-                    Lampa.Controller.collectionSet(buttonsContainer);
-                }, 100);
-            }
+            // Проверим через секунду — не исчезла ли?
+            setTimeout(() => {
+                console.log('[NSL] Через 1с кнопок NSL:', $('.nsl-favorite-button').length);
+            }, 1000);
             
         } catch (err) {
-            // тихо
+            console.error('[NSL] Ошибка:', err.message);
         }
     }
     
