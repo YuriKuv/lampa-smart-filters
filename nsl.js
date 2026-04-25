@@ -535,6 +535,101 @@
         }
         return false;
     }
+
+    function mergeTimeline(localTimeline, remoteTimeline, strategy) {
+        const merged = { ...localTimeline };
+        let changes = 0;
+        for (const key in remoteTimeline) {
+            const remoteRec = remoteTimeline[key];
+            const localRec = merged[key];
+            if (!remoteRec.updated) remoteRec.updated = remoteRec.saved_at || 0;
+            if (!localRec) { merged[key] = remoteRec; changes++; }
+            else {
+                if (!localRec.updated) localRec.updated = localRec.saved_at || 0;
+                const remoteUpdated = remoteRec.updated || 0;
+                const localUpdated = localRec.updated || 0;
+                const remoteTime = remoteRec.time || 0;
+                const localTime = localRec.time || 0;
+                let shouldUpdate = false;
+                if (strategy === 'max_time') { if (remoteTime > localTime) shouldUpdate = true; }
+                else { if (remoteUpdated > localUpdated) shouldUpdate = true; else if (remoteUpdated === localUpdated && remoteTime > localTime) shouldUpdate = true; }
+                if (shouldUpdate) { merged[key] = remoteRec; changes++; }
+            }
+        }
+        return { merged, changes };
+    }
+    
+    function getAllSyncData() {
+        return {
+            version: 5,
+            profile_id: PROFILE_ID,
+            updated: new Date().toISOString(),
+            bookmarks: getBookmarks(),
+            favorites: getFavorites(),
+            timeline: getTimeline()
+        };
+    }
+    
+    function cleanupTimeline() {
+        const c = cfg();
+        if (!c.cleanup_older_days && !c.cleanup_completed) return;
+        const now = Date.now();
+        const olderThan = c.cleanup_older_days * 24 * 60 * 60 * 1000;
+        const timeline = getTimeline();
+        let changed = false;
+        for (const key in timeline) {
+            const record = timeline[key];
+            if (olderThan > 0 && record.updated && (now - record.updated) > olderThan) { delete timeline[key]; changed = true; }
+            else if (c.cleanup_completed && record.percent >= 95) { delete timeline[key]; changed = true; }
+        }
+        if (changed) { saveTimeline(timeline); notify('🧹 Таймкоды очищены'); }
+    }
+    
+    function cleanupDuplicateCategories() {
+        const favorites = getFavorites();
+        const tmdbMap = new Map();
+        let changed = false;
+        
+        for (const item of favorites) {
+            const baseId = getBaseTmdbId(item.tmdb_id);
+            if (!tmdbMap.has(baseId)) tmdbMap.set(baseId, []);
+            tmdbMap.get(baseId).push(item);
+        }
+        
+        for (const [baseId, items] of tmdbMap) {
+            if (items.length <= 1) continue;
+            const categories = items.map(i => i.category);
+            let keepCategories = [...categories];
+            if (categories.includes('abandoned')) keepCategories = keepCategories.filter(c => c === 'abandoned' || c === 'collection');
+            else if (categories.includes('watched')) keepCategories = keepCategories.filter(c => c === 'watched' || c === 'collection');
+            else if (categories.includes('watching')) keepCategories = keepCategories.filter(c => c === 'watching' || c === 'collection');
+            else if (categories.includes('planned') && categories.includes('favorite')) keepCategories = ['planned', 'collection'];
+            
+            const uniqueKeep = [...new Set(keepCategories)];
+            for (const item of items) {
+                if (!uniqueKeep.includes(item.category)) {
+                    const index = favorites.findIndex(f => f.id === item.id);
+                    if (index >= 0) { favorites.splice(index, 1); changed = true; }
+                }
+            }
+            for (const cat of uniqueKeep) {
+                const catItems = items.filter(i => i.category === cat);
+                if (catItems.length > 1) {
+                    catItems.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+                    for (let i = 1; i < catItems.length; i++) {
+                        const index = favorites.findIndex(f => f.id === catItems[i].id);
+                        if (index >= 0) { favorites.splice(index, 1); changed = true; }
+                    }
+                }
+            }
+        }
+        
+        if (changed) {
+            saveFavorites(favorites);
+            logMove('cleanup', 'Система', null, null);
+        }
+        return changed;
+    }
     
     function syncTimelineWithCategories() {
         const c = cfg();
