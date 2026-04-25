@@ -1235,62 +1235,90 @@ function saveProgress(timeInSeconds, force) {
     // ======================
     
 function addFavoriteButtonToCard() {
-    function insertButton() {
-        try {
-            const activity = Lampa.Activity.active();
-            if (!activity || activity.component !== 'full') return;
-            
-            const movie = activity.movie || activity.card;
-            if (!movie || !movie.id) return;
-            
-            const buttonsContainer = $('.full-start-new__buttons, .full-start__buttons').filter(function() {
-                return $(this).is(':visible');
-            }).first();
-            
-            if (!buttonsContainer.length) return;
-            
-            // Проверяем есть ли уже
-            if (buttonsContainer.find('.nsl-favorite-button').length) return;
-            
-            console.log('[NSL] Вставляем кнопку. Контейнер детей:', buttonsContainer.children().length);
-            
-            const isFavorite = isInFavorites(movie, 'favorite');
-            
-            const button = $(`
-                <div class="full-start__button selector nsl-favorite-button" tabindex="0" role="button">
-                    <svg viewBox="0 0 24 24" width="20" height="20">
-                        <path fill="${isFavorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" 
-                              d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
-                    </svg>
-                    <span>В избранное</span>
-                </div>
-            `);
-            
-            button.on('hover:enter', () => {
-                console.log('[NSL] Кнопка нажата!');
-                // ... остальной код
-            });
-            
-            buttonsContainer.prepend(button);
-            console.log('[NSL] Кнопка вставлена, сейчас детей:', buttonsContainer.children().length);
-            
-            // Проверим через секунду — не исчезла ли?
+    Lampa.Listener.follow('full', function (e) {
+        if (e.type == 'complite') {
             setTimeout(() => {
-                console.log('[NSL] Через 1с кнопок NSL:', $('.nsl-favorite-button').length);
-            }, 1000);
-            
-        } catch (err) {
-            console.error('[NSL] Ошибка:', err.message);
-        }
-    }
-    
-    Lampa.Listener.follow('full', (e) => {
-        if (e.type === 'complite') {
-            setTimeout(insertButton, 500);
+                try {
+                    const movie = e.data.movie || e.data.card;
+                    if (!movie || !movie.id) return;
+                    
+                    // Используем e.object.activity.render() как в плагине торрентов
+                    if (!e.object || !e.object.activity) return;
+                    
+                    const render = e.object.activity.render();
+                    const container = render.find('.full-start-new__buttons, .full-start__buttons').first();
+                    
+                    if (!container.length) return;
+                    
+                    container.find('.nsl-favorite-button').remove();
+                    
+                    const isFavorite = isInFavorites(movie, 'favorite');
+                    
+                    const button = $(`
+                        <div class="full-start__button selector nsl-favorite-button" tabindex="0" role="button">
+                            <svg viewBox="0 0 24 24" width="20" height="20">
+                                <path fill="${isFavorite ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" 
+                                      d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/>
+                            </svg>
+                            <span>В избранное</span>
+                        </div>
+                    `);
+                    
+                    button.on('hover:enter', () => {
+                        const categories = [
+                            { id: 'favorite', name: 'Избранное', checked: isInFavorites(movie, 'favorite') },
+                            { id: 'watching', name: 'Смотрю', checked: isInFavorites(movie, 'watching') },
+                            { id: 'planned', name: 'Буду смотреть', checked: isInFavorites(movie, 'planned') },
+                            { id: 'watched', name: 'Просмотрено', checked: isInFavorites(movie, 'watched') },
+                            { id: 'abandoned', name: 'Брошено', checked: isInFavorites(movie, 'abandoned') },
+                            { id: 'collection', name: 'Коллекция', checked: isInFavorites(movie, 'collection') }
+                        ];
+                        
+                        const items = categories.map(cat => ({
+                            title: cat.name, checkbox: true, checked: cat.checked, category: cat.id
+                        }));
+                        
+                        items.push({ title: '──────────', separator: true });
+                        items.push({ title: '❌ Закрыть', action: 'close' });
+                        
+                        Lampa.Select.show({
+                            title: 'Добавить в избранное',
+                            items: items,
+                            onCheck: (item) => {
+                                setTimeout(() => {
+                                    toggleFavorite(movie, item.category);
+                                    button.find('path').attr('fill', isInFavorites(movie, 'favorite') ? 'currentColor' : 'none');
+                                    refreshCardStatus();
+                                }, 50);
+                            },
+                            onSelect: (item) => {
+                                if (item.action === 'close') return;
+                                setTimeout(() => {
+                                    toggleFavorite(movie, item.category);
+                                    button.find('path').attr('fill', isInFavorites(movie, 'favorite') ? 'currentColor' : 'none');
+                                    refreshCardStatus();
+                                }, 50);
+                            },
+                            onBack: () => Lampa.Controller.toggle('content')
+                        });
+                    });
+                    
+                    // Вставляем перед "Избранное" (button--book)
+                    const bookBtn = container.find('.button--book').first();
+                    if (bookBtn.length) {
+                        bookBtn.before(button);
+                    } else {
+                        container.prepend(button);
+                    }
+                    
+                } catch (err) {
+                    console.error('[NSL] Error:', err.message);
+                }
+            }, 500);
         }
     });
     
-    window.nslInsertButton = insertButton;
+    window.nslInsertButton = function() {}; // Заглушка, больше не нужна
 }
     // ======================
     // МЕНЮ (С ПОСТЕРАМИ И ГОДОМ)
@@ -1494,17 +1522,6 @@ function addFavoriteButtonToCard() {
                             source: source,
                             page: 1
                         });
-                        
-                        // Принудительно добавляем кнопку после открытия из избранного
-                        setTimeout(() => {
-                            const checkInterval = setInterval(() => {
-                                const act = Lampa.Activity.active();
-                                if (act && act.component === 'full' && act.movie && (act.movie.title || act.movie.name)) {
-                                    clearInterval(checkInterval);
-                                    setTimeout(() => window.nslInsertButton(), 300);
-                                }
-                            }, 300);
-                        }, 500);
                     }
                 };
             });
@@ -1604,17 +1621,7 @@ function extractYear(cardData) {
                     });
                     
                     markNewEpisodesSeen(item.tmdb_id);
-                    
-                    // Принудительно добавляем кнопку после открытия из избранного
-                    setTimeout(() => {
-                        const checkInterval = setInterval(() => {
-                            const act = Lampa.Activity.active();
-                            if (act && act.component === 'full' && act.movie && (act.movie.title || act.movie.name)) {
-                                clearInterval(checkInterval);
-                                setTimeout(() => window.nslInsertButton(), 300);
-                            }
-                        }, 300);
-                    }, 500);
+
                 }
             };
         });
@@ -1740,17 +1747,6 @@ function extractYear(cardData) {
                         source: source,
                         page: 1
                     });
-                    
-                    // Принудительно добавляем кнопку после открытия из избранного
-                    setTimeout(() => {
-                        const checkInterval = setInterval(() => {
-                            const act = Lampa.Activity.active();
-                            if (act && act.component === 'full' && act.movie && (act.movie.title || act.movie.name)) {
-                                clearInterval(checkInterval);
-                                setTimeout(() => window.nslInsertButton(), 300);
-                            }
-                        }, 300);
-                    }, 500);
                 },
                 onLongPress: null
             };
@@ -2848,17 +2844,6 @@ function syncFromGist(showNotify) {
                             source: source,
                             page: 1
                         });
-                        
-                        // Принудительно добавляем кнопку после открытия из избранного
-                        setTimeout(() => {
-                            const checkInterval = setInterval(() => {
-                                const act = Lampa.Activity.active();
-                                if (act && act.component === 'full' && act.movie && (act.movie.title || act.movie.name)) {
-                                    clearInterval(checkInterval);
-                                    setTimeout(() => window.nslInsertButton(), 300);
-                                }
-                            }, 300);
-                        }, 500);
                     }
                 });
             });
@@ -3378,30 +3363,6 @@ function init() {
         }
     });
     
-    // НОВОЕ: Отслеживаем ЛЮБОЙ переход на страницу фильма
-    // Проверяем каждые 500 мс — для переходов из избранного
-    let activityCheckInterval = setInterval(() => {
-        const act = Lampa.Activity.active();
-        if (act && act.component === 'full' && (act.movie || act.card)) {
-            window.nslInsertButton();
-            refreshCardStatus();
-        }
-    }, 500);
-    
-    // Останавливаем через 60 секунд
-    setTimeout(() => clearInterval(activityCheckInterval), 60000);
-    
-    window.addEventListener('beforeunload', onAppClose);
-    
-    window.NSL = {
-        cfg, getFavorites, getBookmarks, getTimeline,
-        syncToGist, syncFromGist, addToFavorites, toggleFavorite,
-        getMoveLog, getMovieStatus, refreshCardStatus,
-        cleanupDuplicateCategories, enableTimelineOnCards,
-        checkNewEpisodes, getNewEpisodesCount, getNewEpisodesList
-    };
-    
-    console.log('[NSL] Init complete');
 }
     
     if (window.appready) init();
