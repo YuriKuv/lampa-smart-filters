@@ -1029,19 +1029,23 @@
                         const bookBtn = container.find('.button--book').first();
                         if (bookBtn.length) bookBtn.before(button); else container.prepend(button);
                         
+                        // Скрываем штатную кнопку если нужно
+                        if (cfg().hide_lampa_bookmark_button) {
+                            container.find('.button--book').addClass('nsl-hidden-lampa-button');
+                        }
+                        
                         // Добавляем в навигацию для Android TV
                         if (isAndroid && Lampa.Controller) {
                             setTimeout(() => {
                                 Lampa.Controller.collectionSet(container);
                             }, 100);
                         }
-                        } catch (err) { console.error('[NSL] Error:', err.message); }
+                    } catch (err) { console.error('[NSL] Error:', err.message); }
                 }, 500);
             }
         });
         window.nslInsertButton = function() {};
     }
-
     // ======================
     // МЕНЮ (С ПОСТЕРАМИ И ГОДОМ)
     // ======================
@@ -1653,12 +1657,20 @@
 
     function syncFromGist(showNotify) {
         const gist = getGistData();
-        if (!gist) { if (showNotify) notify('⚠️ GitHub Gist не настроен'); return; }
-        
+        if (!gist) { 
+            if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
+            return; 
+        }
+    
         $.ajax({
             url: `https://api.github.com/gists/${gist.id}`,
             method: 'GET',
-            headers: { 'Authorization': `token ${gist.token}`, 'Accept': 'application/vnd.github.v3+json' },
+            dataType: 'json',
+            headers: {
+                'Authorization': `token ${gist.token}`,
+                'Accept': 'application/vnd.github.v3+json'
+            },
+            crossDomain: true,
             success: (data) => {
                 try {
                     let changed = false;
@@ -1701,10 +1713,16 @@
                     Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
                     setTimeout(() => renderBookmarks(), 500);
                     if (showNotify) notify(changed ? '📥 Данные загружены с Gist' : '✅ Актуально');
-                } catch(e) { console.error('[NSL] Parse error:', e); if (showNotify) notify('❌ Ошибка чтения данных'); }
+                } catch(e) {
+                    console.error('[NSL] Parse error:', e);
+                    if (showNotify) notify('❌ Ошибка чтения данных');
+                }
             },
-            error: () => { if (showNotify) notify('❌ Ошибка загрузки с Gist'); },
-            timeout: 15000, crossDomain: true
+            error: (xhr) => {
+                console.error('[NSL] Load error:', xhr.status, xhr.statusText);
+                if (showNotify) notify('❌ Ошибка загрузки с Gist');
+            },
+            timeout: 20000
         });
     }
 
@@ -1834,42 +1852,60 @@
     function applyHideLampaElements() {
         const c = cfg();
         
-        // Скрываем пункт "Закладки" в меню
-        if (c.hide_lampa_bookmarks) {
+        // Скрываем пункты меню Lampa (ищем по тексту)
+        function hideMenuItems() {
             $('.menu__list').find('.menu__item').each(function() {
                 const text = $(this).find('.menu__text').text().trim().toLowerCase();
-                if (text === 'закладки' || text === 'bookmarks') $(this).addClass('nsl-hidden-lampa-item');
+                
+                // Скрываем "Избранное" и "Закладки" Lampa (НЕ наш "⭐ Избранное")
+                if (c.hide_lampa_bookmarks) {
+                    if (text === 'избранное' && !$(this).find('.menu__text').text().includes('⭐')) {
+                        $(this).addClass('nsl-hidden-lampa-item');
+                    }
+                    if (text === 'закладки' || text === 'bookmarks') {
+                        $(this).addClass('nsl-hidden-lampa-item');
+                    }
+                } else {
+                    if (text === 'закладки' || text === 'bookmarks') {
+                        $(this).removeClass('nsl-hidden-lampa-item');
+                    }
+                }
+                
+                // Скрываем "История"
+                if (c.hide_lampa_history) {
+                    if (text === 'история' || text === 'history') {
+                        $(this).addClass('nsl-hidden-lampa-item');
+                    }
+                } else {
+                    if (text === 'история' || text === 'history') {
+                        $(this).removeClass('nsl-hidden-lampa-item');
+                    }
+                }
             });
-            const lampaBookmarks = Lampa.Storage.get('bookmarks', []);
-            if (lampaBookmarks.length > 0) {
-                Lampa.Storage.set(`nsl_lampa_bookmarks_backup_${PROFILE_ID}`, lampaBookmarks);
-                Lampa.Storage.set('bookmarks', []);
+            
+            // Очищаем штатные закладки
+            if (c.hide_lampa_bookmarks) {
+                const lampaBookmarks = Lampa.Storage.get('bookmarks', []);
+                if (lampaBookmarks.length > 0) {
+                    Lampa.Storage.set(`nsl_lampa_bookmarks_backup_${PROFILE_ID}`, lampaBookmarks);
+                    Lampa.Storage.set('bookmarks', []);
+                }
+            } else {
+                const backup = Lampa.Storage.get(`nsl_lampa_bookmarks_backup_${PROFILE_ID}`, []);
+                if (backup.length > 0) Lampa.Storage.set('bookmarks', backup);
             }
-        } else {
-            $('.nsl-hidden-lampa-item').removeClass('nsl-hidden-lampa-item');
-            const backup = Lampa.Storage.get(`nsl_lampa_bookmarks_backup_${PROFILE_ID}`, []);
-            if (backup.length > 0) Lampa.Storage.set('bookmarks', backup);
         }
         
-        // Скрываем кнопку "Избранное" (button--book) на странице фильма
+        // Вызываем сразу
+        hideMenuItems();
+        // И повторяем через 2 секунды (после полного рендера)
+        setTimeout(hideMenuItems, 2000);
+        
+        // Кнопка на странице фильма
         if (c.hide_lampa_bookmark_button) {
             $('.button--book').addClass('nsl-hidden-lampa-button');
         } else {
             $('.nsl-hidden-lampa-button').removeClass('nsl-hidden-lampa-button');
-        }
-        
-        // Скрываем пункт "История" в меню
-        if (c.hide_lampa_history) {
-            $('.menu__list').find('.menu__item').each(function() {
-                const text = $(this).find('.menu__text').text().trim().toLowerCase();
-                if (text === 'история' || text === 'history') $(this).addClass('nsl-hidden-lampa-item');
-            });
-        } else {
-            // Убираем только историю, не трогаем закладки
-            $('.menu__list').find('.menu__item').each(function() {
-                const text = $(this).find('.menu__text').text().trim().toLowerCase();
-                if (text === 'история' || text === 'history') $(this).removeClass('nsl-hidden-lampa-item');
-            });
         }
     }
 
