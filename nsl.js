@@ -315,7 +315,7 @@
         const menuList = $('.menu__list').first();
         if (!menuList.length) return;
         getBookmarks().forEach(item => {
-            const el = $(`<li class="menu__item selector nsl-bookmark-item"><div class="menu__ico">${ICON_FLAG}</div><div class="menu__text">${item.name}</div></li>`);
+            const el = $(`<li class="menu__item selector nsl-bookmark-item"><div class="menu__ico">${ICON_FLAG}</div><div class="menu__text" style="line-height:1.5;padding-top:0.3em;padding-bottom:0.3em;">${item.name}</div></li>`);
             el.on('hover:enter', (e) => { e.stopPropagation(); openBookmark(item); });
             el.on('hover:long', (e) => {
                 e.stopPropagation();
@@ -523,6 +523,52 @@
             notify(`🧹 Авто-удалено просмотренных: ${toRemove.length}`);
             if (c.gist_token && c.gist_id) { syncToGist('favorites', false); syncToGist('timeline', false); }
         }
+    }
+
+    function checkUnfinishedWatching() {
+        const c = cfg();
+        if (!c.auto_watching) return;
+        
+        const now = Date.now();
+        const remindAfter = 7 * 24 * 60 * 60 * 1000; // 7 дней
+        const timeline = getTimeline();
+        const favorites = getFavorites();
+        
+        const unfinished = favorites.filter(f => {
+            if (f.category !== 'watching') return false;
+            const lastUpdate = f.updated || f.added;
+            if (now - lastUpdate < remindAfter) return false;
+            
+            const baseId = getBaseTmdbId(f.tmdb_id);
+            let maxPercent = 0;
+            for (const key in timeline) {
+                if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
+                    maxPercent = Math.max(maxPercent, timeline[key].percent || 0);
+                }
+            }
+            return maxPercent >= 20 && maxPercent <= 80;
+        });
+        
+        if (unfinished.length > 0) {
+            const titles = unfinished.slice(0, 3).map(f => {
+                const p = getProgressPercent(f.tmdb_id);
+                return `"${f.data?.title || f.data?.name || 'Без названия'}" (${p}%)`;
+            }).join(', ');
+            
+            notify(`🎬 Не доcмотрено: ${titles}`);
+        }
+    }
+    
+    function getProgressPercent(tmdbId) {
+        const timeline = getTimeline();
+        const baseId = getBaseTmdbId(tmdbId);
+        let maxPercent = 0;
+        for (const key in timeline) {
+            if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
+                maxPercent = Math.max(maxPercent, timeline[key].percent || 0);
+            }
+        }
+        return maxPercent;
     }
     
     let returnedToWatchingMap = {};
@@ -2352,6 +2398,7 @@
             syncTimelineWithCategories();
             checkNewEpisodes(false);
             checkAutoRemoveWatched();
+            checkUnfinishedWatching();
         }, 3000);
         
         Lampa.Listener.follow('state:changed', (e) => {
