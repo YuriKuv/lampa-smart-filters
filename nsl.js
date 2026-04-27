@@ -1156,7 +1156,6 @@
             { title: '🔍 Поиск по избранному', onSelect: () => searchFavorites() },
             { title: '📊 Статистика просмотров', onSelect: () => showWatchStats() },
             { title: '🕐 История просмотров', onSelect: () => showHistory() },
-            { title: '🤖 Умные рекомендации', onSelect: () => showRecommendations() },
             { title: '──────────', separator: true },
             { title: '◀ Назад', onSelect: () => showFavoritesMenu() },
             { title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') }
@@ -2368,77 +2367,6 @@
                 menuList.append(el);
             }
         }, 2000);
-    }
-
-    // ======================
-    // УМНЫЕ РЕКОМЕНДАЦИИ
-    // ======================
-
-    function showRecommendations() {
-        const favorites = getFavorites();
-        const history = getHistory();
-        
-        // Собираем предпочтения из просмотренного и избранного
-        const preferredGenres = new Map();
-        
-        // Из истории
-        history.forEach(h => {
-            const genres = h.data?.genre_ids || h.data?.genres?.map(g => g.id) || [];
-            genres.forEach(g => preferredGenres.set(g, (preferredGenres.get(g) || 0) + 2));
-        });
-        
-        // Из избранного
-        favorites.forEach(f => {
-            const genres = f.data?.genre_ids || [];
-            genres.forEach(g => preferredGenres.set(g, (preferredGenres.get(g) || 0) + 1));
-        });
-        
-        if (preferredGenres.size === 0) {
-            notify('Недостаточно данных для рекомендаций. Смотрите больше фильмов!');
-            return;
-        }
-        
-        // Показываем популярные жанры
-        const sortedGenres = [...preferredGenres.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-        
-        const genreNames = {
-            28: 'Боевик', 12: 'Приключения', 16: 'Мультфильм', 35: 'Комедия', 80: 'Криминал',
-            99: 'Документальный', 18: 'Драма', 10751: 'Семейный', 14: 'Фэнтези', 36: 'История',
-            27: 'Ужасы', 10402: 'Музыка', 9648: 'Детектив', 10749: 'Мелодрама', 878: 'Фантастика',
-            10770: 'ТВ фильм', 53: 'Триллер', 10752: 'Военный', 37: 'Вестерн', 10759: 'Боевик',
-            10762: 'Детский', 10763: 'Новости', 10764: 'Реалити', 10765: 'Фэнтези'
-        };
-        
-        const menuItems = [];
-        
-        sortedGenres.forEach(([genreId, weight]) => {
-            const name = genreNames[genreId] || `Жанр ${genreId}`;
-            const stars = '⭐'.repeat(Math.min(weight, 5));
-            menuItems.push({
-                title: `${stars} ${name}`,
-                onSelect: () => {
-                    // Открываем категорию с этим жанром
-                    Lampa.Activity.push({
-                        url: 'discover/movie',
-                        title: `${name} (рекомендация)`,
-                        component: 'category_full',
-                        source: 'tmdb',
-                        genres: String(genreId),
-                        page: 1
-                    });
-                }
-            });
-        });
-        
-        menuItems.push({ title: '──────────', separator: true });
-        menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesMenu() });
-        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
-        
-        Lampa.Select.show({
-            title: '🤖 Рекомендации по жанрам',
-            items: menuItems,
-            onBack: () => showFavoritesMenu()
-        });
     }
     
     // ======================
