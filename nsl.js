@@ -1043,7 +1043,7 @@
         if ($('.nsl-favorites-item').length) return;
         const newEpisodesCount = getNewEpisodesCount();
         const badge = newEpisodesCount > 0 ? ` <span style="background:#f44336;color:#fff;border-radius:50%;padding:0 0.3em;font-size:0.8em;margin-left:0.5em;">${newEpisodesCount}</span>` : '';
-        const el = $(`<li class="menu__item selector nsl-favorites-item"><div class="menu__ico"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" stroke="currentColor" stroke-width="1" d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></div><div class="menu__text">⭐ Избранное${badge}</div></li>`);
+        const el = $(`<li class="menu__item selector nsl-favorites-item"><div class="menu__ico"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" stroke="currentColor" stroke-width="1" d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></div><div class="menu__text">Избранное${badge}</div></li>`);
         el.on('hover:enter', (e) => { e.stopPropagation(); showFavoritesMenu(); });
         menuList.append(el);
     }
@@ -2217,8 +2217,34 @@
     }
 
     function addSettingsButton() {
+        // Добавляем папку в основные настройки
+        if (Lampa.SettingsApi && Lampa.SettingsApi.addComponent) {
+            Lampa.SettingsApi.addComponent({
+                component: 'nsl_sync',
+                name: 'NSL Sync',
+                icon: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
+                onSelect: () => {
+                    Lampa.Activity.push({
+                        url: '',
+                        component: 'nsl_settings',
+                        page: 1
+                    });
+                }
+            });
+            
+            // Регистрируем компонент для показа настроек
+            Lampa.Component.add('nsl_settings', {
+                create: function() {
+                    this.activity.loader(false);
+                    showMainMenu();
+                    return $('<div></div>');
+                }
+            });
+        }
+        
+        // Также добавляем в боковое меню для быстрого доступа
         setTimeout(() => {
-            let menuList = $('.menu__list').eq(2); // Меню 2 — правая панель
+            let menuList = $('.menu__list').eq(2);
             if (!menuList.length) menuList = $('.menu__list').last();
             if (menuList.length && !$('.nsl-settings-item').length) {
                 const el = $(`<li class="menu__item selector nsl-settings-item"><div class="menu__text">⚙️ NSL Sync</div></li>`);
@@ -2320,10 +2346,12 @@
         // Добавляем стили для скрытия элементов Lampa
         $('<style>').text('.nsl-hidden-lampa-item{display:none!important}.nsl-hidden-lampa-button{display:none!important}').appendTo('head');
         
+        // Регистрируем компонент настроек сразу (до таймеров)
+        addSettingsButton();
+        
         setTimeout(() => {
             addBookmarkButton();
             addFavoritesToMenu();
-            addSettingsButton();
             renderBookmarks();
             applyHideLampaElements();
         }, 1000);
