@@ -2235,22 +2235,18 @@
     function showRecommendations() {
         const favorites = getFavorites();
         const history = getHistory();
-        const timeline = getTimeline();
         
         // Собираем предпочтения из просмотренного и избранного
         const preferredGenres = new Map();
-        const watchedIds = new Set();
         
         // Из истории
         history.forEach(h => {
-            watchedIds.add(h.id);
             const genres = h.data?.genre_ids || h.data?.genres?.map(g => g.id) || [];
             genres.forEach(g => preferredGenres.set(g, (preferredGenres.get(g) || 0) + 2));
         });
         
         // Из избранного
         favorites.forEach(f => {
-            watchedIds.add(f.card_id);
             const genres = f.data?.genre_ids || [];
             genres.forEach(g => preferredGenres.set(g, (preferredGenres.get(g) || 0) + 1));
         });
@@ -2285,7 +2281,7 @@
                         title: `${name} (рекомендация)`,
                         component: 'category_full',
                         source: 'tmdb',
-                        genres: genreId,
+                        genres: String(genreId),
                         page: 1
                     });
                 }
