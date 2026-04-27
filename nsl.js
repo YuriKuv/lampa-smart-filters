@@ -1038,12 +1038,12 @@
     // ======================
     
     function addFavoritesToMenu() {
-        const menuList = $('.menu__list').eq(1);
+        const menuList = $('.menu__list').eq(0); // Меню 0 — левая панель с фильмами и закладками
         if (!menuList.length) return;
         if ($('.nsl-favorites-item').length) return;
         const newEpisodesCount = getNewEpisodesCount();
         const badge = newEpisodesCount > 0 ? ` <span style="background:#f44336;color:#fff;border-radius:50%;padding:0 0.3em;font-size:0.8em;margin-left:0.5em;">${newEpisodesCount}</span>` : '';
-        const el = $(`<li class="menu__item selector nsl-favorites-item"><div class="menu__text">⭐ Избранное${badge}</div></li>`);
+        const el = $(`<li class="menu__item selector nsl-favorites-item"><div class="menu__ico"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" stroke="currentColor" stroke-width="1" d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></div><div class="menu__text">⭐ Избранное${badge}</div></li>`);
         el.on('hover:enter', (e) => { e.stopPropagation(); showFavoritesMenu(); });
         menuList.append(el);
     }
@@ -2218,8 +2218,8 @@
 
     function addSettingsButton() {
         setTimeout(() => {
-            let menuList = $('.menu__list').last();
-            if (!menuList.length) menuList = $('.menu__list').eq(1);
+            let menuList = $('.menu__list').eq(2); // Меню 2 — правая панель
+            if (!menuList.length) menuList = $('.menu__list').last();
             if (menuList.length && !$('.nsl-settings-item').length) {
                 const el = $(`<li class="menu__item selector nsl-settings-item"><div class="menu__text">⚙️ NSL Sync</div></li>`);
                 el.on('hover:enter', (e) => { e.stopPropagation(); showMainMenu(); });
