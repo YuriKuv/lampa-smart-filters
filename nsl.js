@@ -268,19 +268,28 @@
         const act = Lampa.Activity.active();
         if (!isAllowedForBookmark()) { notify('Здесь нельзя создать закладку'); return; }
         if (bookmarkExists(act)) { notify('Уже есть'); return; }
-
+    
         Lampa.Input.edit({
             title: 'Название',
-            value: act.title || act.name || 'Закладка'
+            value: act.title || act.name || 'Закладка',
+            free: true
         }, (val) => {
-            if (!val) return;
+            if (!val) {
+                // Отмена — возвращаем фокус
+                if (isAndroid) Lampa.Controller.toggle('content');
+                return;
+            }
             const l = getBookmarks();
             l.push({ ...normalizeBookmark(act), name: val.trim() });
             saveBookmarks(l);
             const c = cfg();
             if (c.sync_on_add && c.gist_token && c.gist_id) syncToGist('bookmarks', false);
             notify('Сохранено');
-        }, () => {});
+            if (isAndroid) Lampa.Controller.toggle('content');
+        }, () => {
+            // Колбэк отмены
+            if (isAndroid) Lampa.Controller.toggle('content');
+        });
     }
 
     function removeBookmark(item) {
