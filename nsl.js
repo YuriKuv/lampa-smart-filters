@@ -1028,7 +1028,14 @@
                         });
                         const bookBtn = container.find('.button--book').first();
                         if (bookBtn.length) bookBtn.before(button); else container.prepend(button);
-                    } catch (err) { console.error('[NSL] Error:', err.message); }
+                        
+                        // Добавляем в навигацию для Android TV
+                        if (isAndroid && Lampa.Controller) {
+                            setTimeout(() => {
+                                Lampa.Controller.collectionSet(container);
+                            }, 100);
+                        }
+                        } catch (err) { console.error('[NSL] Error:', err.message); }
                 }, 500);
             }
         });
@@ -1830,10 +1837,9 @@
         // Скрываем пункт "Закладки" в меню
         if (c.hide_lampa_bookmarks) {
             $('.menu__list').find('.menu__item').each(function() {
-                const text = $(this).find('.menu__text').text().trim();
-                if (text === 'Закладки' || text === 'Bookmarks') $(this).addClass('nsl-hidden-lampa-item');
+                const text = $(this).find('.menu__text').text().trim().toLowerCase();
+                if (text === 'закладки' || text === 'bookmarks') $(this).addClass('nsl-hidden-lampa-item');
             });
-            // Очищаем штатные закладки
             const lampaBookmarks = Lampa.Storage.get('bookmarks', []);
             if (lampaBookmarks.length > 0) {
                 Lampa.Storage.set(`nsl_lampa_bookmarks_backup_${PROFILE_ID}`, lampaBookmarks);
@@ -1845,7 +1851,7 @@
             if (backup.length > 0) Lampa.Storage.set('bookmarks', backup);
         }
         
-        // Скрываем кнопку "Избранное" на странице фильма
+        // Скрываем кнопку "Избранное" (button--book) на странице фильма
         if (c.hide_lampa_bookmark_button) {
             $('.button--book').addClass('nsl-hidden-lampa-button');
         } else {
@@ -1855,11 +1861,15 @@
         // Скрываем пункт "История" в меню
         if (c.hide_lampa_history) {
             $('.menu__list').find('.menu__item').each(function() {
-                const text = $(this).find('.menu__text').text().trim();
-                if (text === 'История' || text === 'History') $(this).addClass('nsl-hidden-lampa-item');
+                const text = $(this).find('.menu__text').text().trim().toLowerCase();
+                if (text === 'история' || text === 'history') $(this).addClass('nsl-hidden-lampa-item');
             });
         } else {
-            $('.nsl-hidden-lampa-item').removeClass('nsl-hidden-lampa-item');
+            // Убираем только историю, не трогаем закладки
+            $('.menu__list').find('.menu__item').each(function() {
+                const text = $(this).find('.menu__text').text().trim().toLowerCase();
+                if (text === 'история' || text === 'history') $(this).removeClass('nsl-hidden-lampa-item');
+            });
         }
     }
 
