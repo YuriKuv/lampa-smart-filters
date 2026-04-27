@@ -1220,7 +1220,25 @@
             };
         });
         menuItems.push({ title: '──────────', separator: true });
-        menuItems.push({ title: '✅ Отметить всё просмотренным', onSelect: () => { clearAllNewEpisodes(); notify('✅ Все новые серии отмечены'); } });
+        menuItems.push({ 
+            title: '✅ Отметить всё просмотренным', 
+            onSelect: () => {
+                Lampa.Select.show({
+                    title: '⚠️ Отметить все новые серии просмотренными?',
+                    items: [
+                        { title: '✅ Да', action: 'confirm' },
+                        { title: '❌ Отмена', action: 'cancel' }
+                    ],
+                    onSelect: (opt) => {
+                        if (opt.action === 'confirm') {
+                            clearAllNewEpisodes();
+                            notify('✅ Все новые серии отмечены');
+                        }
+                    },
+                    onBack: () => Lampa.Controller.toggle('content')
+                });
+            }
+        });
         menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesMenu() });
         menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
         Lampa.Select.show({ title: '🔔 Новые серии', items: menuItems, onBack: () => showFavoritesMenu() });
@@ -1577,7 +1595,25 @@
             };
         });
         menuItems.push({ title: '──────────', separator: true });
-        menuItems.push({ title: '🗑️ Очистить историю', onSelect: () => { saveHistory([]); notify('История очищена'); } });
+        menuItems.push({ 
+            title: '🗑️ Очистить историю', 
+            onSelect: () => {
+                Lampa.Select.show({
+                    title: '⚠️ Очистить историю просмотров?',
+                    items: [
+                        { title: '✅ Да, очистить', action: 'confirm' },
+                        { title: '❌ Отмена', action: 'cancel' }
+                    ],
+                    onSelect: (opt) => {
+                        if (opt.action === 'confirm') {
+                            saveHistory([]);
+                            notify('История очищена');
+                        }
+                    },
+                    onBack: () => Lampa.Controller.toggle('content')
+                });
+            }
+        });
         menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesMenu() });
         menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
         Lampa.Select.show({ title: '🕐 История просмотров', items: menuItems, onBack: () => showFavoritesMenu() });
@@ -2029,7 +2065,29 @@
         items.push({ title: '──────────', separator: true });
         items.push({ title: '🗑️ Очистить лог', action: 'clear' });
         items.push({ title: '❌ Закрыть', onSelect: () => {} });
-        Lampa.Select.show({ title: '📋 Лог перемещений', items, onSelect: (item) => { if (item.action === 'clear') { saveMoveLog([]); notify('📋 Лог очищен'); } }, onBack: () => showMainMenu() });
+        Lampa.Select.show({
+            title: '📋 Лог перемещений',
+            items: items,
+            onSelect: (item) => {
+                if (item.action === 'clear') {
+                    Lampa.Select.show({
+                        title: '⚠️ Очистить лог перемещений?',
+                        items: [
+                            { title: '✅ Да, очистить', action: 'confirm' },
+                            { title: '❌ Отмена', action: 'cancel' }
+                        ],
+                        onSelect: (opt) => {
+                            if (opt.action === 'confirm') {
+                                saveMoveLog([]);
+                                notify('📋 Лог очищен');
+                            }
+                        },
+                        onBack: () => Lampa.Controller.toggle('content')
+                    });
+                }
+            },
+            onBack: () => showMainMenu()
+        });
     }
     
     function showSectionsSettings() {
@@ -2045,7 +2103,23 @@
             onSelect: (item) => {
                 if (item.action === 'toggle_position') { c.button_position = c.button_position === 'side' ? 'top' : 'side'; saveCfg(c); notify('Настройка применится после перезагрузки'); showSectionsSettings(); }
                 else if (item.action === 'save_section') { saveBookmark(); setTimeout(() => showSectionsSettings(), 1000); }
-                else if (item.action === 'clear_sections') { saveBookmarks([]); notify('🗑️ Все закладки удалены'); showSectionsSettings(); }
+                else if (item.action === 'clear_sections') {
+                    Lampa.Select.show({
+                        title: '⚠️ Удалить все закладки разделов?',
+                        items: [
+                            { title: '✅ Да, удалить все', action: 'confirm' },
+                            { title: '❌ Отмена', action: 'cancel' }
+                        ],
+                        onSelect: (opt) => {
+                            if (opt.action === 'confirm') {
+                                saveBookmarks([]);
+                                notify('🗑️ Все закладки удалены');
+                            }
+                            showSectionsSettings();
+                        },
+                        onBack: () => showSectionsSettings()
+                    });
+                }
                 else if (item.action === 'back') showMainMenu();
             },
             onBack: () => showMainMenu()
