@@ -2393,7 +2393,6 @@
     function init() {
         if (!cfg().enabled) return;
         console.log('[NSL] Init v26 for profile:', PROFILE_ID);
-        if (c.show_kp_rating) patchRatingModule();
         
         // Добавляем стили для скрытия элементов Lampa
         $('<style>').text('.nsl-hidden-lampa-item{display:none!important}.nsl-hidden-lampa-button{display:none!important}').appendTo('head');
@@ -2415,6 +2414,7 @@
         const c = cfg();
         if (c.auto_backup) startAutoBackup();
         if (c.show_timeline_on_cards) enableTimelineOnCards();
+        if (c.show_kp_rating) patchRatingModule();  // ← перенёс сюда, после const c
         if (c.check_new_episodes) startSeriesCheckTimer();
         
         // Добавляем в историю при открытии фильма
