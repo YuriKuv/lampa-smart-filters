@@ -581,21 +581,6 @@
         };
     }
     
-    function cleanupTimeline() {
-        const c = cfg();
-        if (!c.cleanup_older_days && !c.cleanup_completed) return;
-        const now = Date.now();
-        const olderThan = c.cleanup_older_days * 24 * 60 * 60 * 1000;
-        const timeline = getTimeline();
-        let changed = false;
-        for (const key in timeline) {
-            const record = timeline[key];
-            if (olderThan > 0 && record.updated && (now - record.updated) > olderThan) { delete timeline[key]; changed = true; }
-            else if (c.cleanup_completed && record.percent >= 95) { delete timeline[key]; changed = true; }
-        }
-        if (changed) { saveTimeline(timeline); notify('🧹 Таймкоды очищены'); }
-    }
-    
     function cleanupDuplicateCategories() {
         const favorites = getFavorites();
         const tmdbMap = new Map();
@@ -2331,9 +2316,8 @@
         const c = cfg();
         if (c.sync_on_start && c.gist_token && c.gist_id) setTimeout(() => syncFromGist(false), 5000);
     }
-
+    
     function init() {
-        if (c.auto_backup) startAutoBackup();
         if (!cfg().enabled) return;
         console.log('[NSL] Init v26 for profile:', PROFILE_ID);
         
@@ -2347,7 +2331,7 @@
             renderBookmarks();
             applyHideLampaElements();
         }, 1000);
-
+    
         addFavoriteButtonToCard();
         addStatusToCard();
         initPlayerHandler();
@@ -2355,6 +2339,7 @@
         onAppStart();
         
         const c = cfg();
+        if (c.auto_backup) startAutoBackup();
         if (c.show_timeline_on_cards) enableTimelineOnCards();
         if (c.check_new_episodes) startSeriesCheckTimer();
         
