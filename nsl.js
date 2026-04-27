@@ -112,9 +112,7 @@
             check_new_episodes: true,
             new_episodes_notify: true,
             new_episodes_check_interval: 24,
-            hide_lampa_bookmarks: false,
-            hide_lampa_bookmark_button: false,
-            hide_lampa_history: false
+            hide_lampa_bookmark_button: false
         }) || {};
     }
 
@@ -1924,55 +1922,6 @@
     function applyHideLampaElements() {
         const c = cfg();
         
-        // Скрываем пункты меню Lampa (ищем по тексту)
-        function hideMenuItems() {
-            $('.menu__list').find('.menu__item').each(function() {
-                const text = $(this).find('.menu__text').text().trim().toLowerCase();
-                
-                // Скрываем "Избранное" и "Закладки" Lampa (НЕ наш "⭐ Избранное")
-                if (c.hide_lampa_bookmarks) {
-                    if (text === 'избранное' && !$(this).find('.menu__text').text().includes('⭐')) {
-                        $(this).addClass('nsl-hidden-lampa-item');
-                    }
-                    if (text === 'закладки' || text === 'bookmarks') {
-                        $(this).addClass('nsl-hidden-lampa-item');
-                    }
-                } else {
-                    if (text === 'закладки' || text === 'bookmarks') {
-                        $(this).removeClass('nsl-hidden-lampa-item');
-                    }
-                }
-                
-                // Скрываем "История"
-                if (c.hide_lampa_history) {
-                    if (text === 'история' || text === 'history') {
-                        $(this).addClass('nsl-hidden-lampa-item');
-                    }
-                } else {
-                    if (text === 'история' || text === 'history') {
-                        $(this).removeClass('nsl-hidden-lampa-item');
-                    }
-                }
-            });
-            
-            // Очищаем штатные закладки
-            if (c.hide_lampa_bookmarks) {
-                const lampaBookmarks = Lampa.Storage.get('bookmarks', []);
-                if (lampaBookmarks.length > 0) {
-                    Lampa.Storage.set(`nsl_lampa_bookmarks_backup_${PROFILE_ID}`, lampaBookmarks);
-                    Lampa.Storage.set('bookmarks', []);
-                }
-            } else {
-                const backup = Lampa.Storage.get(`nsl_lampa_bookmarks_backup_${PROFILE_ID}`, []);
-                if (backup.length > 0) Lampa.Storage.set('bookmarks', backup);
-            }
-        }
-        
-        // Вызываем сразу
-        hideMenuItems();
-        // И повторяем через 2 секунды (после полного рендера)
-        setTimeout(hideMenuItems, 2000);
-        
         // Кнопка на странице фильма
         if (c.hide_lampa_bookmark_button) {
             $('.button--book').addClass('nsl-hidden-lampa-button');
@@ -2006,9 +1955,7 @@
                 { title: `⏱️ Проверка серий: ${c.new_episodes_check_interval} ч.`, action: 'set_episodes_check_interval' },
                 { title: `🔍 Проверить сейчас${newEpisodesCount > 0 ? ` (${newEpisodesCount})` : ''}`, action: 'check_episodes_now' },
                 { title: '──────────', separator: true },
-                { title: `👁 Скрыть закладки Lampa: ${c.hide_lampa_bookmarks ? 'Да' : 'Нет'}`, action: 'toggle_hide_bookmarks' },
                 { title: `👁 Скрыть кнопку Избранное: ${c.hide_lampa_bookmark_button ? 'Да' : 'Нет'}`, action: 'toggle_hide_bookmark_btn' },
-                { title: `👁 Скрыть историю Lampa: ${c.hide_lampa_history ? 'Да' : 'Нет'}`, action: 'toggle_hide_history' },
                 { title: '──────────', separator: true },
                 { title: `🔄 Синхронизировать сейчас`, action: 'sync_now' },
                 { title: `🧹 Очистить дубликаты`, action: 'cleanup_duplicates' },
@@ -2051,9 +1998,7 @@
                     });
                 }
                 else if (item.action === 'check_episodes_now') { checkNewEpisodes(true); showMainMenu(); }
-                else if (item.action === 'toggle_hide_bookmarks') { c.hide_lampa_bookmarks = !c.hide_lampa_bookmarks; saveCfg(c); applyHideLampaElements(); showMainMenu(); }
                 else if (item.action === 'toggle_hide_bookmark_btn') { c.hide_lampa_bookmark_button = !c.hide_lampa_bookmark_button; saveCfg(c); applyHideLampaElements(); showMainMenu(); }
-                else if (item.action === 'toggle_hide_history') { c.hide_lampa_history = !c.hide_lampa_history; saveCfg(c); applyHideLampaElements(); showMainMenu(); }
                 else if (item.action === 'sync_now') { syncToGist('favorites', false); syncToGist('timeline', false); syncToGist('bookmarks', false); notify('🔄 Синхронизация...'); setTimeout(() => syncFromGist(true), 1500); }
                 else if (item.action === 'cleanup_duplicates') { if (cleanupDuplicateCategories()) notify('🧹 Дубликаты очищены'); else notify('✅ Дубликатов не найдено'); showMainMenu(); }
                 else if (item.action === 'show_log') showMoveLog();
