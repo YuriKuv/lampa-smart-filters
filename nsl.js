@@ -91,6 +91,8 @@
             sync_interval_minutes: 60,
             auto_save: true,
             auto_sync: true,
+            auto_backup: true,
+            auto_backup_interval: 24,
             sync_interval: 30,
             sync_strategy: 'max_time',
             auto_abandoned: false,
@@ -1078,6 +1080,7 @@
         items.push({ title: '🔍 Поиск по избранному', onSelect: () => searchFavorites() });
         items.push({ title: '📊 Статистика просмотров', onSelect: () => showWatchStats() });
         items.push({ title: '🕐 История просмотров', onSelect: () => showHistory() });
+        items.push({ title: '🤖 Умные рекомендации', onSelect: () => showRecommendations() });
         if (newEpisodesCount > 0) {
             items.push({ title: '──────────', separator: true });
             items.push({ title: `🔔 Новые серии (${newEpisodesCount})`, onSelect: () => showNewEpisodes() });
@@ -1736,6 +1739,40 @@
     let syncTimer = null;
     function startAutoSync() { if (syncTimer) clearInterval(syncTimer); syncTimer = setInterval(() => checkAutoSync(), 5 * 60 * 1000); }
 
+    let autoBackupTimer = null;
+    
+    function startAutoBackup() {
+        const c = cfg();
+        if (!c.auto_backup) return;
+        
+        if (autoBackupTimer) clearInterval(autoBackupTimer);
+        
+        // Первый бэкап через минуту после запуска
+        setTimeout(() => doAutoBackup(), 60000);
+        
+        // Далее раз в сутки (или по настройке)
+        const interval = (c.auto_backup_interval || 24) * 60 * 60 * 1000;
+        autoBackupTimer = setInterval(() => doAutoBackup(), interval);
+    }
+    
+    function doAutoBackup() {
+        try {
+            const data = {
+                version: 5,
+                profile_id: PROFILE_ID,
+                updated: new Date().toISOString(),
+                bookmarks: getBookmarks(),
+                favorites: getFavorites(),
+                timeline: getTimeline()
+            };
+            Lampa.Storage.set(`nsl_autobackup_${PROFILE_ID}`, data);
+            Lampa.Storage.set(`nsl_autobackup_time_${PROFILE_ID}`, Date.now());
+            console.log('[NSL] Auto-backup completed');
+        } catch (e) {
+            console.error('[NSL] Auto-backup failed:', e);
+        }
+    }
+    
     function exportToFile() {
         const data = { version: 5, profile_id: PROFILE_ID, updated: new Date().toISOString(), bookmarks: getBookmarks(), favorites: getFavorites(), timeline: getTimeline() };
         const jsonStr = JSON.stringify(data, null, 2);
@@ -2136,6 +2173,23 @@
             onBack: () => showMainMenu()
         });
     }
+
+    function getSyncStatus() {
+        const lastSync = Lampa.Storage.get(GIST_CACHE + '_last_sync', 0);
+        if (!lastSync) return 'Никогда';
+        
+        const now = Date.now();
+        const diff = now - lastSync;
+        const minutes = Math.floor(diff / 60000);
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(diff / 86400000);
+        
+        if (minutes < 1) return 'Только что';
+        if (minutes < 60) return `${minutes} мин назад`;
+        if (hours < 24) return `${hours} ч назад`;
+        if (days < 7) return `${days} дн назад`;
+        return new Date(lastSync).toLocaleDateString();
+    }
     
     function showGistSetup() {
         const c = cfg();
@@ -2150,6 +2204,8 @@
                 { title: '──────────', separator: true },
                 { title: '💾 Экспорт в файл', action: 'export_file' },
                 { title: '📂 Импорт из файла', action: 'import_file' },
+                { title: '──────────', separator: true },
+                { title: `🔄 Статус: ${getSyncStatus()}`, action: 'sync_status' },
                 { title: '──────────', separator: true },
                 { title: '◀ Назад', action: 'back' }
             ],
@@ -2166,6 +2222,10 @@
                 } else if (item.action === 'export_file') { exportToFile(); setTimeout(() => showGistSetup(), 500); }
                 else if (item.action === 'import_file') { importFromFile(); setTimeout(() => showGistSetup(), 500); }
                 else if (item.action === 'back') showMainMenu();
+                else if (item.action === 'sync_status') {
+                    syncFromGist(true);
+                    setTimeout(() => showGistSetup(), 1500);
+                }
             },
             onBack: () => showMainMenu()
         });
@@ -2181,6 +2241,81 @@
                 menuList.append(el);
             }
         }, 2000);
+    }
+
+    // ======================
+    // УМНЫЕ РЕКОМЕНДАЦИИ
+    // ======================
+
+    function showRecommendations() {
+        const favorites = getFavorites();
+        const history = getHistory();
+        const timeline = getTimeline();
+        
+        // Собираем предпочтения из просмотренного и избранного
+        const preferredGenres = new Map();
+        const watchedIds = new Set();
+        
+        // Из истории
+        history.forEach(h => {
+            watchedIds.add(h.id);
+            const genres = h.data?.genre_ids || h.data?.genres?.map(g => g.id) || [];
+            genres.forEach(g => preferredGenres.set(g, (preferredGenres.get(g) || 0) + 2));
+        });
+        
+        // Из избранного
+        favorites.forEach(f => {
+            watchedIds.add(f.card_id);
+            const genres = f.data?.genre_ids || [];
+            genres.forEach(g => preferredGenres.set(g, (preferredGenres.get(g) || 0) + 1));
+        });
+        
+        if (preferredGenres.size === 0) {
+            notify('Недостаточно данных для рекомендаций. Смотрите больше фильмов!');
+            return;
+        }
+        
+        // Показываем популярные жанры
+        const sortedGenres = [...preferredGenres.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+        
+        const genreNames = {
+            28: 'Боевик', 12: 'Приключения', 16: 'Мультфильм', 35: 'Комедия', 80: 'Криминал',
+            99: 'Документальный', 18: 'Драма', 10751: 'Семейный', 14: 'Фэнтези', 36: 'История',
+            27: 'Ужасы', 10402: 'Музыка', 9648: 'Детектив', 10749: 'Мелодрама', 878: 'Фантастика',
+            10770: 'ТВ фильм', 53: 'Триллер', 10752: 'Военный', 37: 'Вестерн', 10759: 'Боевик',
+            10762: 'Детский', 10763: 'Новости', 10764: 'Реалити', 10765: 'Фэнтези'
+        };
+        
+        const menuItems = [];
+        
+        sortedGenres.forEach(([genreId, weight]) => {
+            const name = genreNames[genreId] || `Жанр ${genreId}`;
+            const stars = '⭐'.repeat(Math.min(weight, 5));
+            menuItems.push({
+                title: `${stars} ${name}`,
+                onSelect: () => {
+                    // Открываем категорию с этим жанром
+                    Lampa.Activity.push({
+                        url: 'discover/movie',
+                        title: `${name} (рекомендация)`,
+                        component: 'category_full',
+                        source: 'tmdb',
+                        genres: genreId,
+                        page: 1
+                    });
+                }
+            });
+        });
+        
+        menuItems.push({ title: '──────────', separator: true });
+        menuItems.push({ title: '◀ Назад', onSelect: () => showFavoritesMenu() });
+        menuItems.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
+        
+        Lampa.Select.show({
+            title: '🤖 Рекомендации по жанрам',
+            items: menuItems,
+            onBack: () => showFavoritesMenu()
+        });
     }
     
     // ======================
@@ -2198,6 +2333,7 @@
     }
 
     function init() {
+        if (c.auto_backup) startAutoBackup();
         if (!cfg().enabled) return;
         console.log('[NSL] Init v26 for profile:', PROFILE_ID);
         
