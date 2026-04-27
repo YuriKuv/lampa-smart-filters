@@ -1133,9 +1133,15 @@
     
     function showMyLists() {
         const newEpisodesCount = getNewEpisodesCount();
+        const unfinishedCount = getUnfinishedCount();
+        
         const items = FAVORITE_CATEGORIES.map(cat => {
             const count = getFavoritesByCategory(cat.id).length;
-            return { title: `${cat.icon} ${cat.name} (${count})`, onSelect: () => showFavoritesByCategory(cat.id, cat.name) };
+            let extra = '';
+            if (cat.id === 'watching' && unfinishedCount > 0) {
+                extra = ' 🔄';
+            }
+            return { title: `${cat.icon} ${cat.name} (${count})${extra}`, onSelect: () => showFavoritesByCategory(cat.id, cat.name) };
         });
         
         if (newEpisodesCount > 0) {
@@ -1147,11 +1153,34 @@
         items.push({ title: '◀ Назад', onSelect: () => showFavoritesMenu() });
         items.push({ title: '❌ Закрыть', onSelect: () => Lampa.Controller.toggle('content') });
         
-        Lampa.Select.show({ title: '📋 Мои списки', items, onBack: () => showFavoritesMenu() });
+        const title = newEpisodesCount > 0 ? `📋 Мои списки 🔔${newEpisodesCount}` : '📋 Мои списки';
+        Lampa.Select.show({ title, items, onBack: () => showFavoritesMenu() });
+    }
+    
+    function getUnfinishedCount() {
+        const now = Date.now();
+        const remindAfter = 7 * 24 * 60 * 60 * 1000;
+        const timeline = getTimeline();
+        const favorites = getFavorites();
+        
+        return favorites.filter(f => {
+            if (f.category !== 'watching') return false;
+            const lastUpdate = f.updated || f.added;
+            if (now - lastUpdate < remindAfter) return false;
+            const baseId = getBaseTmdbId(f.tmdb_id);
+            let maxPercent = 0;
+            for (const key in timeline) {
+                if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
+                    maxPercent = Math.max(maxPercent, timeline[key].percent || 0);
+                }
+            }
+            return maxPercent >= 20 && maxPercent <= 80;
+        }).length;
     }
     
     function showTools() {
         const items = [
+            { title: '▶ Продолжить просмотр', onSelect: () => continueLastWatching() },
             { title: '🎲 Случайный фильм', onSelect: () => showRandomMovie() },
             { title: '🔍 Поиск по избранному', onSelect: () => searchFavorites() },
             { title: '📊 Статистика просмотров', onSelect: () => showWatchStats() },
@@ -1218,6 +1247,50 @@
         showFavoritesList(sorted, categoryName, category);
     }
 
+    function continueLastWatching() {
+        const timeline = getTimeline();
+        const favorites = getFavorites();
+        
+        let bestItem = null;
+        let bestTime = 0;
+        
+        // Ищем последний просмотренный с прогрессом 5-95%
+        const watchingItems = favorites.filter(f => f.category === 'watching');
+        
+        watchingItems.forEach(f => {
+            const baseId = getBaseTmdbId(f.tmdb_id);
+            for (const key in timeline) {
+                if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
+                    const time = timeline[key].updated || 0;
+                    const percent = timeline[key].percent || 0;
+                    if (time > bestTime && percent >= 5 && percent <= 95) {
+                        bestTime = time;
+                        bestItem = f;
+                    }
+                }
+            }
+        });
+        
+        if (!bestItem) {
+            notify('Нет фильмов для продолжения просмотра');
+            return;
+        }
+        
+        const cardData = bestItem.data || {};
+        const method = (bestItem.media_type === 'tv' || cardData.original_name) ? 'tv' : 'movie';
+        const cardId = cardData.id || bestItem.card_id || getBaseTmdbId(bestItem.tmdb_id);
+        const source = cardData.source || 'tmdb';
+        
+        Lampa.Activity.push({
+            id: cardId, method,
+            card: { id: cardId, source, title: cardData.title, name: cardData.name, original_name: cardData.original_name, original_title: cardData.original_title, poster_path: cardData.poster_path, backdrop_path: cardData.backdrop_path, overview: cardData.overview, vote_average: cardData.vote_average, first_air_date: cardData.first_air_date, release_date: cardData.release_date, img: cardData.img },
+            url: '', component: 'full', source, page: 1
+        });
+        
+        const title = cardData.title || cardData.name || 'Без названия';
+        notify(`▶ ${title}`);
+    }
+    
     function searchFavorites() {
         Lampa.Input.edit({ title: 'Поиск по избранному', value: '', free: true }, (query) => {
             if (!query || !query.trim()) { notify('Введите название для поиска'); return; }
@@ -1329,7 +1402,17 @@
                 if (checkData && checkData.seasons_count > 0) {
                     seriesInfo = `${checkData.seasons_count} сез.`;
                     if (checkData.total_episodes > 0) seriesInfo += ` · ${checkData.total_episodes} сер.`;
-                } else if (cardData.number_of_seasons) seriesInfo = `${cardData.number_of_seasons} сез.`;
+                    if (checkData.last_air_date) {
+                        try {
+                            const airDate = new Date(checkData.last_air_date);
+                            const months = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+                            const dateStr = `${airDate.getDate()} ${months[airDate.getMonth()]}`;
+                            seriesInfo += ` · ${dateStr}`;
+                        } catch(e) {}
+                    }
+                } else if (cardData.number_of_seasons) {
+                    seriesInfo = `${cardData.number_of_seasons} сез.`;
+                }
             }
             if (item.category === 'watching') {
                 const baseId = getBaseTmdbId(item.tmdb_id);
@@ -1386,6 +1469,13 @@
                             if (checkData.seasons_count > 0) {
                                 newSeriesInfo = `${checkData.seasons_count} сез.`;
                                 if (checkData.total_episodes > 0) newSeriesInfo += ` · ${checkData.total_episodes} сер.`;
+                                if (checkData.last_air_date) {
+                                    try {
+                                        const airDate = new Date(checkData.last_air_date);
+                                        const months = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+                                        newSeriesInfo += ` · ${airDate.getDate()} ${months[airDate.getMonth()]}`;
+                                    } catch(e) {}
+                                }
                             }
                             if (!newSeriesInfo) return;
                             const subtitleLine = el.find('.nsl-subtitle-line');
