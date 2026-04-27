@@ -108,6 +108,7 @@
             cleanup_older_days: 0,
             cleanup_completed: false,
             show_timeline_on_cards: true,
+            show_kp_rating: true,
             timeline_position: 'bottom',
             check_new_episodes: true,
             new_episodes_notify: true,
@@ -216,7 +217,7 @@
         const allowedFields = ['id', 'title', 'name', 'original_title', 'original_name', 
             'poster_path', 'backdrop_path', 'vote_average', 'release_date', 'first_air_date',
             'overview', 'genre_ids', 'source', 'animation', 'anime', 'kp_rating', 'rating',
-            'number_of_seasons', 'number_of_episodes', 'last_air_date'];
+            'number_of_seasons', 'number_of_episodes', 'last_air_date', 'kinopoisk_id'];
         for (const field of allowedFields) {
             if (card[field] !== undefined) cleaned[field] = card[field];
         }
@@ -964,6 +965,72 @@
         button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
     }
 
+    // ======================
+    // ОТОБРАЖЕНИЕ РЕЙТИНГА КП НА КАРТОЧКЕ
+    // ======================
+
+    function getKPRating(card) {
+        if (card.kp_rating) return parseFloat(card.kp_rating).toFixed(1);
+        if (card.rating && card.rating !== card.vote_average) return parseFloat(card.rating).toFixed(1);
+        return null;
+    }
+    
+    function updateCardRatingElement(cardElement, cardData) {
+        const rating = getKPRating(cardData);
+        let voteEl = cardElement.querySelector('.card__vote');
+        
+        if (rating) {
+            if (!voteEl) {
+                const viewEl = cardElement.querySelector('.card__view');
+                if (viewEl) {
+                    voteEl = document.createElement('div');
+                    voteEl.className = 'card__vote';
+                    viewEl.appendChild(voteEl);
+                }
+            }
+            if (voteEl) {
+                voteEl.textContent = rating;
+                voteEl.style.display = '';
+            }
+        } else if (voteEl) {
+            voteEl.style.display = 'none';
+        }
+    }
+    
+    let ratingModulePatched = false;
+    
+    function patchRatingModule() {
+        if (ratingModulePatched) return;
+        if (!Lampa.Maker || !Lampa.Maker.map) return;
+    
+        try {
+            const cardMap = Lampa.Maker.map('Card');
+            if (cardMap && cardMap.Base) {
+                const originalOnCreate = cardMap.Base.onCreate;
+                
+                cardMap.Base.onCreate = function() {
+                    if (originalOnCreate) originalOnCreate.call(this);
+                    
+                    const c = cfg();
+                    if (!c.show_kp_rating) return;
+                    
+                    setTimeout(() => {
+                        const cardData = this.data;
+                        const cardElement = this.render().get(0);
+                        if (cardData && cardElement) {
+                            updateCardRatingElement(cardElement, cardData);
+                        }
+                    }, 50);
+                };
+                
+                ratingModulePatched = true;
+                console.log('[NSL] Модуль рейтингов КП пропатчен');
+            }
+        } catch(e) {
+            console.warn('[NSL] Не удалось пропатчить модуль КП:', e);
+        }
+    }
+    
     // ======================
     // КНОПКА НА КАРТОЧКЕ
     // ======================
@@ -1950,6 +2017,7 @@
                 { title: '──────────', separator: true },
                 { title: `🎬 Таймкоды на карточках: ${c.show_timeline_on_cards ? 'Вкл' : 'Выкл'}`, action: 'toggle_timeline_cards' },
                 { title: `📍 Позиция таймкодов: ${timelinePosName}`, action: 'timeline_position' },
+                { title: `⭐ Рейтинг КП на карточках: ${c.show_kp_rating ? 'Вкл' : 'Выкл'}`, action: 'toggle_kp_rating' },
                 { title: '──────────', separator: true },
                 { title: `🔔 Новые серии: ${c.check_new_episodes ? 'Вкл' : 'Выкл'}`, action: 'toggle_new_episodes' },
                 { title: `📢 Уведомления о сериях: ${c.new_episodes_notify ? 'Вкл' : 'Выкл'}`, action: 'toggle_new_episodes_notify' },
@@ -1991,6 +2059,11 @@
                 else if (item.action === 'toggle_new_episodes') {
                     c.check_new_episodes = !c.check_new_episodes; saveCfg(c);
                     if (c.check_new_episodes) startSeriesCheckTimer(); else if (seriesCheckTimer) clearInterval(seriesCheckTimer);
+                    showMainMenu();
+                }
+                else if (item.action === 'toggle_kp_rating') {
+                    c.show_kp_rating = !c.show_kp_rating; saveCfg(c);
+                    notify('Рейтинг КП ' + (c.show_kp_rating ? 'включен' : 'выключен'));
                     showMainMenu();
                 }
                 else if (item.action === 'toggle_new_episodes_notify') { c.new_episodes_notify = !c.new_episodes_notify; saveCfg(c); showMainMenu(); }
@@ -2320,6 +2393,7 @@
     function init() {
         if (!cfg().enabled) return;
         console.log('[NSL] Init v26 for profile:', PROFILE_ID);
+        if (c.show_kp_rating) patchRatingModule();
         
         // Добавляем стили для скрытия элементов Lampa
         $('<style>').text('.nsl-hidden-lampa-item{display:none!important}.nsl-hidden-lampa-button{display:none!important}').appendTo('head');
