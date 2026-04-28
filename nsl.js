@@ -2449,10 +2449,19 @@
 
     function addSettingsButton() {
         setTimeout(() => {
-            let menuList = $('.menu__list').eq(2); // Меню 2
+            let menuList = $('.menu__list').eq(2);
             if (!menuList.length) menuList = $('.menu__list').last();
             if (menuList.length && !$('.nsl-settings-item').length) {
-                const el = $(`<li class="menu__item selector nsl-settings-item"><div class="menu__text">⚙️ Избранное+ Настройки</div></li>`);
+                const el = $(`
+                    <li class="menu__item selector nsl-settings-item">
+                        <div class="menu__ico">
+                            <svg viewBox="0 0 24 24" width="20" height="20">
+                                <path fill="currentColor" d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                            </svg>
+                        </div>
+                        <div class="menu__text">Избранное+</div>
+                    </li>
+                `);
                 el.on('hover:enter', (e) => { e.stopPropagation(); showMainMenu(); });
                 menuList.append(el);
             }
