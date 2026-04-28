@@ -76,6 +76,7 @@
     let gistSyncingFav = false;
     let gistSyncingTime = false;
     let gistSyncingBook = false;
+    let gistSyncingHis = false;
 
     function cfg() {
         return Lampa.Storage.get(CFG, {
@@ -1657,6 +1658,42 @@
         if (showNotifyFlag && newFound > 0) notify(`🔔 Найдено новых серий: ${newFound}`);
         else if (showNotifyFlag && checkCount > 0 && newFound === 0) notify('✅ Новых серий нет');
     }
+
+    function checkUpcomingEpisodes() {
+        const c = cfg();
+        if (!c.check_new_episodes || !c.new_episodes_notify) return;
+        
+        const seriesCheck = getSeriesCheck();
+        const favorites = getFavorites();
+        const now = Date.now();
+        const tomorrow = now + 24 * 60 * 60 * 1000;
+        
+        const upcoming = [];
+        
+        for (const key in seriesCheck) {
+            const data = seriesCheck[key];
+            if (!data.last_air_date) continue;
+            
+            try {
+                const airDate = new Date(data.last_air_date).getTime();
+                // Если дата выхода в пределах следующих 24 часов
+                if (airDate > now && airDate < tomorrow) {
+                    const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === key);
+                    if (item && (item.category === 'watching' || item.category === 'planned')) {
+                        upcoming.push({
+                            title: data.title || item.data?.title || item.data?.name || 'Без названия',
+                            date: data.last_air_date
+                        });
+                    }
+                }
+            } catch(e) {}
+        }
+        
+        if (upcoming.length > 0) {
+            const titles = upcoming.slice(0, 3).map(u => `"${u.title}"`).join(', ');
+            notify(`📅 Премьера сегодня: ${titles}`);
+        }
+    }
     
     function countAiredEpisodes(season) {
         if (!season || !season.episodes) return 0;
@@ -1735,6 +1772,10 @@
         history.unshift({ id: card.id, tmdb_id: extractTmdbId(card), media_type: getMediaType(card), data: cleanCardData(card), time: Date.now() });
         if (history.length > 50) history.length = 50;
         saveHistory(history);
+        
+        // Синхронизируем с Gist
+        const c = cfg();
+        if (c.gist_token && c.gist_id) syncToGist('history', false);
     }
     
     function showHistory() {
@@ -1770,6 +1811,8 @@
                         if (opt.action === 'confirm') {
                             saveHistory([]);
                             notify('История очищена');
+                            const c = cfg();
+                            if (c.gist_token && c.gist_id) syncToGist('history', false);
                         }
                     },
                     onBack: () => Lampa.Controller.toggle('content')
@@ -1876,6 +1919,11 @@
             gistSyncingBook = true; busyFlag = () => gistSyncingBook = false;
             fileName = 'nsl_bookmarks.json';
             data = { version: 5, profile_id: PROFILE_ID, updated: new Date().toISOString(), bookmarks: getBookmarks() };
+        } else if (type === 'history') {
+            if (gistSyncingHis) return;
+            gistSyncingHis = true; busyFlag = () => gistSyncingHis = false;
+            fileName = 'nsl_history.json';
+            data = { version: 5, profile_id: PROFILE_ID, updated: new Date().toISOString(), history: getHistory() };
         } else return;
         
         $.ajax({
@@ -1926,6 +1974,12 @@
                     if (bookContent) {
                         const bookData = JSON.parse(bookContent);
                         if (bookData.bookmarks) { saveBookmarks(bookData.bookmarks); changed = true; }
+                    }
+                    // Загружаем историю
+                    const hisContent = data.files['nsl_history.json']?.content;
+                    if (hisContent) {
+                        const hisData = JSON.parse(hisContent);
+                        if (hisData.history) { saveHistory(hisData.history); changed = true; }
                     }
                     // Если нет новых файлов — пробуем старый формат
                     if (!favContent && !timeContent) {
@@ -2522,6 +2576,7 @@
             checkNewEpisodes(false);
             checkAutoRemoveWatched();
             checkUnfinishedWatching();
+            checkUpcomingEpisodes();
         }, 3000);
         
         Lampa.Listener.follow('state:changed', (e) => {
