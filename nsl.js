@@ -2138,7 +2138,7 @@
         const newEpisodesCount = getNewEpisodesCount();
         
         Lampa.Select.show({
-            title: 'NSL Меню',
+            title: 'Избранное+',
             items: [
                 { title: `📌 Закладки разделов (${getBookmarks().length})`, action: 'sections' },
                 { title: `⭐ Избранное (${getFavorites().length})${newEpisodesCount > 0 ? ` 🔔${newEpisodesCount}` : ''}`, action: 'favorites' },
@@ -2449,10 +2449,10 @@
 
     function addSettingsButton() {
         setTimeout(() => {
-            let menuList = $('.menu__list').eq(2); // Меню 2 — правая панель
+            let menuList = $('.menu__list').eq(2); // Меню 2
             if (!menuList.length) menuList = $('.menu__list').last();
             if (menuList.length && !$('.nsl-settings-item').length) {
-                const el = $(`<li class="menu__item selector nsl-settings-item"><div class="menu__text">⚙️ NSL Настройки</div></li>`);
+                const el = $(`<li class="menu__item selector nsl-settings-item"><div class="menu__text">⚙️ Избранное+ Настройки</div></li>`);
                 el.on('hover:enter', (e) => { e.stopPropagation(); showMainMenu(); });
                 menuList.append(el);
             }
