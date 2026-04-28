@@ -2138,7 +2138,7 @@
         const newEpisodesCount = getNewEpisodesCount();
         
         Lampa.Select.show({
-            title: 'NSL Sync v26',
+            title: 'NSL Меню',
             items: [
                 { title: `📌 Закладки разделов (${getBookmarks().length})`, action: 'sections' },
                 { title: `⭐ Избранное (${getFavorites().length})${newEpisodesCount > 0 ? ` 🔔${newEpisodesCount}` : ''}`, action: 'favorites' },
@@ -2452,7 +2452,7 @@
             let menuList = $('.menu__list').eq(2); // Меню 2 — правая панель
             if (!menuList.length) menuList = $('.menu__list').last();
             if (menuList.length && !$('.nsl-settings-item').length) {
-                const el = $(`<li class="menu__item selector nsl-settings-item"><div class="menu__text">⚙️ NSL Sync</div></li>`);
+                const el = $(`<li class="menu__item selector nsl-settings-item"><div class="menu__text">⚙️ NSL Настройки</div></li>`);
                 el.on('hover:enter', (e) => { e.stopPropagation(); showMainMenu(); });
                 menuList.append(el);
             }
