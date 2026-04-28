@@ -1119,7 +1119,7 @@
     
     function showFavoritesMenu() {
         Lampa.Select.show({
-            title: '⭐ Избранное',
+            title: '⭐ Избранное+',
             items: [
                 { title: '📋 Мои списки', onSelect: () => showMyLists() },
                 { title: '🔧 Инструменты', onSelect: () => showTools() },
