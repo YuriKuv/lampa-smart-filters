@@ -2733,55 +2733,7 @@
     
     let statusModulePatched = false;
     
-    function patchCardStatus() {
-        if (statusModulePatched || !Lampa.Maker?.map) return;
-        try {
-            const cardMap = Lampa.Maker.map('Card');
-            if (cardMap?.Base) {
-                const origCreate = cardMap.Base.onCreate;
-                const origVisible = cardMap.Base.onVisible;
-                
-                cardMap.Base.onCreate = function() {
-                    if (origCreate) origCreate.call(this);
-                    this._nslStatusListener = () => this.emit('update');
-                    Lampa.Listener.follow('state:changed', this._nslStatusListener);
-                };
-                
-                cardMap.Base.onVisible = function() {
-                    if (origVisible) origVisible.call(this);
-                    setTimeout(() => this.emit('update'), 200);
-                };
-                
-                cardMap.Base.onUpdate = function() {
-                    const data = this.data;
-                    if (!data?.id) return;
-                    const el = this.render().get(0);
-                    if (!el) return;
-                    el.querySelector('.nsl-card-status')?.remove();
-                    const status = getMovieStatus(data);
-                    if (!status) return;
-                    const div = document.createElement('div');
-                    div.className = 'nsl-card-status';
-                    div.style.backgroundColor = status.bgColor;
-                    div.style.color = status.color;
-                    div.innerHTML = `<span>${status.icon}</span><span>${status.text}</span>`;
-                    el.querySelector('.card__view')?.appendChild(div);
-                };
-                
-                statusModulePatched = true;
-            }
-        } catch(e) {}
-    }
-    
-    function enableStatusOnCards() {
-        injectStatusStyles();
-        patchCardStatus();
-    }
-    
-    function disableStatusOnCards() {
-        document.getElementById('nsl-status-styles')?.remove();
-        document.querySelectorAll('.nsl-card-status').forEach(el => el.remove());
-    }
+
     
     function init() {
         if (!cfg().enabled) return;
