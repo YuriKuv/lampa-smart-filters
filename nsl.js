@@ -858,10 +858,16 @@
             timeline[movieKey] = { time: currentTime, percent, duration, updated: Date.now(), tmdb_id: tmdbId };
             saveTimeline(timeline);
             
-            // Сохраняем в file_view Lampa для отображения на карточках
+            // Сохраняем в file_view Lampa используя movieKey как hash
             if (tmdbId) {
                 const fileView = Lampa.Storage.get('file_view', {});
-                fileView[tmdbId] = { duration, time: currentTime, percent, profile: 0 };
+                fileView[movieKey] = { 
+                    duration, 
+                    time: currentTime, 
+                    percent, 
+                    profile: 0,
+                    updated: Date.now()
+                };
                 Lampa.Storage.set('file_view', fileView, true);
             }
             
@@ -2715,25 +2721,47 @@
             checkUpcomingEpisodes();
         }, 3000);
         
-        // Очищаем file_view от чужих таймкодов
+        // Синхронизируем file_view с нашими таймкодами
         setTimeout(() => {
-            const favs = getFavorites();
-            const favIds = new Set(favs.map(f => getBaseTmdbId(f.tmdb_id)));
-            const fv = Lampa.Storage.get('file_view', {});
-            let fvChanged = false;
-            for (const id in fv) {
-                if (!favIds.has(id)) {
-                    delete fv[id];
-                    fvChanged = true;
+            const timeline = getTimeline();
+            const fileView = Lampa.Storage.get('file_view', {});
+            let changed = false;
+            
+            for (const key in timeline) {
+                const t = timeline[key];
+                if (t.tmdb_id && t.time > 0) {
+                    if (!fileView[key] || (t.updated || 0) > (fileView[key]?.updated || 0)) {
+                        fileView[key] = {
+                            duration: t.duration || 0,
+                            time: t.time,
+                            percent: t.percent || 0,
+                            profile: 0,
+                            updated: t.updated || Date.now()
+                        };
+                        changed = true;
+                    }
                 }
             }
-            if (fvChanged) {
-                Lampa.Storage.set('file_view', fv, true);
+            
+            if (changed) {
+                Lampa.Storage.set('file_view', fileView, true);
                 if (Lampa.Timeline) {
                     Lampa.Timeline.cache = {};
                     Lampa.Timeline.data = {};
                     Lampa.Timeline.read(true);
                 }
+            }
+            
+            // Очищаем file_view от таймкодов которых нет в нашем timeline
+            const timelineKeys = new Set(Object.keys(timeline));
+            for (const key in fileView) {
+                if (!timelineKeys.has(key)) {
+                    delete fileView[key];
+                    changed = true;
+                }
+            }
+            if (changed) {
+                Lampa.Storage.set('file_view', fileView, true);
             }
         }, 4000);
         
