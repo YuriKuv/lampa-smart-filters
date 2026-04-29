@@ -469,12 +469,19 @@
         history = history.filter(h => getBaseTmdbId(h.tmdb_id) !== baseId && h.id != baseId);
         saveHistory(history);
         
-        // Удаляем из штатного file_view Lampa
+        // Удаляем из штатного file_view Lampa (по хешу)
         const fileView = Lampa.Storage.get('file_view', {});
-        if (fileView[baseId]) {
-            delete fileView[baseId];
-            Lampa.Storage.set('file_view', fileView, true);
+        const hash = Lampa.Utils.hash(baseId);
+        if (fileView[hash]) {
+            delete fileView[hash];
         }
+        // И для сериалов тоже — удаляем все ключи содержащие baseId
+        for (const key in fileView) {
+            if (String(key).includes(baseId) || String(Lampa.Utils.hash(String(key))).includes(baseId)) {
+                delete fileView[key];
+            }
+        }
+        Lampa.Storage.set('file_view', fileView, true);
         
         // Удаляем из штатного избранного Lampa (история)
         const fav = Lampa.Storage.get('favorite', {});
@@ -858,10 +865,11 @@
             timeline[movieKey] = { time: currentTime, percent, duration, updated: Date.now(), tmdb_id: tmdbId };
             saveTimeline(timeline);
             
-            // Сохраняем в file_view Lampa используя movieKey как hash
+            // Сохраняем в file_view Lampa используя ХЕШ как ключ
             if (tmdbId) {
                 const fileView = Lampa.Storage.get('file_view', {});
-                fileView[movieKey] = { 
+                const hash = Lampa.Utils.hash(movieKey);
+                fileView[hash] = { 
                     duration, 
                     time: currentTime, 
                     percent, 
@@ -2730,8 +2738,9 @@
             for (const key in timeline) {
                 const t = timeline[key];
                 if (t.tmdb_id && t.time > 0) {
-                    if (!fileView[key] || (t.updated || 0) > (fileView[key]?.updated || 0)) {
-                        fileView[key] = {
+                    const hash = Lampa.Utils.hash(key);
+                    if (!fileView[hash] || (t.updated || 0) > (fileView[hash]?.updated || 0)) {
+                        fileView[hash] = {
                             duration: t.duration || 0,
                             time: t.time,
                             percent: t.percent || 0,
@@ -2743,6 +2752,20 @@
                 }
             }
             
+            // Очищаем file_view от хешей которых нет в нашем timeline
+            const validHashes = new Set();
+            for (const key in timeline) {
+                if (timeline[key].tmdb_id && timeline[key].time > 0) {
+                    validHashes.add(Lampa.Utils.hash(key));
+                }
+            }
+            for (const hash in fileView) {
+                if (!validHashes.has(hash) && !validHashes.has(String(hash))) {
+                    delete fileView[hash];
+                    changed = true;
+                }
+            }
+            
             if (changed) {
                 Lampa.Storage.set('file_view', fileView, true);
                 if (Lampa.Timeline) {
@@ -2750,18 +2773,6 @@
                     Lampa.Timeline.data = {};
                     Lampa.Timeline.read(true);
                 }
-            }
-            
-            // Очищаем file_view от таймкодов которых нет в нашем timeline
-            const timelineKeys = new Set(Object.keys(timeline));
-            for (const key in fileView) {
-                if (!timelineKeys.has(key)) {
-                    delete fileView[key];
-                    changed = true;
-                }
-            }
-            if (changed) {
-                Lampa.Storage.set('file_view', fileView, true);
             }
         }, 4000);
         
