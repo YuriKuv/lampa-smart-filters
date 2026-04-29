@@ -97,6 +97,7 @@
             sync_interval: 30,
             sync_strategy: 'max_time',
             auto_abandoned: false,
+            badge_on_top: true,
             abandoned_days: 30,
             auto_watching: true,
             watching_min_progress: 5,
@@ -2351,6 +2352,7 @@
                 { title: '──────────', separator: true },
                 { title: `🎬 Таймкоды на карточках: ${c.show_timeline_on_cards ? 'Вкл' : 'Выкл'}`, action: 'toggle_timeline_cards' },
                 { title: `📍 Позиция таймкодов: ${timelinePosName}`, action: 'timeline_position' },
+                { title: `🏷 Статус над таймкодом: ${c.badge_on_top !== false ? 'Да' : 'Нет'}`, action: 'toggle_badge_position' },
                 { title: '──────────', separator: true },
                 { title: `🔔 Новые серии: ${c.check_new_episodes ? 'Вкл' : 'Выкл'}`, action: 'toggle_new_episodes' },
                 { title: `📢 Уведомления о сериях: ${c.new_episodes_notify ? 'Вкл' : 'Выкл'}`, action: 'toggle_new_episodes_notify' },
@@ -2386,6 +2388,12 @@
                         },
                         onBack: () => showMainMenu()
                     });
+                }
+                else if (item.action === 'toggle_badge_position') {
+                    c.badge_on_top = c.badge_on_top !== false ? false : true;
+                    saveCfg(c);
+                    if (c.show_timeline_on_cards) enableTimelineOnCards();
+                    showMainMenu();
                 }
                 else if (item.action === 'toggle_new_episodes') {
                     c.check_new_episodes = !c.check_new_episodes; saveCfg(c);
@@ -2702,41 +2710,33 @@
                         const el = this.render().get(0);
                         if (!el) return;
                         
-                        // Находим контейнер таймкодов (card-watched)
-                        let watchedEl = el.querySelector('.card-watched');
-                        
                         // Удаляем старый статус
                         el.querySelector('.nsl-card-badge')?.remove();
                         
-                        // Ищем фильм в избранном
                         const favs = getFavorites();
                         const baseId = getBaseTmdbId(String(data.id));
                         const found = favs.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
-                        
                         if (!found) return;
                         
                         const badges = {
-                            'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50', bg: 'rgba(76,175,80,0.15)' },
-                            'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336', bg: 'rgba(244,67,54,0.15)' },
-                            'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3', bg: 'rgba(33,150,243,0.15)' },
-                            'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800', bg: 'rgba(255,152,0,0.15)' },
-                            'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107', bg: 'rgba(255,193,7,0.15)' },
-                            'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0', bg: 'rgba(156,39,176,0.15)' }
+                            'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50' },
+                            'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336' },
+                            'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3' },
+                            'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800' },
+                            'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107' },
+                            'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0' }
                         };
                         
                         const badge = badges[found.category];
                         if (!badge) return;
                         
-                        // Создаём статус
                         const div = document.createElement('div');
                         div.className = 'nsl-card-badge';
                         div.style.cssText = `
                             position: absolute;
-                            left: 0;
-                            right: 0;
-                            bottom: 100%;
-                            margin-bottom: 0.3em;
-                            z-index: 6;
+                            left: 0.8em;
+                            right: 0.8em;
+                            z-index: 4;
                             padding: 0.3em 0.8em;
                             background: rgba(0,0,0,0.7);
                             backdrop-filter: blur(2px);
@@ -2746,29 +2746,32 @@
                             font-weight: 500;
                             white-space: nowrap;
                             pointer-events: none;
+                            display: flex;
+                            align-items: center;
+                            gap: 0.3em;
                         `;
-                        div.innerHTML = `<span style="color:${badge.color}">${badge.icon} ${badge.text}</span>`;
+                        div.innerHTML = `<span style="color:${badge.color}">${badge.icon}</span><span style="color:#fff">${badge.text}</span>`;
                         
-                        // Если нет контейнера таймкодов — создаём пустой
-                        if (!watchedEl) {
-                            watchedEl = document.createElement('div');
-                            watchedEl.className = 'card-watched';
-                            watchedEl.style.cssText = `
-                                display: block !important;
-                                opacity: 1 !important;
-                                visibility: visible !important;
-                                pointer-events: none;
-                                position: absolute;
-                                left: 0.8em;
-                                right: 0.8em;
-                                z-index: 5;
-                            `;
-                            watchedEl.appendChild(div);
-                            el.querySelector('.card__view')?.appendChild(watchedEl);
-                        } else {
-                            // Вставляем статус ПЕРЕД содержимым таймкода
-                            watchedEl.insertBefore(div, watchedEl.firstChild);
+                        let watchedEl = el.querySelector('.card-watched');
+                        const viewEl = el.querySelector('.card__view');
+                        
+                        // Позиционируем статус относительно таймкода
+                        const c = cfg();
+                        const pos = c.timeline_position || 'bottom';
+                        const badgeOnTop = c.badge_on_top !== false; // по умолчанию над таймкодом
+                        
+                        if (pos === 'bottom') {
+                            div.style.bottom = badgeOnTop ? '3.5em' : '1.8em';
+                        } else if (pos === 'center') {
+                            div.style.bottom = 'auto';
+                            div.style.top = badgeOnTop ? 'calc(50% - 2em)' : 'calc(50% + 0.5em)';
+                            div.style.transform = 'translateY(-50%)';
+                        } else { // top
+                            div.style.top = badgeOnTop ? '2.5em' : '0.8em';
+                            div.style.bottom = 'auto';
                         }
+                        
+                        viewEl?.appendChild(div);
                     };
                     
                     setTimeout(() => this._nslUpdate(), 100);
