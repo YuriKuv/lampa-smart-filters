@@ -2393,8 +2393,20 @@
                         onBack: () => showMainMenu()
                     });
                 }
+                else if (item.action === 'toggle_show_badge') {
+                    c.show_badge_on_cards = !c.show_badge_on_cards;
+                    saveCfg(c);
+                    if (c.show_timeline_on_cards) enableTimelineOnCards();
+                    showMainMenu();
+                }
                 else if (item.action === 'toggle_badge_position') {
                     c.badge_on_top = c.badge_on_top !== false ? false : true;
+                    saveCfg(c);
+                    if (c.show_timeline_on_cards) enableTimelineOnCards();
+                    showMainMenu();
+                }
+                else if (item.action === 'toggle_hide_history_icon') {
+                    c.hide_lampa_history_icon = !c.hide_lampa_history_icon;
                     saveCfg(c);
                     if (c.show_timeline_on_cards) enableTimelineOnCards();
                     showMainMenu();
