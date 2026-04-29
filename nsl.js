@@ -2708,6 +2708,28 @@
             checkUpcomingEpisodes();
         }, 3000);
         
+        // Очищаем file_view от чужих таймкодов
+        setTimeout(() => {
+            const favs = getFavorites();
+            const favIds = new Set(favs.map(f => getBaseTmdbId(f.tmdb_id)));
+            const fv = Lampa.Storage.get('file_view', {});
+            let fvChanged = false;
+            for (const id in fv) {
+                if (!favIds.has(id)) {
+                    delete fv[id];
+                    fvChanged = true;
+                }
+            }
+            if (fvChanged) {
+                Lampa.Storage.set('file_view', fv, true);
+                if (Lampa.Timeline) {
+                    Lampa.Timeline.cache = {};
+                    Lampa.Timeline.data = {};
+                    Lampa.Timeline.read(true);
+                }
+            }
+        }, 4000);
+        
         Lampa.Listener.follow('state:changed', (e) => {
             if (e.target === 'nsl_favorites' || e.target === 'timeline') {
                 setTimeout(() => { refreshCardStatus(); refreshFavoriteButton(); refreshNewEpisodesBadge(); }, 100);
