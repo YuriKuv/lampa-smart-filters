@@ -786,6 +786,10 @@
                 const playerData = Lampa.Player.playdata();
                 if (playerData?.timeline?.time !== undefined) return playerData.timeline.time;
             }
+            const video = document.querySelector('video');
+            if (video && !isNaN(video.currentTime) && video.currentTime > 0) {
+                return video.currentTime;
+            }
         } catch (e) {}
         return null;
     }
@@ -826,6 +830,7 @@
     
     function initPlayerHandler() {
         let wasPlayerOpen = false;
+        let wasVideoPlaying = false;
         let lastSyncToGist = 0;
         let checkCount = 0;
         
@@ -836,8 +841,11 @@
             if (!c.enabled) return;
             
             const isPlayerOpen = Lampa.Player.opened();
+            const video = document.querySelector('video');
+            const isVideoPlaying = video && !video.paused && video.currentTime > 0;
+            const isActive = isPlayerOpen || isVideoPlaying;
             
-            if (!isPlayerOpen && !wasPlayerOpen) {
+            if (!isActive && !wasPlayerOpen && !wasVideoPlaying) {
                 checkCount++;
                 if (checkCount < 5) return;
                 checkCount = 0;
@@ -845,27 +853,35 @@
             
             const currentTime = getCurrentPlayerTime();
             
-            if (isPlayerOpen && !wasPlayerOpen) {
+            if (isActive && !wasPlayerOpen && !wasVideoPlaying) {
                 checkCount = 0;
                 returnedToWatchingMap = {};
-                setTimeout(() => { videoDuration = getVideoDuration(); }, 2000);
+                videoDuration = getVideoDuration();
             }
             
-            if (wasPlayerOpen && !isPlayerOpen) {
+            if ((wasPlayerOpen || wasVideoPlaying) && !isActive) {
                 if (currentMovieTime > 0) {
                     saveProgress(currentMovieTime, true);
                     syncTimelineWithCategories();
                     if (c.auto_sync && c.gist_token && c.gist_id) syncToGist('timeline', false);
                 }
-                currentMovieTime = 0; currentMovieKey = null; lastSavedProgress = 0; videoDuration = 0;
+                currentMovieTime = 0;
+                currentMovieKey = null;
+                lastSavedProgress = 0;
+                videoDuration = 0;
             }
             
             wasPlayerOpen = isPlayerOpen;
+            wasVideoPlaying = isVideoPlaying;
             
-            if (isPlayerOpen && currentTime !== null && currentTime > 0) {
+            if (isActive && currentTime !== null && currentTime > 0) {
                 currentMovieTime = currentTime;
                 const movieKey = getCurrentMovieKey();
-                if (movieKey && movieKey !== currentMovieKey) { currentMovieKey = movieKey; lastSavedProgress = 0; videoDuration = 0; }
+                if (movieKey && movieKey !== currentMovieKey) {
+                    currentMovieKey = movieKey;
+                    lastSavedProgress = 0;
+                    videoDuration = 0;
+                }
                 if (c.auto_save && Math.floor(currentTime) - lastSavedProgress >= 10) {
                     if (saveProgress(currentTime, false)) {
                         const now = Date.now();
