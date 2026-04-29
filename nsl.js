@@ -1527,6 +1527,9 @@
             } else if (item.category === 'watched') {
                 sub = '✓ Просмотрено';
                 if (seriesInfo) sub += ' · ' + seriesInfo;
+            } else if (item.category === 'abandoned') {
+                sub = '❌ Брошено';
+                if (seriesInfo) sub += ' · ' + seriesInfo;
             } else if (item.category === 'planned') sub = seriesInfo || 'В планах';
             else if (seriesInfo) sub = seriesInfo;
             
@@ -1579,6 +1582,7 @@
                             let finalText = newSeriesInfo;
                             if (percentMatch) finalText += ' · ' + percentMatch[1];
                             if (item.category === 'watched') finalText = '✓ Просмотрено · ' + newSeriesInfo;
+                            if (item.category === 'abandoned') finalText = '❌ Брошено · ' + newSeriesInfo;
                             subtitleLine.text(finalText);
                         });
                     }
