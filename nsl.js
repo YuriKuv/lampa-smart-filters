@@ -2702,6 +2702,9 @@
                         const el = this.render().get(0);
                         if (!el) return;
                         
+                        // Находим контейнер таймкодов (card-watched)
+                        let watchedEl = el.querySelector('.card-watched');
+                        
                         // Удаляем старый статус
                         el.querySelector('.nsl-card-badge')?.remove();
                         
@@ -2724,26 +2727,48 @@
                         const badge = badges[found.category];
                         if (!badge) return;
                         
+                        // Создаём статус
                         const div = document.createElement('div');
                         div.className = 'nsl-card-badge';
                         div.style.cssText = `
                             position: absolute;
-                            bottom: 3.2em;
-                            left: 0.8em;
+                            left: 0;
+                            right: 0;
+                            bottom: 100%;
+                            margin-bottom: 0.3em;
                             z-index: 6;
-                            padding: 0.2em 0.6em;
-                            background: ${badge.bg};
-                            color: ${badge.color};
-                            border-radius: 0.3em;
+                            padding: 0.3em 0.8em;
+                            background: rgba(0,0,0,0.7);
+                            backdrop-filter: blur(2px);
+                            -webkit-backdrop-filter: blur(2px);
+                            border-radius: 0.5em;
                             font-size: 0.75em;
                             font-weight: 500;
                             white-space: nowrap;
                             pointer-events: none;
                         `;
-                        div.textContent = badge.icon + ' ' + badge.text;
+                        div.innerHTML = `<span style="color:${badge.color}">${badge.icon} ${badge.text}</span>`;
                         
-                        const viewEl = el.querySelector('.card__view');
-                        if (viewEl) viewEl.appendChild(div);
+                        // Если нет контейнера таймкодов — создаём пустой
+                        if (!watchedEl) {
+                            watchedEl = document.createElement('div');
+                            watchedEl.className = 'card-watched';
+                            watchedEl.style.cssText = `
+                                display: block !important;
+                                opacity: 1 !important;
+                                visibility: visible !important;
+                                pointer-events: none;
+                                position: absolute;
+                                left: 0.8em;
+                                right: 0.8em;
+                                z-index: 5;
+                            `;
+                            watchedEl.appendChild(div);
+                            el.querySelector('.card__view')?.appendChild(watchedEl);
+                        } else {
+                            // Вставляем статус ПЕРЕД содержимым таймкода
+                            watchedEl.insertBefore(div, watchedEl.firstChild);
+                        }
                     };
                     
                     setTimeout(() => this._nslUpdate(), 100);
