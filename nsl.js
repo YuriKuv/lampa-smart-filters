@@ -2031,6 +2031,7 @@
     function enableTimelineOnCards() { 
         injectTimelineStyles(); 
         patchTimelineModule(); 
+        patchCardStatus();
         forceRefreshCards(); 
     }
     
@@ -2684,7 +2685,75 @@
         const c = cfg();
         if (c.sync_on_start && c.gist_token && c.gist_id) setTimeout(() => syncFromGist(false), 5000);
     }
-    
+
+    function patchCardStatus() {
+        if (!Lampa.Maker?.map) return;
+        try {
+            const cardMap = Lampa.Maker.map('Card');
+            if (cardMap?.Watched) {
+                const origCreate = cardMap.Watched.onCreate;
+                
+                cardMap.Watched.onCreate = function() {
+                    if (origCreate) origCreate.call(this);
+                    
+                    this._nslUpdate = () => {
+                        const data = this.data;
+                        if (!data?.id) return;
+                        const el = this.render().get(0);
+                        if (!el) return;
+                        
+                        // Удаляем старый статус
+                        el.querySelector('.nsl-card-badge')?.remove();
+                        
+                        // Ищем фильм в избранном
+                        const favs = getFavorites();
+                        const baseId = getBaseTmdbId(String(data.id));
+                        const found = favs.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
+                        
+                        if (!found) return;
+                        
+                        const badges = {
+                            'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50', bg: 'rgba(76,175,80,0.15)' },
+                            'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336', bg: 'rgba(244,67,54,0.15)' },
+                            'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3', bg: 'rgba(33,150,243,0.15)' },
+                            'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800', bg: 'rgba(255,152,0,0.15)' },
+                            'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107', bg: 'rgba(255,193,7,0.15)' },
+                            'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0', bg: 'rgba(156,39,176,0.15)' }
+                        };
+                        
+                        const badge = badges[found.category];
+                        if (!badge) return;
+                        
+                        const div = document.createElement('div');
+                        div.className = 'nsl-card-badge';
+                        div.style.cssText = `
+                            position: absolute;
+                            bottom: 3.2em;
+                            left: 0.8em;
+                            z-index: 6;
+                            padding: 0.2em 0.6em;
+                            background: ${badge.bg};
+                            color: ${badge.color};
+                            border-radius: 0.3em;
+                            font-size: 0.75em;
+                            font-weight: 500;
+                            white-space: nowrap;
+                            pointer-events: none;
+                        `;
+                        div.textContent = badge.icon + ' ' + badge.text;
+                        
+                        const viewEl = el.querySelector('.card__view');
+                        if (viewEl) viewEl.appendChild(div);
+                    };
+                    
+                    setTimeout(() => this._nslUpdate(), 100);
+                    Lampa.Listener.follow('state:changed', () => {
+                        setTimeout(() => this._nslUpdate?.(), 100);
+                    });
+                };
+            }
+        } catch(e) {}
+    }
     
     function init() {
         if (!cfg().enabled) return;
