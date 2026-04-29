@@ -2628,8 +2628,6 @@
         document.head.appendChild(style);
     }
     
-    let statusModulePatched = false;
-    
     function patchCardStatus() {
         if (statusModulePatched || !Lampa.Maker?.map) return;
         try {
