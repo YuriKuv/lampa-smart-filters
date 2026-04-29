@@ -1600,7 +1600,7 @@
                         const actionItems = [
                             { title: `📋 Переместить в...`, action: 'move' },
                             { title: `🗑️ Удалить из категории`, action: 'remove' },
-                            { title: `💥 Удалить полностью (с таймкодами)`, action: 'delete_all' },
+                            { title: `💥 Удалить из Избранное+`, action: 'delete_all' },
                             { title: '❌ Отмена', action: 'cancel' }
                         ];
                         Lampa.Select.show({
