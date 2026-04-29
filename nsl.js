@@ -2726,15 +2726,15 @@
                         const el = this.render().get(0);
                         if (!el) return;
                         
-                        el.querySelector('.nsl-card-badge')?.remove();
-                        
+                        // Скрываем штатный значок истории
                         const c = cfg();
-                        
-                        // Скрываем штатный значок истории лампы
-                        if (c.hide_lampa_history_icon) {
-                            const historyIcon = el.querySelector('.icon--history');
-                            if (historyIcon) historyIcon.style.display = 'none';
+                        const historyIcon = el.querySelector('.icon--history');
+                        if (historyIcon) {
+                            historyIcon.style.display = c.hide_lampa_history_icon ? 'none' : '';
                         }
+                        
+                        // Удаляем старый статус
+                        el.querySelector('.nsl-card-badge')?.remove();
                         
                         if (!c.show_badge_on_cards) return;
                         
@@ -2757,19 +2757,6 @@
                         
                         const div = document.createElement('div');
                         div.className = 'nsl-card-badge';
-                        
-                        const pos = c.timeline_position || 'bottom';
-                        const badgeOnTop = c.badge_on_top !== false;
-                        
-                        let posStyles = '';
-                        if (pos === 'bottom') {
-                            posStyles = badgeOnTop ? 'bottom: 3.5em;' : 'bottom: 1.8em;';
-                        } else if (pos === 'center') {
-                            posStyles = badgeOnTop ? 'bottom: auto; top: calc(50% - 2em);' : 'bottom: auto; top: calc(50% + 0.5em);';
-                        } else {
-                            posStyles = badgeOnTop ? 'top: 0.5em; bottom: auto;' : 'top: 2.2em; bottom: auto;';
-                        }
-                        
                         div.style.cssText = `
                             position: absolute;
                             left: 0.8em;
@@ -2787,11 +2774,33 @@
                             display: flex;
                             align-items: center;
                             gap: 0.3em;
-                            ${posStyles}
                         `;
                         div.innerHTML = `<span style="color:${badge.color}">${badge.icon}</span><span style="color:#fff">${badge.text}</span>`;
                         
-                        el.querySelector('.card__view')?.appendChild(div);
+                        const viewEl = el.querySelector('.card__view');
+                        if (!viewEl) return;
+                        
+                        const watchedEl = el.querySelector('.card-watched');
+                        const pos = c.timeline_position || 'bottom';
+                        const badgeOnTop = c.badge_on_top !== false;
+                        
+                        // Размещаем относительно card-watched или card__view
+                        if (pos === 'center') {
+                            // Центр — размещаем над или под центром карточки
+                            div.style.top = badgeOnTop ? '30%' : '70%';
+                            div.style.bottom = 'auto';
+                            div.style.transform = 'translateY(-50%)';
+                        } else if (pos === 'top') {
+                            // Сверху
+                            div.style.top = badgeOnTop ? '0.5em' : '2.2em';
+                            div.style.bottom = 'auto';
+                        } else {
+                            // Снизу (по умолчанию)
+                            div.style.bottom = badgeOnTop ? '3.5em' : '1.8em';
+                            div.style.top = 'auto';
+                        }
+                        
+                        viewEl.appendChild(div);
                     };
                     
                     setTimeout(() => this._nslUpdate(), 100);
