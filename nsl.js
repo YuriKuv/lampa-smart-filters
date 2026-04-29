@@ -843,7 +843,6 @@
     }
     
     function saveProgress(timeInSeconds, force) {
-        console.log('[NSL-DEBUG] saveProgress called, time:', timeInSeconds, 'force:', force);
         const c = cfg();
         if (!c.auto_save && !force) return false;
         const movieKey = getCurrentMovieKey();
@@ -858,6 +857,14 @@
             const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
             timeline[movieKey] = { time: currentTime, percent, duration, updated: Date.now(), tmdb_id: tmdbId };
             saveTimeline(timeline);
+            
+            // Сохраняем в file_view Lampa для отображения на карточках
+            if (tmdbId) {
+                const fileView = Lampa.Storage.get('file_view', {});
+                fileView[tmdbId] = { duration, time: currentTime, percent, profile: 0 };
+                Lampa.Storage.set('file_view', fileView, true);
+            }
+            
             lastSavedProgress = currentTime;
             currentMovieTime = currentTime;
             if (tmdbId && currentTime > 60 && !returnedToWatchingMap[getBaseTmdbId(tmdbId)]) returnToWatching(tmdbId);
