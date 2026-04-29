@@ -2021,14 +2021,44 @@
     }
     
     function forceRefreshCards() {
-        if (!cfg().show_timeline_on_cards) return;
-        if (Lampa.Timeline?.read) Lampa.Timeline.read(true);
+        // Принудительно обновляем существующие карточки через класс focus
+        document.querySelectorAll('.card').forEach(function(card) {
+            card.classList.add('focus');
+            setTimeout(function() { card.classList.remove('focus'); }, 50);
+        });
+        
+        // Обновляем таймкоды
+        if (Lampa.Timeline?.read) {
+            Lampa.Timeline.read(true);
+        }
+        
+        // Отправляем событие для обновления NSL-элементов на всех карточках
+        setTimeout(function() {
+            Lampa.Listener.send('state:changed', { target: 'nsl_settings', reason: 'refresh' });
+        }, 150);
+    }
+        
+        // NSL-специфичное обновление: ищем все созданные карточки и вызываем их _nslUpdate
         setTimeout(() => {
-            document.querySelectorAll('.card').forEach(card => {
-                card.classList.add('focus');
-                setTimeout(() => card.classList.remove('focus'), 50);
-            });
-        }, 200);
+            if (Lampa.Maker?.map) {
+                const cardMap = Lampa.Maker.map('Card');
+                if (cardMap?.Watched) {
+                    // Пробуем вызвать обновление на всех активных карточках
+                    document.querySelectorAll('.card').forEach(cardEl => {
+                        // Ищем данные карточки в Lampa (если есть API для этого)
+                        const cardId = cardEl.getAttribute('data-id') || cardEl.querySelector('[data-id]')?.getAttribute('data-id');
+                        if (cardId) {
+                            // Эмитируем событие watched для перерисовки
+                            const event = new CustomEvent('nsl:refresh-card', { detail: { id: cardId } });
+                            cardEl.dispatchEvent(event);
+                        }
+                    });
+                }
+            }
+            
+            // Фолбэк: эмулируем изменение состояния для триггера всех подписок
+            Lampa.Listener.send('state:changed', { target: 'nsl_settings', reason: 'refresh' });
+        }, 150);
     }
     
     function enableTimelineOnCards() { 
@@ -2356,7 +2386,7 @@
                 { title: `📍 Позиция таймкодов: ${timelinePosName}`, action: 'timeline_position' },
                 { title: `🏷 Статус на карточках: ${c.show_badge_on_cards ? 'Вкл' : 'Выкл'}`, action: 'toggle_show_badge' },
                 { title: `🏷 Статус над таймкодом: ${c.badge_on_top !== false ? 'Да' : 'Нет'}`, action: 'toggle_badge_position' },
-                { title: `👁 Значок статуса просмотра Lampa: ${c.hide_lampa_history_icon ? 'Да' : 'Нет'}`, action: 'toggle_hide_history_icon' },
+                { title: `👁 Значок статуса просмотра Lampa: ${c.hide_lampa_history_icon ? 'Скрыт' : 'Показан'}`, action: 'toggle_hide_history_icon' },
                 { title: '──────────', separator: true },
                 { title: `🔔 Новые серии: ${c.check_new_episodes ? 'Вкл' : 'Выкл'}`, action: 'toggle_new_episodes' },
                 { title: `📢 Уведомления о сериях: ${c.new_episodes_notify ? 'Вкл' : 'Выкл'}`, action: 'toggle_new_episodes_notify' },
@@ -2379,6 +2409,7 @@
                 else if (item.action === 'toggle_timeline_cards') {
                     c.show_timeline_on_cards = !c.show_timeline_on_cards; saveCfg(c);
                     c.show_timeline_on_cards ? enableTimelineOnCards() : disableTimelineOnCards();
+                    forceRefreshCards();
                     notify('Таймкоды на карточках ' + (c.show_timeline_on_cards ? 'включены' : 'выключены'));
                     showMainMenu();
                 }
@@ -2387,7 +2418,12 @@
                         title: 'Позиция таймкодов',
                         items: [{ title: 'Снизу', action: 'bottom' }, { title: 'По центру', action: 'center' }, { title: 'Сверху', action: 'top' }],
                         onSelect: (subItem) => {
-                            if (subItem.action) { c.timeline_position = subItem.action; saveCfg(c); if (c.show_timeline_on_cards) enableTimelineOnCards(); }
+                            if (subItem.action) { 
+                                c.timeline_position = subItem.action; 
+                                saveCfg(c); 
+                                if (c.show_timeline_on_cards) enableTimelineOnCards();
+                                forceRefreshCards();
+                            }
                             showMainMenu();
                         },
                         onBack: () => showMainMenu()
@@ -2396,19 +2432,22 @@
                 else if (item.action === 'toggle_show_badge') {
                     c.show_badge_on_cards = !c.show_badge_on_cards;
                     saveCfg(c);
-                    if (c.show_timeline_on_cards) enableTimelineOnCards();
+                    forceRefreshCards();
+                    notify('Статус на карточках ' + (c.show_badge_on_cards ? 'включен' : 'выключен'));
                     showMainMenu();
                 }
                 else if (item.action === 'toggle_badge_position') {
                     c.badge_on_top = c.badge_on_top !== false ? false : true;
                     saveCfg(c);
-                    if (c.show_timeline_on_cards) enableTimelineOnCards();
+                    forceRefreshCards();
+                    notify('Статус теперь ' + (c.badge_on_top !== false ? 'над таймкодом' : 'под таймкодом'));
                     showMainMenu();
                 }
                 else if (item.action === 'toggle_hide_history_icon') {
                     c.hide_lampa_history_icon = !c.hide_lampa_history_icon;
                     saveCfg(c);
-                    if (c.show_timeline_on_cards) enableTimelineOnCards();
+                    forceRefreshCards();
+                    notify('Значок Lampa ' + (c.hide_lampa_history_icon ? 'скрыт' : 'показан'));
                     showMainMenu();
                 }
                 else if (item.action === 'toggle_new_episodes') {
@@ -2720,96 +2759,147 @@
                 cardMap.Watched.onCreate = function() {
                     if (origCreate) origCreate.call(this);
                     
+                    // Сохраняем ссылку на функцию обновления
                     this._nslUpdate = () => {
                         const data = this.data;
                         if (!data?.id) return;
                         const el = this.render().get(0);
                         if (!el) return;
                         
-                        // Скрываем штатный значок истории
                         const c = cfg();
+                        
+                        // 1. Управление значком лампы (иконка истории)
                         const historyIcon = el.querySelector('.icon--history');
                         if (historyIcon) {
                             historyIcon.style.display = c.hide_lampa_history_icon ? 'none' : '';
                         }
                         
-                        // Удаляем старый статус
-                        el.querySelector('.nsl-card-badge')?.remove();
+                        // 2. Удаляем старые элементы NSL
+                        el.querySelector('.nsl-card-status')?.remove();
                         
+                        // 3. Если статус на карточках выключен — выходим
                         if (!c.show_badge_on_cards) return;
                         
+                        // 4. Получаем данные статуса
+                        const tmdbId = extractTmdbId({ id: data.id });
+                        const baseId = getBaseTmdbId(tmdbId || String(data.id));
                         const favs = getFavorites();
-                        const baseId = getBaseTmdbId(String(data.id));
                         const found = favs.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
-                        if (!found) return;
                         
-                        const badges = {
-                            'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50' },
-                            'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336' },
-                            'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3' },
-                            'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800' },
-                            'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107' },
-                            'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0' }
-                        };
-                        
-                        const badge = badges[found.category];
-                        if (!badge) return;
-                        
-                        const div = document.createElement('div');
-                        div.className = 'nsl-card-badge';
-                        div.style.cssText = `
-                            position: absolute;
-                            left: 0.8em;
-                            right: 0.8em;
-                            z-index: 4;
-                            padding: 0.3em 0.8em;
-                            background: rgba(0,0,0,0.7);
-                            backdrop-filter: blur(2px);
-                            -webkit-backdrop-filter: blur(2px);
-                            border-radius: 0.5em;
-                            font-size: 0.75em;
-                            font-weight: 500;
-                            white-space: nowrap;
-                            pointer-events: none;
-                            display: flex;
-                            align-items: center;
-                            gap: 0.3em;
-                        `;
-                        div.innerHTML = `<span style="color:${badge.color}">${badge.icon}</span><span style="color:#fff">${badge.text}</span>`;
-                        
-                        const viewEl = el.querySelector('.card__view');
-                        if (!viewEl) return;
-                        
-                        const watchedEl = el.querySelector('.card-watched');
-                        const pos = c.timeline_position || 'bottom';
-                        const badgeOnTop = c.badge_on_top !== false;
-                        
-                        // Размещаем относительно card-watched или card__view
-                        if (pos === 'center') {
-                            // Центр — размещаем над или под центром карточки
-                            div.style.top = badgeOnTop ? '30%' : '70%';
-                            div.style.bottom = 'auto';
-                            div.style.transform = 'translateY(-50%)';
-                        } else if (pos === 'top') {
-                            // Сверху
-                            div.style.top = badgeOnTop ? '0.5em' : '2.2em';
-                            div.style.bottom = 'auto';
-                        } else {
-                            // Снизу (по умолчанию)
-                            div.style.bottom = badgeOnTop ? '3.5em' : '1.8em';
-                            div.style.top = 'auto';
+                        // 5. Получаем данные таймкода
+                        const timeline = getTimeline();
+                        let timelineItem = null;
+                        if (tmdbId || baseId) {
+                            for (const key in timeline) {
+                                const rec = timeline[key];
+                                const recBaseId = getBaseTmdbId(rec.tmdb_id || '');
+                                if (recBaseId === baseId || getBaseTmdbId(key) === baseId) {
+                                    if (!timelineItem || (rec.time || 0) > (timelineItem.time || 0)) {
+                                        timelineItem = rec;
+                                    }
+                                }
+                            }
                         }
                         
-                        viewEl.appendChild(div);
+                        // 6. Формируем блоки для отображения
+                        const blocks = [];
+                        
+                        // Блок таймкода
+                        if (timelineItem && timelineItem.time > 0 && c.show_timeline_on_cards) {
+                            const hours = Math.floor(timelineItem.time / 3600);
+                            const minutes = Math.floor((timelineItem.time % 3600) / 60);
+                            let timeStr;
+                            if (hours > 0) {
+                                timeStr = `${hours} Ч. ${minutes} М.`;
+                            } else {
+                                timeStr = `${minutes} М.`;
+                            }
+                            blocks.push({
+                                type: 'timecode',
+                                html: '<span style="color:#aaa;">⏱</span><span style="color:#fff;">' + timeStr + '</span>',
+                                priority: 2
+                            });
+                        }
+                        
+                        // Блок статуса
+                        if (found) {
+                            var badges = {
+                                'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50' },
+                                'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336' },
+                                'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3' },
+                                'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800' },
+                                'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107' },
+                                'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0' }
+                            };
+                            var badge = badges[found.category];
+                            if (badge) {
+                                blocks.push({
+                                    type: 'status',
+                                    html: '<span style="color:' + badge.color + ';">' + badge.icon + '</span><span style="color:#fff;">' + badge.text + '</span>',
+                                    priority: 1
+                                });
+                            }
+                        }
+                        
+                        // Если нет ни одного блока — выходим
+                        if (blocks.length === 0) return;
+                        
+                        // Сортируем: статус первый, таймкод второй
+                        blocks.sort(function(a, b) { return a.priority - b.priority; });
+                        
+                        // 7. Создаём единый контейнер
+                        var container = document.createElement('div');
+                        container.className = 'nsl-card-status';
+                        container.style.cssText = 'position:absolute;left:0.8em;right:0.8em;z-index:4;pointer-events:none;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:nowrap;';
+                        
+                        // 8. Создаём подэлементы
+                        blocks.forEach(function(block) {
+                            var blockEl = document.createElement('div');
+                            blockEl.className = block.type === 'status' ? 'nsl-card-badge' : 'nsl-card-timecode';
+                            blockEl.style.cssText = 'padding:0.3em 0.8em;background:rgba(0,0,0,0.7);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);border-radius:0.5em;font-size:0.75em;font-weight:500;white-space:nowrap;display:flex;align-items:center;gap:0.3em;flex-shrink:0;';
+                            blockEl.innerHTML = block.html;
+                            container.appendChild(blockEl);
+                        });
+                        
+                        // 9. Определяем позицию контейнера
+                        var viewEl = el.querySelector('.card__view');
+                        if (!viewEl) return;
+                        
+                        var pos = c.timeline_position || 'bottom';
+                        var badgeOnTop = c.badge_on_top !== false;
+                        
+                        // Сбрасываем все позиции
+                        container.style.top = 'auto';
+                        container.style.bottom = 'auto';
+                        container.style.transform = 'none';
+                        
+                        if (pos === 'center') {
+                            container.style.top = '50%';
+                            container.style.transform = 'translateY(-50%)';
+                        } else if (pos === 'top') {
+                            container.style.top = badgeOnTop ? '0.5em' : '2.2em';
+                        } else {
+                            container.style.bottom = badgeOnTop ? '3.5em' : '1.8em';
+                        }
+                        
+                        viewEl.appendChild(container);
                     };
                     
-                    setTimeout(() => this._nslUpdate(), 100);
-                    Lampa.Listener.follow('state:changed', () => {
-                        setTimeout(() => this._nslUpdate?.(), 100);
+                    // Первичное создание
+                    var self = this;
+                    setTimeout(function() { self._nslUpdate(); }, 100);
+                    
+                    // Подписка на обновления для мгновенного применения
+                    Lampa.Listener.follow('state:changed', function(e) {
+                        if (e.target === 'nsl_favorites' || e.target === 'timeline' || e.target === 'nsl_settings') {
+                            setTimeout(function() { self._nslUpdate(); }, 100);
+                        }
                     });
                 };
             }
-        } catch(e) {}
+        } catch(e) {
+            console.error('[NSL] patchCardStatus error:', e);
+        }
     }
     
     function init() {
