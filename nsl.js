@@ -131,7 +131,6 @@
     function getTimeline() { return Lampa.Storage.get(STORE_TIMELINE, {}) || {}; }
     function saveTimeline(t) { 
         Lampa.Storage.set(STORE_TIMELINE, t, true); 
-        setTimeout(() => Lampa.Listener.send('state:changed', { target: 'timeline', reason: 'update', data: {} }), 100);
     }
     
     function getMoveLog() { return Lampa.Storage.get(STORE_MOVE_LOG, []) || []; }
@@ -733,7 +732,6 @@
         if (changed) {
             saveFavorites(favorites);
             refreshNewEpisodesBadge();
-            if (c.gist_token && c.gist_id) syncToGist('favorites', false);
         }
     }
     
@@ -820,7 +818,6 @@
             lastSavedProgress = currentTime;
             currentMovieTime = currentTime;
             if (tmdbId && currentTime > 60 && !returnedToWatchingMap[getBaseTmdbId(tmdbId)]) returnToWatching(tmdbId);
-            syncTimelineWithCategories();
             if (Lampa.Timeline?.update) Lampa.Timeline.update({ hash: movieKey, percent, time: currentTime, duration });
             return true;
         }
@@ -830,24 +827,41 @@
     function initPlayerHandler() {
         let wasPlayerOpen = false;
         let lastSyncToGist = 0;
+        let checkCount = 0;
+        
         if (playerInterval) clearInterval(playerInterval);
+        
         playerInterval = setInterval(() => {
             const c = cfg();
             if (!c.enabled) return;
+            
             const isPlayerOpen = Lampa.Player.opened();
+            
+            if (!isPlayerOpen && !wasPlayerOpen) {
+                checkCount++;
+                if (checkCount < 5) return;
+                checkCount = 0;
+            }
+            
             const currentTime = getCurrentPlayerTime();
+            
             if (isPlayerOpen && !wasPlayerOpen) {
+                checkCount = 0;
                 returnedToWatchingMap = {};
                 setTimeout(() => { videoDuration = getVideoDuration(); }, 2000);
             }
+            
             if (wasPlayerOpen && !isPlayerOpen) {
                 if (currentMovieTime > 0) {
                     saveProgress(currentMovieTime, true);
+                    syncTimelineWithCategories();
                     if (c.auto_sync && c.gist_token && c.gist_id) syncToGist('timeline', false);
                 }
                 currentMovieTime = 0; currentMovieKey = null; lastSavedProgress = 0; videoDuration = 0;
             }
+            
             wasPlayerOpen = isPlayerOpen;
+            
             if (isPlayerOpen && currentTime !== null && currentTime > 0) {
                 currentMovieTime = currentTime;
                 const movieKey = getCurrentMovieKey();
@@ -1075,12 +1089,10 @@
                         const bookBtn = container.find('.button--book').first();
                         if (bookBtn.length) bookBtn.before(button); else container.prepend(button);
                         
-                        // Скрываем штатную кнопку если нужно
                         if (cfg().hide_lampa_bookmark_button) {
                             container.find('.button--book').addClass('nsl-hidden-lampa-button');
                         }
                         
-                        // Добавляем в навигацию для Android TV
                         if (isAndroid && Lampa.Controller) {
                             setTimeout(() => {
                                 Lampa.Controller.collectionSet(container);
@@ -2535,6 +2547,67 @@
         const c = cfg();
         if (c.sync_on_start && c.gist_token && c.gist_id) setTimeout(() => syncFromGist(false), 5000);
     }
+
+    function injectStatusStyles() {
+        const oldStyle = document.getElementById('nsl-status-styles');
+        if (oldStyle) oldStyle.remove();
+        const style = document.createElement('style');
+        style.id = 'nsl-status-styles';
+        style.textContent = `.card .nsl-card-status{position:absolute;top:0.5em;left:0.5em;z-index:6;display:flex;align-items:center;gap:0.3em;padding:0.2em 0.6em;border-radius:0.3em;font-size:0.75em;font-weight:500;white-space:nowrap;pointer-events:none;}`;
+        document.head.appendChild(style);
+    }
+    
+    let statusModulePatched = false;
+    
+    function patchCardStatus() {
+        if (statusModulePatched || !Lampa.Maker?.map) return;
+        try {
+            const cardMap = Lampa.Maker.map('Card');
+            if (cardMap?.Base) {
+                const origCreate = cardMap.Base.onCreate;
+                const origVisible = cardMap.Base.onVisible;
+                
+                cardMap.Base.onCreate = function() {
+                    if (origCreate) origCreate.call(this);
+                    this._nslStatusListener = () => this.emit('update');
+                    Lampa.Listener.follow('state:changed', this._nslStatusListener);
+                };
+                
+                cardMap.Base.onVisible = function() {
+                    if (origVisible) origVisible.call(this);
+                    setTimeout(() => this.emit('update'), 200);
+                };
+                
+                cardMap.Base.onUpdate = function() {
+                    const data = this.data;
+                    if (!data?.id) return;
+                    const el = this.render().get(0);
+                    if (!el) return;
+                    el.querySelector('.nsl-card-status')?.remove();
+                    const status = getMovieStatus(data);
+                    if (!status) return;
+                    const div = document.createElement('div');
+                    div.className = 'nsl-card-status';
+                    div.style.backgroundColor = status.bgColor;
+                    div.style.color = status.color;
+                    div.innerHTML = `<span>${status.icon}</span><span>${status.text}</span>`;
+                    el.querySelector('.card__view')?.appendChild(div);
+                };
+                
+                statusModulePatched = true;
+            }
+        } catch(e) {}
+    }
+    
+    function enableStatusOnCards() {
+        injectStatusStyles();
+        patchCardStatus();
+    }
+    
+    function disableStatusOnCards() {
+        document.getElementById('nsl-status-styles')?.remove();
+        document.querySelectorAll('.nsl-card-status').forEach(el => el.remove());
+    }
     
     function init() {
         if (!cfg().enabled) return;
@@ -2561,6 +2634,7 @@
         if (c.auto_backup) startAutoBackup();
         if (c.show_timeline_on_cards) enableTimelineOnCards();
         if (c.check_new_episodes) startSeriesCheckTimer();
+        enableStatusOnCards();
         
         // Добавляем в историю при открытии фильма
         Lampa.Listener.follow('full', function(e) {
