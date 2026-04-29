@@ -1933,11 +1933,106 @@
     // ======================
     // ТАЙМКОДЫ НА КАРТОЧКАХ
     // ======================
-
-
-
-    function enableTimelineOnCards() {}
-    function disableTimelineOnCards() {}
+    
+    function getTimelinePositionStyles() {
+        const c = cfg();
+        const pos = c.timeline_position || 'bottom';
+        const styles = { 
+            bottom: `bottom: 2.5em !important; top: auto !important;`, 
+            center: `bottom: auto !important; top: 50% !important; transform: translateY(-50%) !important;`, 
+            top: `bottom: auto !important; top: 0.5em !important;` 
+        };
+        return styles[pos] || styles.bottom;
+    }
+    
+    function injectTimelineStyles() {
+        const oldStyle = document.getElementById('nsl-timeline-styles');
+        if (oldStyle) oldStyle.remove();
+        const positionStyles = getTimelinePositionStyles();
+        const style = document.createElement('style');
+        style.id = 'nsl-timeline-styles';
+        style.textContent = `
+            .card .card-watched {
+                display: block !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+                pointer-events: none;
+                ${positionStyles}
+                left: 0.8em !important;
+                right: 0.8em !important;
+                z-index: 5 !important;
+                background-color: rgba(0,0,0,0.7) !important;
+                -webkit-backdrop-filter: blur(2px);
+                backdrop-filter: blur(2px);
+                border-radius: 0.5em !important;
+            }
+            .card:not(.focus) .card-watched {
+                display: block !important;
+                opacity: 1 !important;
+                visibility: visible !important;
+            }
+            .card-watched[style*="display: none"] {
+                display: block !important;
+            }
+            .card-watched__item:nth-child(n+3) { display: none !important; }
+            .card--wide .card-watched__item:nth-child(n+2) { display: none !important; }
+            @media screen and (max-width: 480px) {
+                .card .card-watched { left: 0.5em !important; right: 0.5em !important; }
+            }
+        `;
+        document.head.appendChild(style);
+        timelineStylesInjected = true;
+    }
+    
+    function removeTimelineStyles() { 
+        const s = document.getElementById('nsl-timeline-styles'); 
+        if (s) s.remove(); 
+        timelineStylesInjected = false; 
+    }
+    
+    function patchTimelineModule() {
+        if (timelineModulePatched) return;
+        if (!Lampa.Maker || !Lampa.Maker.map) return;
+        try {
+            const cardMap = Lampa.Maker.map('Card');
+            if (cardMap && cardMap.Watched) {
+                const orig = cardMap.Watched.onCreate;
+                cardMap.Watched.onCreate = function() {
+                    if (orig) orig.call(this);
+                    const c = cfg();
+                    if (!c.show_timeline_on_cards) return;
+                    setTimeout(() => this.emit('watched'), 100);
+                    Lampa.Listener.follow('state:changed', (e) => { 
+                        if (e.target === 'timeline' && (e.reason === 'read' || e.reason === 'update')) 
+                            setTimeout(() => this.emit('watched'), 50); 
+                    });
+                };
+                timelineModulePatched = true;
+                console.log('[NSL] Таймкоды на карточках пропатчены');
+            }
+        } catch(e) {}
+    }
+    
+    function forceRefreshCards() {
+        if (!cfg().show_timeline_on_cards) return;
+        if (Lampa.Timeline?.read) Lampa.Timeline.read(true);
+        setTimeout(() => {
+            document.querySelectorAll('.card').forEach(card => {
+                card.classList.add('focus');
+                setTimeout(() => card.classList.remove('focus'), 50);
+            });
+        }, 200);
+    }
+    
+    function enableTimelineOnCards() { 
+        injectTimelineStyles(); 
+        patchTimelineModule(); 
+        forceRefreshCards(); 
+    }
+    
+    function disableTimelineOnCards() { 
+        removeTimelineStyles(); 
+    }
 
     // ======================
     // GITHUB GIST СИНХРОНИЗАЦИЯ (РАЗДЕЛЁННАЯ)
@@ -2585,155 +2680,7 @@
         const c = cfg();
         if (c.sync_on_start && c.gist_token && c.gist_id) setTimeout(() => syncFromGist(false), 5000);
     }
-
-    function injectStatusStyles() {
-        const oldStyle = document.getElementById('nsl-status-styles');
-        if (oldStyle) oldStyle.remove();
-        const style = document.createElement('style');
-        style.id = 'nsl-status-styles';
-        style.textContent = `
-            .card .nsl-card-status {
-                position: absolute;
-                top: 0.5em;
-                left: 0.5em;
-                z-index: 6;
-                display: flex;
-                align-items: center;
-                gap: 0.3em;
-                padding: 0.2em 0.6em;
-                border-radius: 0.3em;
-                font-size: 0.75em;
-                font-weight: 500;
-                white-space: nowrap;
-                pointer-events: none;
-            }
-            .card .nsl-card-progress {
-                position: absolute;
-                bottom: 2.5em;
-                left: 0.8em;
-                right: 0.8em;
-                z-index: 5;
-                height: 0.3em;
-                background: rgba(0,0,0,0.7);
-                border-radius: 0.5em;
-                pointer-events: none;
-            }
-            .card .nsl-card-progress-bar {
-                height: 100%;
-                background: rgba(76,175,80,0.8);
-                border-radius: 0.5em;
-                transition: width 0.3s;
-            }
-        `;
-        document.head.appendChild(style);
-    }
     
-    function patchCardStatus() {
-        if (statusModulePatched || !Lampa.Maker?.map) return;
-        try {
-            const cardMap = Lampa.Maker.map('Card');
-            if (cardMap?.Base) {
-                const origCreate = cardMap.Base.onCreate;
-                const origVisible = cardMap.Base.onVisible;
-                
-                cardMap.Base.onCreate = function() {
-                    if (origCreate) origCreate.call(this);
-                    this._nslListener = () => setTimeout(() => this.emit('update'), 100);
-                    Lampa.Listener.follow('state:changed', this._nslListener);
-                };
-                
-                cardMap.Base.onVisible = function() {
-                    if (origVisible) origVisible.call(this);
-                    setTimeout(() => this.emit('update'), 200);
-                };
-                
-                cardMap.Base.onUpdate = function() {
-                    const data = this.data;
-                    if (!data?.id) return;
-                    const el = this.render().get(0);
-                    if (!el) return;
-                    
-                    // Удаляем старые
-                    el.querySelector('.nsl-card-status')?.remove();
-                    el.querySelector('.nsl-card-progress')?.remove();
-                    
-                    const status = getMovieStatus(data);
-                    const timeline = getTimeline();
-                    
-                    // Добавляем статус
-                    if (status) {
-                        const div = document.createElement('div');
-                        div.className = 'nsl-card-status';
-                        div.style.backgroundColor = status.bgColor;
-                        div.style.color = status.color;
-                        div.innerHTML = `<span>${status.icon}</span><span>${status.text}</span>`;
-                        el.querySelector('.card__view')?.appendChild(div);
-                    }
-                    
-                    // Добавляем полоску прогресса
-                    const baseId = getBaseTmdbId(String(data.id));
-                    let bestPercent = 0;
-                    for (const key in timeline) {
-                        if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId || getBaseTmdbId(key) === baseId) {
-                            bestPercent = Math.max(bestPercent, timeline[key]?.percent || 0);
-                        }
-                    }
-                    
-                    if (bestPercent > 0 && bestPercent < 100) {
-                        const progressWrap = document.createElement('div');
-                        progressWrap.className = 'nsl-card-progress';
-                        const progressBar = document.createElement('div');
-                        progressBar.className = 'nsl-card-progress-bar';
-                        progressBar.style.width = bestPercent + '%';
-                        progressWrap.appendChild(progressBar);
-                        el.querySelector('.card__view')?.appendChild(progressWrap);
-                    }
-                };
-                
-                // Перехватываем открытие карточки — передаём время в плеер
-                cardMap.Base.onEnter = function() {
-                    const data = this.data;
-                    if (!data?.id) return;
-                    
-                    const timeline = getTimeline();
-                    const baseId = getBaseTmdbId(String(data.id));
-                    let bestTime = 0;
-                    let bestKey = null;
-                    
-                    for (const key in timeline) {
-                        if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId || getBaseTmdbId(key) === baseId) {
-                            if ((timeline[key]?.time || 0) > bestTime) {
-                                bestTime = timeline[key]?.time || 0;
-                                bestKey = key;
-                            }
-                        }
-                    }
-                    
-                    // Сохраняем время для передачи плееру
-                    if (bestTime > 60 && bestKey) {
-                        data._nslTime = bestTime;
-                        data._nslKey = bestKey;
-                    }
-                };
-                
-                statusModulePatched = true;
-            }
-        } catch(e) {}
-    }
-    
-    function enableStatusOnCards() {
-        injectStatusStyles();
-        patchCardStatus();
-    }
-    
-    function disableStatusOnCards() {
-        document.getElementById('nsl-status-styles')?.remove();
-        document.querySelectorAll('.nsl-card-status, .nsl-card-progress').forEach(el => el.remove());
-    }
-    
-    let statusModulePatched = false;
-    
-
     
     function init() {
         if (!cfg().enabled) return;
@@ -2758,7 +2705,7 @@
         const c = cfg();
         if (c.auto_backup) startAutoBackup();
         if (c.check_new_episodes) startSeriesCheckTimer();
-        enableStatusOnCards();
+        if (c.show_timeline_on_cards) enableTimelineOnCards();
         
         Lampa.Listener.follow('full', function(e) {
             if (e.type == 'complite' && e.data && (e.data.movie || e.data.card)) {
