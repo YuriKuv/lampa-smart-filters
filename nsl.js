@@ -98,6 +98,8 @@
             sync_strategy: 'max_time',
             auto_abandoned: false,
             badge_on_top: true,
+            show_badge_on_cards: true,
+            hide_lampa_history_icon: true,
             abandoned_days: 30,
             auto_watching: true,
             watching_min_progress: 5,
@@ -2352,7 +2354,9 @@
                 { title: '──────────', separator: true },
                 { title: `🎬 Таймкоды на карточках: ${c.show_timeline_on_cards ? 'Вкл' : 'Выкл'}`, action: 'toggle_timeline_cards' },
                 { title: `📍 Позиция таймкодов: ${timelinePosName}`, action: 'timeline_position' },
+                { title: `🏷 Статус на карточках: ${c.show_badge_on_cards ? 'Вкл' : 'Выкл'}`, action: 'toggle_show_badge' },
                 { title: `🏷 Статус над таймкодом: ${c.badge_on_top !== false ? 'Да' : 'Нет'}`, action: 'toggle_badge_position' },
+                { title: `👁 Значок статуса просмотра Lampa: ${c.hide_lampa_history_icon ? 'Да' : 'Нет'}`, action: 'toggle_hide_history_icon' },
                 { title: '──────────', separator: true },
                 { title: `🔔 Новые серии: ${c.check_new_episodes ? 'Вкл' : 'Выкл'}`, action: 'toggle_new_episodes' },
                 { title: `📢 Уведомления о сериях: ${c.new_episodes_notify ? 'Вкл' : 'Выкл'}`, action: 'toggle_new_episodes_notify' },
@@ -2710,8 +2714,17 @@
                         const el = this.render().get(0);
                         if (!el) return;
                         
-                        // Удаляем старый статус
                         el.querySelector('.nsl-card-badge')?.remove();
+                        
+                        const c = cfg();
+                        
+                        // Скрываем штатный значок истории лампы
+                        if (c.hide_lampa_history_icon) {
+                            const historyIcon = el.querySelector('.icon--history');
+                            if (historyIcon) historyIcon.style.display = 'none';
+                        }
+                        
+                        if (!c.show_badge_on_cards) return;
                         
                         const favs = getFavorites();
                         const baseId = getBaseTmdbId(String(data.id));
@@ -2732,6 +2745,19 @@
                         
                         const div = document.createElement('div');
                         div.className = 'nsl-card-badge';
+                        
+                        const pos = c.timeline_position || 'bottom';
+                        const badgeOnTop = c.badge_on_top !== false;
+                        
+                        let posStyles = '';
+                        if (pos === 'bottom') {
+                            posStyles = badgeOnTop ? 'bottom: 3.5em;' : 'bottom: 1.8em;';
+                        } else if (pos === 'center') {
+                            posStyles = badgeOnTop ? 'bottom: auto; top: calc(50% - 2em);' : 'bottom: auto; top: calc(50% + 0.5em);';
+                        } else {
+                            posStyles = badgeOnTop ? 'top: 0.5em; bottom: auto;' : 'top: 2.2em; bottom: auto;';
+                        }
+                        
                         div.style.cssText = `
                             position: absolute;
                             left: 0.8em;
@@ -2749,29 +2775,11 @@
                             display: flex;
                             align-items: center;
                             gap: 0.3em;
+                            ${posStyles}
                         `;
                         div.innerHTML = `<span style="color:${badge.color}">${badge.icon}</span><span style="color:#fff">${badge.text}</span>`;
                         
-                        let watchedEl = el.querySelector('.card-watched');
-                        const viewEl = el.querySelector('.card__view');
-                        
-                        // Позиционируем статус относительно таймкода
-                        const c = cfg();
-                        const pos = c.timeline_position || 'bottom';
-                        const badgeOnTop = c.badge_on_top !== false; // по умолчанию над таймкодом
-                        
-                        if (pos === 'bottom') {
-                            div.style.bottom = badgeOnTop ? '3.5em' : '1.8em';
-                        } else if (pos === 'center') {
-                            div.style.bottom = 'auto';
-                            div.style.top = badgeOnTop ? 'calc(50% - 2em)' : 'calc(50% + 0.5em)';
-                            div.style.transform = 'translateY(-50%)';
-                        } else { // top
-                            div.style.top = badgeOnTop ? '2.5em' : '0.8em';
-                            div.style.bottom = 'auto';
-                        }
-                        
-                        viewEl?.appendChild(div);
+                        el.querySelector('.card__view')?.appendChild(div);
                     };
                     
                     setTimeout(() => this._nslUpdate(), 100);
