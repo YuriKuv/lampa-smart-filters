@@ -448,21 +448,57 @@
     function deleteCompletely(item) {
         const baseId = getBaseTmdbId(item.tmdb_id);
         const title = item.data?.title || item.data?.name || 'Без названия';
+        
+        // Удаляем из избранного
         let favorites = getFavorites();
         favorites = favorites.filter(f => getBaseTmdbId(f.tmdb_id) !== baseId);
         saveFavorites(favorites);
+        
+        // Удаляем таймкоды из нашего хранилища
         const timeline = getTimeline();
         for (const key in timeline) {
-            if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) delete timeline[key];
+            const recTmdbId = timeline[key]?.tmdb_id || '';
+            if (getBaseTmdbId(recTmdbId) === baseId || getBaseTmdbId(key) === baseId) {
+                delete timeline[key];
+            }
         }
         saveTimeline(timeline);
+        
+        // Удаляем из истории
+        let history = getHistory();
+        history = history.filter(h => getBaseTmdbId(h.tmdb_id) !== baseId && h.id != baseId);
+        saveHistory(history);
+        
+        // Удаляем из штатного file_view Lampa
+        const fileView = Lampa.Storage.get('file_view', {});
+        if (fileView[baseId]) {
+            delete fileView[baseId];
+            Lampa.Storage.set('file_view', fileView, true);
+        }
+        
+        // Удаляем из штатного избранного Lampa (история)
+        const fav = Lampa.Storage.get('favorite', {});
+        if (fav.history) {
+            fav.history = fav.history.filter(id => String(id) !== baseId);
+            Lampa.Storage.set('favorite', fav, true);
+        }
+        
+        // Очищаем кэш Lampa.Timeline
+        if (Lampa.Timeline) {
+            Lampa.Timeline.cache = {};
+            Lampa.Timeline.data = {};
+            Lampa.Timeline.read(true);
+        }
+        
         notify(`🗑️ "${title}" удалён полностью`);
         logMove('delete', title, item.category, null);
         refreshNewEpisodesBadge();
+        
         const c = cfg();
         if (c.sync_on_remove && c.gist_token && c.gist_id) {
             syncToGist('favorites', false);
             syncToGist('timeline', false);
+            syncToGist('history', false);
         }
     }
         
@@ -788,9 +824,11 @@
             }
             const video = document.querySelector('video');
             if (video && !isNaN(video.currentTime) && video.currentTime > 0) {
+                console.log('[NSL-DEBUG] Video time:', video.currentTime);
                 return video.currentTime;
             }
         } catch (e) {}
+        console.log('[NSL-DEBUG] No time found');
         return null;
     }
     
@@ -805,6 +843,7 @@
     }
     
     function saveProgress(timeInSeconds, force) {
+        console.log('[NSL-DEBUG] saveProgress called, time:', timeInSeconds, 'force:', force);
         const c = cfg();
         if (!c.auto_save && !force) return false;
         const movieKey = getCurrentMovieKey();
