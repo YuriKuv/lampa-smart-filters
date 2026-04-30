@@ -97,7 +97,6 @@
             sync_interval: 30,
             sync_strategy: 'max_time',
             auto_abandoned: false,
-            badge_on_top: true,
             show_badge_on_cards: true,
             hide_lampa_history_icon: true,
             abandoned_days: 30,
