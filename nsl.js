@@ -1955,7 +1955,9 @@
     function injectTimelineStyles() {
         const oldStyle = document.getElementById('nsl-timeline-styles');
         if (oldStyle) oldStyle.remove();
+        
         const positionStyles = getTimelinePositionStyles();
+        
         const style = document.createElement('style');
         style.id = 'nsl-timeline-styles';
         style.textContent = `
@@ -1968,23 +1970,35 @@
                 left: 0.8em !important;
                 right: 0.8em !important;
                 z-index: 5 !important;
-                background-color: rgba(0,0,0,0.7) !important;
+                background-color: rgba(0, 0, 0, 0.7) !important;
                 -webkit-backdrop-filter: blur(2px);
                 backdrop-filter: blur(2px);
                 border-radius: 0.5em !important;
             }
+            
             .card:not(.focus) .card-watched {
                 display: block !important;
                 opacity: 1 !important;
                 visibility: visible !important;
             }
+            
             .card-watched[style*="display: none"] {
                 display: block !important;
             }
-            .card-watched__item:nth-child(n+3) { display: none !important; }
-            .card--wide .card-watched__item:nth-child(n+2) { display: none !important; }
+            
+            .card-watched__item:nth-child(n+3) {
+                display: none !important;
+            }
+            
+            .card--wide .card-watched__item:nth-child(n+2) {
+                display: none !important;
+            }
+            
             @media screen and (max-width: 480px) {
-                .card .card-watched { left: 0.5em !important; right: 0.5em !important; }
+                .card .card-watched {
+                    left: 0.5em !important;
+                    right: 0.5em !important;
+                }
             }
         `;
         document.head.appendChild(style);
@@ -2000,166 +2014,164 @@
     function patchTimelineModule() {
         if (timelineModulePatched) return;
         if (!Lampa.Maker || !Lampa.Maker.map) return;
+    
         try {
-            var cardMap = Lampa.Maker.map('Card');
+            const cardMap = Lampa.Maker.map('Card');
             if (cardMap && cardMap.Watched) {
-                var orig = cardMap.Watched.onCreate;
+                const originalOnCreate = cardMap.Watched.onCreate;
                 
                 cardMap.Watched.onCreate = function() {
-                    // Вызываем оригинал первым — он создаёт card-watched
-                    if (orig) orig.call(this);
+                    if (originalOnCreate) originalOnCreate.call(this);
                     
-                    // Сохраняем self
-                    var self = this;
+                    const c = cfg();
                     
-                    // Добавляем наш _nslUpdate к инстансу
-                    this._nslUpdate = function() {
-                        var data = self.data;
-                        if (!data?.id) return;
-                        var el = self.render().get(0);
-                        if (!el) return;
-                        
-                        var c = cfg();
-                        
-                        // 1. Управление значком лампы
-                        var historyIcon = el.querySelector('.icon--history');
-                        if (historyIcon) {
-                            historyIcon.style.display = c.hide_lampa_history_icon ? 'none' : '';
+                    // Всегда показываем таймкоды (если включены в настройках)
+                    if (c.show_timeline_on_cards) {
+                        setTimeout(() => this.emit('watched'), 100);
+                    }
+                    
+                    // Добавляем наш статус
+                    const self = this;
+                    setTimeout(() => {
+                        nslUpdateCardStatus(self);
+                    }, 200);
+                    
+                    // Подписка на обновление таймкодов
+                    Lampa.Listener.follow('state:changed', (e) => {
+                        if (e.target === 'timeline' && (e.reason === 'read' || e.reason === 'update')) {
+                            setTimeout(() => this.emit('watched'), 50);
                         }
-                        
-                        // 2. Удаляем старый статус
-                        el.querySelector('.nsl-card-status')?.remove();
-                        
-                        // 3. Если статус выключен — выходим
-                        if (!c.show_badge_on_cards) return;
-                        
-                        // 4. Получаем данные статуса
-                        var tmdbId = extractTmdbId({ id: data.id });
-                        var baseId = getBaseTmdbId(tmdbId || String(data.id));
-                        var favs = getFavorites();
-                        var found = favs.find(function(f) { return getBaseTmdbId(f.tmdb_id) === baseId; });
-                        
-                        if (!found) return;
-                        
-                        var badges = {
-                            'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50' },
-                            'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336' },
-                            'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3' },
-                            'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800' },
-                            'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107' },
-                            'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0' }
-                        };
-                        
-                        var badge = badges[found.category];
-                        if (!badge) return;
-                        
-                        // 5. Создаём статус
-                        var statusEl = document.createElement('div');
-                        statusEl.className = 'nsl-card-status';
-                        statusEl.innerHTML = '<span style="color:' + badge.color + ';">' + badge.icon + '</span><span style="color:#fff;">' + badge.text + '</span>';
-                        
-                        statusEl.style.cssText = 
-                            'position:absolute;' +
-                            'left:0.8em;right:0.8em;' +
-                            'z-index:6;' +
-                            'pointer-events:none;' +
-                            'padding:0.3em 0.8em;' +
-                            'background:rgba(0,0,0,0.7);' +
-                            'backdrop-filter:blur(2px);' +
-                            '-webkit-backdrop-filter:blur(2px);' +
-                            'border-radius:0.5em;' +
-                            'font-size:0.75em;' +
-                            'font-weight:500;' +
-                            'white-space:nowrap;' +
-                            'display:flex;' +
-                            'align-items:center;' +
-                            'justify-content:center;' +
-                            'gap:0.3em;';
-                        
-                        var watchedEl = el.querySelector('.card-watched');
-                        var viewEl = el.querySelector('.card__view');
-                        if (!viewEl) return;
-                        
-                        var pos = c.timeline_position || 'bottom';
-                        
-                        statusEl.style.top = 'auto';
-                        statusEl.style.bottom = 'auto';
-                        statusEl.style.transform = 'none';
-                        
-                        if (watchedEl && c.show_timeline_on_cards) {
-                            // Прилепляемся к card-watched
-                            statusEl.style.left = '0';
-                            statusEl.style.right = '0';
-                            
-                            if (pos === 'top') {
-                                statusEl.style.top = '100%';
-                                statusEl.style.marginTop = '2px';
-                                statusEl.style.borderRadius = '0 0 0.5em 0.5em';
-                            } else {
-                                statusEl.style.bottom = '100%';
-                                statusEl.style.marginBottom = '2px';
-                                statusEl.style.borderRadius = '0.5em 0.5em 0 0';
-                            }
-                            
-                            watchedEl.appendChild(statusEl);
-                        } else {
-                            if (pos === 'center') {
-                                statusEl.style.top = '50%';
-                                statusEl.style.transform = 'translateY(-50%)';
-                            } else if (pos === 'top') {
-                                statusEl.style.top = '0.5em';
-                            } else {
-                                statusEl.style.bottom = '1.8em';
-                            }
-                            
-                            viewEl.appendChild(statusEl);
-                        }
-                    };
-                    
-                    // Первичное создание статуса
-                    setTimeout(function() { self._nslUpdate(); }, 200);
-                    
-                    // Подписка на обновления
-                    Lampa.Listener.follow('state:changed', function(e) {
                         if (e.target === 'nsl_favorites' || e.target === 'timeline' || e.target === 'nsl_settings') {
-                            setTimeout(function() { self._nslUpdate && self._nslUpdate(); }, 100);
+                            setTimeout(() => nslUpdateCardStatus(self), 100);
                         }
                     });
-                    
-                    // НЕМЕДЛЕННО вызываем watched() для принудительного показа таймкодов
-                    if (cfg().show_timeline_on_cards) {
-                        setTimeout(function() {
-                            // Эмулируем событие watched — это заставит Lampa показать card-watched
-                            self.emit && self.emit('watched');
-                        }, 100);
-                    }
                 };
                 
                 timelineModulePatched = true;
-                console.log('[NSL] Таймкоды на карточках пропатчены');
+                console.log('[NSL] Модуль таймкодов пропатчен');
             }
         } catch(e) {
-            console.error('[NSL] patchTimelineModule error:', e);
+            console.warn('[NSL] Не удалось пропатчить модуль таймкодов:', e);
+        }
+    }
+
+    function nslUpdateCardStatus(cardInstance) {
+        const data = cardInstance.data;
+        if (!data?.id) return;
+        
+        const el = cardInstance.render().get(0);
+        if (!el) return;
+        
+        const c = cfg();
+        
+        // 1. Управление значком лампы
+        const historyIcon = el.querySelector('.icon--history');
+        if (historyIcon) {
+            historyIcon.style.display = c.hide_lampa_history_icon ? 'none' : '';
+        }
+        
+        // 2. Удаляем старый статус
+        el.querySelector('.nsl-card-status')?.remove();
+        
+        // 3. Если статус выключен — выходим
+        if (!c.show_badge_on_cards) return;
+        
+        // 4. Получаем данные статуса
+        const tmdbId = extractTmdbId({ id: data.id });
+        const baseId = getBaseTmdbId(tmdbId || String(data.id));
+        const favs = getFavorites();
+        const found = favs.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
+        
+        if (!found) return;
+        
+        const badges = {
+            'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50' },
+            'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336' },
+            'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3' },
+            'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800' },
+            'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107' },
+            'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0' }
+        };
+        
+        const badge = badges[found.category];
+        if (!badge) return;
+        
+        // 5. Создаём статус
+        const statusEl = document.createElement('div');
+        statusEl.className = 'nsl-card-status';
+        statusEl.innerHTML = '<span style="color:' + badge.color + ';">' + badge.icon + '</span><span style="color:#fff;">' + badge.text + '</span>';
+        
+        statusEl.style.cssText = 
+            'position:absolute;' +
+            'left:0.8em;right:0.8em;' +
+            'z-index:6;' +
+            'pointer-events:none;' +
+            'padding:0.3em 0.8em;' +
+            'background:rgba(0,0,0,0.7);' +
+            'backdrop-filter:blur(2px);' +
+            '-webkit-backdrop-filter:blur(2px);' +
+            'border-radius:0.5em;' +
+            'font-size:0.75em;' +
+            'font-weight:500;' +
+            'white-space:nowrap;' +
+            'display:flex;' +
+            'align-items:center;' +
+            'justify-content:center;' +
+            'gap:0.3em;';
+        
+        const watchedEl = el.querySelector('.card-watched');
+        const viewEl = el.querySelector('.card__view');
+        if (!viewEl) return;
+        
+        const pos = c.timeline_position || 'bottom';
+        
+        statusEl.style.top = 'auto';
+        statusEl.style.bottom = 'auto';
+        statusEl.style.transform = 'none';
+        
+        if (watchedEl && c.show_timeline_on_cards) {
+            // Прилепляемся к card-watched
+            statusEl.style.left = '0';
+            statusEl.style.right = '0';
+            
+            if (pos === 'top') {
+                statusEl.style.top = '100%';
+                statusEl.style.marginTop = '2px';
+                statusEl.style.borderRadius = '0 0 0.5em 0.5em';
+            } else {
+                statusEl.style.bottom = '100%';
+                statusEl.style.marginBottom = '2px';
+                statusEl.style.borderRadius = '0.5em 0.5em 0 0';
+            }
+            
+            watchedEl.appendChild(statusEl);
+        } else {
+            if (pos === 'center') {
+                statusEl.style.top = '50%';
+                statusEl.style.transform = 'translateY(-50%)';
+            } else if (pos === 'top') {
+                statusEl.style.top = '0.5em';
+            } else {
+                statusEl.style.bottom = '1.8em';
+            }
+            
+            viewEl.appendChild(statusEl);
         }
     }
     
     function forceRefreshCards() {
         // Принудительно показываем card-watched на всех карточках
         document.querySelectorAll('.card').forEach(function(card) {
-            // Эмулируем фокус для триггера watched()
             card.classList.add('focus');
-            // Ждём создания card-watched
             setTimeout(function() {
                 card.classList.remove('focus');
             }, 100);
         });
         
-        // Обновляем таймкоды через API Lampa
         if (Lampa.Timeline?.read) {
             Lampa.Timeline.read(true);
         }
         
-        // Отправляем событие для обновления NSL-статусов
         setTimeout(function() {
             Lampa.Listener.send('state:changed', { target: 'nsl_settings', reason: 'refresh' });
         }, 200);
@@ -2854,10 +2866,6 @@
     }
     
     function patchCardStatus() {
-        // Эта функция больше не нужна как отдельный патч,
-        // вся логика теперь в patchTimelineModule.
-        // Оставляем пустой для обратной совместимости.
-        console.log('[NSL] patchCardStatus: логика перенесена в patchTimelineModule');
     }
     
     function init() {
