@@ -2997,6 +2997,57 @@
     function init() {
         if (!cfg().enabled) return;
         console.log('[NSL] Init v26 for profile:', PROFILE_ID);
+        // Диагностика таймкодов
+        setTimeout(() => {
+            console.log('[NSL-DEBUG] === Диагностика таймкодов ===');
+            console.log('[NSL-DEBUG] card_display_mode:', cfg().card_display_mode);
+            console.log('[NSL-DEBUG] Lampa.Timeline exists:', !!Lampa.Timeline);
+            if (Lampa.Timeline) {
+                console.log('[NSL-DEBUG] Lampa.Timeline.cache size:', Object.keys(Lampa.Timeline.cache || {}).length);
+                console.log('[NSL-DEBUG] Lampa.Timeline.data size:', Object.keys(Lampa.Timeline.data || {}).length);
+                console.log('[NSL-DEBUG] Lampa.Timeline.enabled:', Lampa.Timeline.enabled);
+            }
+            console.log('[NSL-DEBUG] Lampa.Maker.map("Card"):', !!Lampa.Maker?.map?.('Card'));
+            if (Lampa.Maker?.map?.('Card')) {
+                console.log('[NSL-DEBUG] Card.Watched:', !!Lampa.Maker.map('Card').Watched);
+            }
+            console.log('[NSL-DEBUG] Our timeline items:', Object.keys(getTimeline()).length);
+            
+            // Проверим карточки на странице
+            const cards = document.querySelectorAll('.card');
+            console.log('[NSL-DEBUG] Cards on page:', cards.length);
+            cards.forEach((card, i) => {
+                const watched = card.querySelector('.card-watched');
+                const history = card.querySelector('.icon--history');
+                console.log(`[NSL-DEBUG] Card ${i}: watched=${!!watched}, watched.display=${watched?.style.display}, history=${!!history}`);
+            });
+        }, 3000);
+        
+        // Отслеживание событий таймлайна
+        if (Lampa.Timeline) {
+            const origRead = Lampa.Timeline.read;
+            Lampa.Timeline.read = function(...args) {
+                console.log('[NSL-DEBUG] Lampa.Timeline.read called, args:', args);
+                const result = origRead.apply(this, args);
+                console.log('[NSL-DEBUG] Lampa.Timeline.read result size:', Object.keys(result || {}).length);
+                return result;
+            };
+            
+            const origUpdate = Lampa.Timeline.update;
+            if (origUpdate) {
+                Lampa.Timeline.update = function(...args) {
+                    console.log('[NSL-DEBUG] Lampa.Timeline.update called, data:', args[0]);
+                    return origUpdate.apply(this, args);
+                };
+            }
+        }
+        
+        // Отслеживание событий state:changed
+        Lampa.Listener.follow('state:changed', (e) => {
+            if (e.target === 'timeline') {
+                console.log('[NSL-DEBUG] state:changed timeline:', e);
+            }
+        });
         
         $('<style>').text('.nsl-hidden-lampa-item{display:none!important}.nsl-hidden-lampa-button{display:none!important}').appendTo('head');
         
