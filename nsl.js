@@ -2029,32 +2029,8 @@
                 }
             `;
         } else if (c.card_display_mode === 'lampa_default') {
-            // ПОЛНОСТЬЮ возвращаем стандартное отображение Lampa
-            // Убираем ВСЕ наши стили, которые могли помешать
+            // Только скрываем наш статус, не трогаем стандартные стили Lampa
             styles.lampa_default = `
-                /* Возвращаем стандартное поведение - таймкоды только при фокусе */
-                .card .card-watched {
-                    display: flex !important;
-                }
-                .card:not(.focus) .card-watched {
-                    display: none !important;
-                }
-                .card-watched__item {
-                    display: flex !important;
-                }
-                .card-watched__item:nth-child(n+3) {
-                    display: none !important;
-                }
-                .card--wide .card-watched__item:nth-child(n+2) {
-                    display: none !important;
-                }
-                
-                /* Показываем штатный значок истории */
-                .card .icon--history {
-                    display: flex !important;
-                }
-                
-                /* Скрываем наш статус */
                 .nsl-card-status {
                     display: none !important;
                 }
@@ -2224,8 +2200,6 @@
     }
     
     function patchCardDisplay() {
-        // НЕ патчим карточки в режиме lampa_default и none
-        // Патчим только для nsl_status
         const c = cfg();
         if (c.card_display_mode !== 'nsl_status') {
             cardDisplayPatched = false;
@@ -2286,16 +2260,24 @@
         // Удаляем старые стили
         removeCardDisplayStyles();
         
-        // Применяем новые стили
+        if (c.card_display_mode === 'lampa_default') {
+            // Только скрываем наш статус, больше ничего не трогаем
+            const style = document.createElement('style');
+            style.id = 'nsl-card-display-styles';
+            style.textContent = '.nsl-card-status { display: none !important; }';
+            document.head.appendChild(style);
+            cardDisplayStylesInjected = true;
+            console.log('[NSL] Card display mode: lampa_default (no intervention)');
+            return;
+        }
+        
+        // Для остальных режимов применяем полные стили
         injectCardDisplayStyles();
         
-        // Патчим только для нашего режима
         if (c.card_display_mode === 'nsl_status') {
             patchCardDisplay();
             setTimeout(refreshAllCardStatuses, 500);
         }
-        // Для lampa_default и none - ничего не патчим, 
-        // пусть Lampa работает стандартно
         
         console.log('[NSL] Card display mode applied:', c.card_display_mode);
     }
