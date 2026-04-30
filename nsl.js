@@ -2001,23 +2001,36 @@
         if (timelineModulePatched) return;
         if (!Lampa.Maker || !Lampa.Maker.map) return;
         try {
-            const cardMap = Lampa.Maker.map('Card');
+            var cardMap = Lampa.Maker.map('Card');
             if (cardMap && cardMap.Watched) {
-                const orig = cardMap.Watched.onCreate;
+                var orig = cardMap.Watched.onCreate;
+                
+                // НЕ перезаписываем origCreate полностью!
+                // Вместо этого добавляем свой код ДО и ПОСЛЕ оригинального
                 cardMap.Watched.onCreate = function() {
+                    // Вызываем оригинал, который создаёт card-watched
                     if (orig) orig.call(this);
-                    const c = cfg();
-                    if (!c.show_timeline_on_cards) return;
-                    setTimeout(() => this.emit('watched'), 100);
-                    Lampa.Listener.follow('state:changed', (e) => { 
-                        if (e.target === 'timeline' && (e.reason === 'read' || e.reason === 'update')) 
-                            setTimeout(() => this.emit('watched'), 50); 
+                    
+                    // Добавляем наш статус после создания
+                    var self = this;
+                    setTimeout(function() {
+                        self._nslUpdate && self._nslUpdate();
+                    }, 150);
+                    
+                    // Подписываем на обновления
+                    Lampa.Listener.follow('state:changed', function(e) {
+                        if (e.target === 'nsl_favorites' || e.target === 'timeline' || e.target === 'nsl_settings') {
+                            setTimeout(function() { self._nslUpdate && self._nslUpdate(); }, 100);
+                        }
                     });
                 };
+                
                 timelineModulePatched = true;
                 console.log('[NSL] Таймкоды на карточках пропатчены');
             }
-        } catch(e) {}
+        } catch(e) {
+            console.error('[NSL] patchTimelineModule error:', e);
+        }
     }
     
     function forceRefreshCards() {
@@ -2729,155 +2742,120 @@
     function patchCardStatus() {
         if (!Lampa.Maker?.map) return;
         try {
-            const cardMap = Lampa.Maker.map('Card');
+            var cardMap = Lampa.Maker.map('Card');
             if (cardMap?.Watched) {
-                const origCreate = cardMap.Watched.onCreate;
+                // Сохраняем оригинальный _nslUpdate если есть
+                var origNslUpdate = cardMap.Watched.prototype?._nslUpdate;
                 
-                cardMap.Watched.onCreate = function() {
-                    if (origCreate) origCreate.call(this);
+                // Функция обновления статуса (вызывается из patchTimelineModule)
+                cardMap.Watched.prototype._nslUpdate = function() {
+                    var data = this.data;
+                    if (!data?.id) return;
+                    var el = this.render().get(0);
+                    if (!el) return;
                     
-                    // Сохраняем ссылку на функцию обновления
-                    this._nslUpdate = () => {
-                        const data = this.data;
-                        if (!data?.id) return;
-                        const el = this.render().get(0);
-                        if (!el) return;
-                        
-                        const c = cfg();
-                        
-                        // 1. Управление значком лампы (иконка истории)
-                        const historyIcon = el.querySelector('.icon--history');
-                        if (historyIcon) {
-                            historyIcon.style.display = c.hide_lampa_history_icon ? 'none' : '';
-                        }
-                        
-                        // 2. Удаляем старые элементы NSL
-                        el.querySelector('.nsl-card-status')?.remove();
-                        
-                        // 3. Получаем данные статуса
-                        const tmdbId = extractTmdbId({ id: data.id });
-                        const baseId = getBaseTmdbId(tmdbId || String(data.id));
-                        const favs = getFavorites();
-                        const found = favs.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
-                        
-                        // Если нет статуса — нечего показывать
-                        if (!found) return;
-                        
-                        const badges = {
-                            'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50' },
-                            'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336' },
-                            'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3' },
-                            'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800' },
-                            'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107' },
-                            'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0' }
-                        };
-                        
-                        const badge = badges[found.category];
-                        if (!badge) return;
-                        
-                        // 4. Создаём статус
-                        const statusEl = document.createElement('div');
-                        statusEl.className = 'nsl-card-status';
-                        statusEl.innerHTML = '<span style="color:' + badge.color + ';">' + badge.icon + '</span><span style="color:#fff;">' + badge.text + '</span>';
-                        
-                        // Базовые стили статуса
-                        var baseStyle = 
-                            'position:absolute;' +
-                            'left:0;right:0;' +
-                            'z-index:6;' +
-                            'pointer-events:none;' +
-                            'padding:0.3em 0.8em;' +
-                            'background:rgba(0,0,0,0.7);' +
-                            'backdrop-filter:blur(2px);' +
-                            '-webkit-backdrop-filter:blur(2px);' +
-                            'font-size:0.75em;' +
-                            'font-weight:500;' +
-                            'white-space:nowrap;' +
-                            'display:flex;' +
-                            'align-items:center;' +
-                            'justify-content:center;' +
-                            'gap:0.3em;';
-                        
-                        // 5. Находим card-watched — к нему будем прилепляться
-                        const watchedEl = el.querySelector('.card-watched');
-                        const viewEl = el.querySelector('.card__view');
-                        if (!viewEl) return;
-                        
-                        const pos = c.timeline_position || 'bottom';
-                        
-                        if (watchedEl && c.show_timeline_on_cards) {
-                            // Есть штатный таймкод — прилепляемся к нему
-                            
-                            // Обнуляем все позиции
-                            statusEl.style.cssText = baseStyle +
-                                'top:auto;' +
-                                'bottom:auto;' +
-                                'transform:none;';
-                            
-                            if (pos === 'top') {
-                                // Таймкод сверху — статус ПОД ним (снизу card-watched)
-                                statusEl.style.top = '100%';
-                                statusEl.style.bottom = 'auto';
-                                statusEl.style.borderRadius = '0 0 0.5em 0.5em';
-                                
-                                // Убираем нижний радиус у card-watched
-                                watchedEl.style.borderRadius = '0.5em 0.5em 0 0';
-                            } else {
-                                // Таймкод в центре или снизу — статус НАД ним (сверху card-watched)
-                                statusEl.style.top = 'auto';
-                                statusEl.style.bottom = '100%';
-                                statusEl.style.borderRadius = '0.5em 0.5em 0 0';
-                                
-                                // Убираем верхний радиус у card-watched
-                                watchedEl.style.borderRadius = '0 0 0.5em 0.5em';
-                            }
-                            
-                            // Если show_badge_on_cards выключен — показываем только при фокусе
-                            if (!c.show_badge_on_cards) {
-                                statusEl.style.display = 'none';
-                                // Добавляем класс для CSS-показа при фокусе
-                                statusEl.classList.add('nsl-show-on-focus');
-                            }
-                            
-                            watchedEl.appendChild(statusEl);
-                        } else {
-                            // Нет таймкода — размещаем самостоятельно
-                            statusEl.style.cssText = baseStyle +
-                                'left:0.8em;right:0.8em;' +
-                                'border-radius:0.5em;' +
-                                'top:auto;' +
-                                'bottom:auto;' +
-                                'transform:none;';
-                            
-                            if (pos === 'center') {
-                                statusEl.style.top = '50%';
-                                statusEl.style.transform = 'translateY(-50%)';
-                            } else if (pos === 'top') {
-                                statusEl.style.top = '0.5em';
-                            } else {
-                                statusEl.style.bottom = '1.8em';
-                            }
-                            
-                            // Если show_badge_on_cards выключен — показываем только при фокусе
-                            if (!c.show_badge_on_cards) {
-                                statusEl.style.display = 'none';
-                                statusEl.classList.add('nsl-show-on-focus');
-                            }
-                            
-                            viewEl.appendChild(statusEl);
-                        }
+                    var c = cfg();
+                    
+                    // 1. Управление значком лампы
+                    var historyIcon = el.querySelector('.icon--history');
+                    if (historyIcon) {
+                        historyIcon.style.display = c.hide_lampa_history_icon ? 'none' : '';
+                    }
+                    
+                    // 2. Удаляем старый статус
+                    el.querySelector('.nsl-card-status')?.remove();
+                    
+                    // 3. Если статус выключен — выходим
+                    if (!c.show_badge_on_cards) return;
+                    
+                    // 4. Получаем данные статуса
+                    var tmdbId = extractTmdbId({ id: data.id });
+                    var baseId = getBaseTmdbId(tmdbId || String(data.id));
+                    var favs = getFavorites();
+                    var found = favs.find(function(f) { return getBaseTmdbId(f.tmdb_id) === baseId; });
+                    
+                    if (!found) return;
+                    
+                    var badges = {
+                        'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50' },
+                        'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336' },
+                        'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3' },
+                        'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800' },
+                        'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107' },
+                        'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0' }
                     };
                     
-                    // Первичное создание
-                    var self = this;
-                    setTimeout(function() { self._nslUpdate(); }, 100);
+                    var badge = badges[found.category];
+                    if (!badge) return;
                     
-                    // Подписка на обновления для мгновенного применения
-                    Lampa.Listener.follow('state:changed', function(e) {
-                        if (e.target === 'nsl_favorites' || e.target === 'timeline' || e.target === 'nsl_settings') {
-                            setTimeout(function() { self._nslUpdate(); }, 100);
+                    // 5. Создаём статус
+                    var statusEl = document.createElement('div');
+                    statusEl.className = 'nsl-card-status';
+                    statusEl.innerHTML = '<span style="color:' + badge.color + ';">' + badge.icon + '</span><span style="color:#fff;">' + badge.text + '</span>';
+                    
+                    // Базовые стили статуса
+                    statusEl.style.cssText = 
+                        'position:absolute;' +
+                        'left:0.8em;right:0.8em;' +
+                        'z-index:6;' +
+                        'pointer-events:none;' +
+                        'padding:0.3em 0.8em;' +
+                        'background:rgba(0,0,0,0.7);' +
+                        'backdrop-filter:blur(2px);' +
+                        '-webkit-backdrop-filter:blur(2px);' +
+                        'border-radius:0.5em;' +
+                        'font-size:0.75em;' +
+                        'font-weight:500;' +
+                        'white-space:nowrap;' +
+                        'display:flex;' +
+                        'align-items:center;' +
+                        'justify-content:center;' +
+                        'gap:0.3em;';
+                    
+                    // 6. Ищем card-watched для привязки
+                    var watchedEl = el.querySelector('.card-watched');
+                    var viewEl = el.querySelector('.card__view');
+                    if (!viewEl) return;
+                    
+                    var pos = c.timeline_position || 'bottom';
+                    
+                    // Сбрасываем позиции
+                    statusEl.style.top = 'auto';
+                    statusEl.style.bottom = 'auto';
+                    statusEl.style.transform = 'none';
+                    
+                    if (watchedEl && c.show_timeline_on_cards) {
+                        // Прилепляемся к card-watched
+                        statusEl.style.position = 'absolute';
+                        statusEl.style.left = '0';
+                        statusEl.style.right = '0';
+                        
+                        if (pos === 'top') {
+                            // Таймкод сверху — статус ПОД ним
+                            statusEl.style.top = '100%';
+                            statusEl.style.marginTop = '2px';
+                            statusEl.style.borderRadius = '0 0 0.5em 0.5em';
+                        } else {
+                            // Таймкод снизу или в центре — статус НАД ним
+                            statusEl.style.bottom = '100%';
+                            statusEl.style.marginBottom = '2px';
+                            statusEl.style.borderRadius = '0.5em 0.5em 0 0';
                         }
-                    });
+                        
+                        watchedEl.appendChild(statusEl);
+                    } else {
+                        // Нет таймкода — позиционируем сами
+                        if (pos === 'center') {
+                            statusEl.style.top = '50%';
+                            statusEl.style.transform = 'translateY(-50%)';
+                        } else if (pos === 'top') {
+                            statusEl.style.top = '0.5em';
+                        } else {
+                            statusEl.style.bottom = '1.8em';
+                        }
+                        
+                        viewEl.appendChild(statusEl);
+                    }
                 };
             }
         } catch(e) {
