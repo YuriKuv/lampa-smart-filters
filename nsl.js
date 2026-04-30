@@ -2011,48 +2011,57 @@
             timelineStylesInjected = false;
         }
         
-        function patchTimelineModule() {
-            if (timelineModulePatched) return;
-            if (!Lampa.Maker || !Lampa.Maker.map) return;
-        
-            try {
-                const cardMap = Lampa.Maker.map('Card');
-                if (cardMap && cardMap.Watched) {
-                    const originalOnCreate = cardMap.Watched.onCreate;
+    function patchTimelineModule() {
+        if (timelineModulePatched) return;
+        if (!Lampa.Maker || !Lampa.Maker.map) return;
+    
+        try {
+            const cardMap = Lampa.Maker.map('Card');
+            if (cardMap && cardMap.Watched) {
+                const originalOnCreate = cardMap.Watched.onCreate;
+                
+                cardMap.Watched.onCreate = function() {
+                    // ВАЖНО: сначала вызываем оригинал, который настраивает
+                    // события hover:focus, hover:touch, подписку на timeline и т.д.
+                    if (originalOnCreate) originalOnCreate.call(this);
                     
-                    cardMap.Watched.onCreate = function() {
-                        // Вызываем оригинал
-                        if (originalOnCreate) originalOnCreate.call(this);
-                        
-                        const c = cfg();
-                        
-                        // Принудительно показываем таймкоды
-                        if (c.show_timeline_on_cards) {
-                            setTimeout(() => this.emit('watched'), 100);
+                    const c = cfg();
+                    const self = this;
+                    
+                    // Принудительно показываем таймкоды (emit 'watched')
+                    if (c.show_timeline_on_cards) {
+                        setTimeout(() => {
+                            this.html.addClass('focus');
+                            this.emit('watched');
+                            setTimeout(() => this.html.removeClass('focus'), 50);
+                        }, 200);
+                    }
+                    
+                    // Добавляем НАШ статус (не трогая штатные таймкоды)
+                    setTimeout(() => addCardStatus(self), 250);
+                    
+                    // Подписка на обновления
+                    Lampa.Listener.follow('state:changed', (e) => {
+                        if (e.target === 'timeline' && (e.reason === 'read' || e.reason === 'update')) {
+                            setTimeout(() => {
+                                self.html.addClass('focus');
+                                self.emit('watched');
+                                setTimeout(() => self.html.removeClass('focus'), 50);
+                            }, 50);
                         }
-                        
-                        // Добавляем статус (отдельно от таймкодов!)
-                        const self = this;
-                        setTimeout(() => addCardStatus(self), 150);
-                        
-                        // Подписка на обновление таймкодов
-                        Lampa.Listener.follow('state:changed', (e) => {
-                            if (e.target === 'timeline' && (e.reason === 'read' || e.reason === 'update')) {
-                                setTimeout(() => this.emit('watched'), 50);
-                            }
-                            if (e.target === 'nsl_favorites' || e.target === 'nsl_settings') {
-                                setTimeout(() => addCardStatus(self), 100);
-                            }
-                        });
-                    };
-                    
-                    timelineModulePatched = true;
-                    console.log('[NSL] Модуль таймкодов пропатчен');
-                }
-            } catch(e) {
-                console.warn('[NSL] Не удалось пропатчить модуль таймкодов:', e);
+                        if (e.target === 'nsl_favorites' || e.target === 'nsl_settings') {
+                            setTimeout(() => addCardStatus(self), 100);
+                        }
+                    });
+                };
+                
+                timelineModulePatched = true;
+                console.log('[NSL] Модуль таймкодов пропатчен');
             }
+        } catch(e) {
+            console.warn('[NSL] Не удалось пропатчить модуль таймкодов:', e);
         }
+    }
         
         // Функция добавления статуса на карточку
         function addCardStatus(cardInstance) {
