@@ -2185,15 +2185,31 @@
     
     function applyCardDisplayMode() {
         const c = cfg();
-        cardDisplayPatched = false;
+        
+        // Удаляем старые стили
         removeCardDisplayStyles();
         
-        // Всегда добавляем стили (для lampa_default только скрываем .nsl-card-status)
-        injectCardDisplayStyles();
+        if (c.card_display_mode === 'lampa_default') {
+            // Только скрываем наш статус, НЕ патчим карточки
+            injectCardDisplayStyles(); // Добавит только .nsl-card-status { display: none }
+            console.log('[NSL] Card display mode: lampa_default (no patches)');
+            return;
+        }
         
         if (c.card_display_mode === 'nsl_status') {
+            cardDisplayPatched = false;
+            injectCardDisplayStyles();
             patchCardDisplay();
             setTimeout(refreshAllCardStatuses, 500);
+            console.log('[NSL] Card display mode: nsl_status');
+            return;
+        }
+        
+        if (c.card_display_mode === 'none') {
+            cardDisplayPatched = false;
+            injectCardDisplayStyles();
+            console.log('[NSL] Card display mode: none');
+            return;
         }
         
         console.log('[NSL] Card display mode applied:', c.card_display_mode);
