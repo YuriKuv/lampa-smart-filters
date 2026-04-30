@@ -2125,6 +2125,14 @@
                             setTimeout(function() { self._nslUpdate && self._nslUpdate(); }, 100);
                         }
                     });
+                    
+                    // НЕМЕДЛЕННО вызываем watched() для принудительного показа таймкодов
+                    if (cfg().show_timeline_on_cards) {
+                        setTimeout(function() {
+                            // Эмулируем событие watched — это заставит Lampa показать card-watched
+                            self.emit && self.emit('watched');
+                        }, 100);
+                    }
                 };
                 
                 timelineModulePatched = true;
@@ -2136,21 +2144,25 @@
     }
     
     function forceRefreshCards() {
-        // Принудительно обновляем существующие карточки через класс focus
+        // Принудительно показываем card-watched на всех карточках
         document.querySelectorAll('.card').forEach(function(card) {
+            // Эмулируем фокус для триггера watched()
             card.classList.add('focus');
-            setTimeout(function() { card.classList.remove('focus'); }, 50);
+            // Ждём создания card-watched
+            setTimeout(function() {
+                card.classList.remove('focus');
+            }, 100);
         });
         
-        // Обновляем таймкоды
+        // Обновляем таймкоды через API Lampa
         if (Lampa.Timeline?.read) {
             Lampa.Timeline.read(true);
         }
         
-        // Отправляем событие для обновления NSL-элементов на всех карточках
+        // Отправляем событие для обновления NSL-статусов
         setTimeout(function() {
             Lampa.Listener.send('state:changed', { target: 'nsl_settings', reason: 'refresh' });
-        }, 150);
+        }, 200);
     }
     
     function enableTimelineOnCards() { 
