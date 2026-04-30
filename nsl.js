@@ -1935,8 +1935,10 @@
     }
     
     // ======================
-    // ОТОБРАЖЕНИЕ НА КАРТОЧКАХ (НОВАЯ СИСТЕМА)
+    // ЗАМЕНА СЕКЦИИ "ОТОБРАЖЕНИЕ НА КАРТОЧКАХ"
     // ======================
+    
+    // Замените всю секцию от "function getCardStyles()" до "function initCardDisplay()"
     
     function getCardStyles() {
         const c = cfg();
@@ -1945,7 +1947,7 @@
             nsl_status: '',
             lampa_default: ''
         };
-
+    
         if (c.card_display_mode === 'nsl_status') {
             styles.nsl_status = `
                 /* Скрываем штатные таймкоды */
@@ -2029,21 +2031,54 @@
                 }
             `;
         } else if (c.card_display_mode === 'lampa_default') {
+            // Возвращаем стандартное отображение Lampa
             styles.lampa_default = `
+                /* Показываем штатные таймкоды ВСЕГДА, а не только при фокусе */
                 .card .card-watched {
+                    display: block !important;
+                    opacity: 1 !important;
+                    visibility: visible !important;
+                    pointer-events: none;
+                    bottom: 2.5em !important;
+                    top: auto !important;
+                    left: 0.8em !important;
+                    right: 0.8em !important;
+                    z-index: 5 !important;
+                    background-color: rgba(0,0,0,0.7) !important;
+                    -webkit-backdrop-filter: blur(2px);
+                    backdrop-filter: blur(2px);
+                    border-radius: 0.5em !important;
+                }
+                .card:not(.focus) .card-watched {
+                    display: block !important;
+                    opacity: 1 !important;
+                    visibility: visible !important;
+                }
+                .card-watched[style*="display: none"] {
                     display: block !important;
                 }
                 .card-watched__item {
                     display: flex !important;
                 }
+                .card-watched__item:nth-child(n+3) { display: none !important; }
+                .card--wide .card-watched__item:nth-child(n+2) { display: none !important; }
+                
+                /* Показываем штатный значок истории */
                 .card .icon--history {
                     display: flex !important;
                 }
+                
+                /* Скрываем наш статус */
                 .nsl-card-status {
                     display: none !important;
                 }
+                
+                @media screen and (max-width: 480px) {
+                    .card .card-watched { left: 0.5em !important; right: 0.5em !important; }
+                }
             `;
         } else {
+            // Режим 'none' - скрываем всё
             styles.none = `
                 .card .card-watched {
                     display: none !important;
@@ -2059,10 +2094,10 @@
                 }
             `;
         }
-
+    
         return styles[c.card_display_mode] || '';
     }
-
+    
     function injectCardDisplayStyles() {
         const oldStyle = document.getElementById('nsl-card-display-styles');
         if (oldStyle) oldStyle.remove();
@@ -2073,13 +2108,13 @@
         document.head.appendChild(style);
         cardDisplayStylesInjected = true;
     }
-
+    
     function removeCardDisplayStyles() {
         const s = document.getElementById('nsl-card-display-styles');
         if (s) s.remove();
         cardDisplayStylesInjected = false;
     }
-
+    
     function updateCardStatusElement(cardElement, cardData) {
         if (!cardElement || !cardData?.id) return;
         
@@ -2131,7 +2166,7 @@
         
         updateCardStatusElementWithTime(cardElement, cardData, status, timeline, timelineItem);
     }
-
+    
     function updateCardStatusElementWithTime(cardElement, cardData, status, timeline, timelineItem) {
         let existing = cardElement.querySelector('.nsl-card-status');
         
@@ -2173,7 +2208,7 @@
         
         updateCardStatusPosition(existing);
     }
-
+    
     function formatTimeShort(seconds) {
         if (!seconds || seconds < 0) return '';
         const hours = Math.floor(seconds / 3600);
@@ -2187,7 +2222,7 @@
             return `${Math.floor(seconds)} сек.`;
         }
     }
-
+    
     function updateCardStatusPosition(element) {
         if (!element) return;
         const c = cfg();
@@ -2196,7 +2231,7 @@
         element.classList.remove('nsl-card-status--top', 'nsl-card-status--center', 'nsl-card-status--bottom');
         element.classList.add(`nsl-card-status--${pos}`);
     }
-
+    
     function refreshAllCardStatuses() {
         document.querySelectorAll('.card').forEach(card => {
             const cardData = card._data || card.__data;
@@ -2205,10 +2240,87 @@
             }
         });
     }
-
+    
+    function patchTimelineForDefaultMode() {
+        // Патчим таймкоды Lampa для режима lampa_default
+        // Это нужно чтобы таймкоды показывались всегда, а не только при фокусе
+        if (!Lampa.Maker?.map) {
+            setTimeout(patchTimelineForDefaultMode, 1000);
+            return;
+        }
+        
+        try {
+            const cardMap = Lampa.Maker.map('Card');
+            if (cardMap && cardMap.Watched) {
+                const orig = cardMap.Watched.onCreate;
+                cardMap.Watched.onCreate = function() {
+                    if (orig) orig.call(this);
+                    const c = cfg();
+                    if (c.card_display_mode === 'lampa_default') {
+                        // Форсируем показ таймкодов
+                        setTimeout(() => {
+                            this.emit('watched');
+                            // Показываем таймкоды даже без фокуса
+                            const el = this.render().get(0);
+                            if (el) {
+                                const watchedEl = el.querySelector('.card-watched');
+                                if (watchedEl) {
+                                    watchedEl.style.display = 'block';
+                                    watchedEl.style.opacity = '1';
+                                    watchedEl.style.visibility = 'visible';
+                                }
+                            }
+                        }, 100);
+                        
+                        Lampa.Listener.follow('state:changed', (e) => { 
+                            if (e.target === 'timeline' && (e.reason === 'read' || e.reason === 'update')) {
+                                setTimeout(() => {
+                                    this.emit('watched');
+                                    const el = this.render().get(0);
+                                    if (el) {
+                                        const watchedEl = el.querySelector('.card-watched');
+                                        if (watchedEl) {
+                                            watchedEl.style.display = 'block';
+                                            watchedEl.style.opacity = '1';
+                                            watchedEl.style.visibility = 'visible';
+                                        }
+                                    }
+                                }, 50); 
+                            }
+                        });
+                    }
+                };
+                console.log('[NSL] Timeline patched for default mode');
+            }
+        } catch(e) {
+            console.error('[NSL] Error patching timeline:', e);
+        }
+    }
+    
+    function forceRefreshTimelineCards() {
+        // Обновляем таймкоды Lampa
+        if (Lampa.Timeline?.read) Lampa.Timeline.read(true);
+        setTimeout(() => {
+            document.querySelectorAll('.card').forEach(card => {
+                card.classList.add('focus');
+                setTimeout(() => card.classList.remove('focus'), 50);
+            });
+        }, 200);
+    }
+    
     function patchCardDisplay() {
-        if (cardDisplayPatched) return;
-        if (!Lampa.Maker?.map) return;
+        if (cardDisplayPatched) {
+            // Уже пропатчено, но обновим в зависимости от режима
+            const c = cfg();
+            if (c.card_display_mode === 'lampa_default') {
+                forceRefreshTimelineCards();
+            }
+            return;
+        }
+        if (!Lampa.Maker?.map) {
+            setTimeout(patchCardDisplay, 1000);
+            return;
+        }
         
         try {
             const cardMap = Lampa.Maker.map('Card');
@@ -2222,24 +2334,62 @@
             cardMap.Watched.onCreate = function() {
                 if (origCreate) origCreate.call(this);
                 
-                const updateCard = () => {
-                    const data = this.data;
-                    if (!data?.id) return;
-                    const el = this.render().get(0);
-                    if (!el) return;
-                    updateCardStatusElement(el, data);
-                };
+                const c = cfg();
                 
-                setTimeout(updateCard, 150);
-                
-                const handler = () => setTimeout(updateCard, 100);
-                
-                if (this._nslUnsubscribe) {
-                    Lampa.Listener.unfollow('state:changed', this._nslUnsubscribe);
+                if (c.card_display_mode === 'nsl_status') {
+                    // Режим нашего статуса
+                    const updateCard = () => {
+                        const data = this.data;
+                        if (!data?.id) return;
+                        const el = this.render().get(0);
+                        if (!el) return;
+                        updateCardStatusElement(el, data);
+                    };
+                    
+                    setTimeout(updateCard, 150);
+                    
+                    const handler = () => setTimeout(updateCard, 100);
+                    
+                    if (this._nslUnsubscribe) {
+                        Lampa.Listener.unfollow('state:changed', this._nslUnsubscribe);
+                    }
+                    
+                    Lampa.Listener.follow('state:changed', handler);
+                    this._nslUnsubscribe = handler;
+                } else if (c.card_display_mode === 'lampa_default') {
+                    // Режим стандартных таймкодов Lampa
+                    setTimeout(() => {
+                        this.emit('watched');
+                        // Показываем таймкоды всегда
+                        const el = this.render().get(0);
+                        if (el) {
+                            const watchedEl = el.querySelector('.card-watched');
+                            if (watchedEl) {
+                                watchedEl.style.display = 'block';
+                                watchedEl.style.opacity = '1';
+                                watchedEl.style.visibility = 'visible';
+                            }
+                        }
+                    }, 100);
+                    
+                    const handler = () => {
+                        setTimeout(() => {
+                            this.emit('watched');
+                            const el = this.render().get(0);
+                            if (el) {
+                                const watchedEl = el.querySelector('.card-watched');
+                                if (watchedEl) {
+                                    watchedEl.style.display = 'block';
+                                    watchedEl.style.opacity = '1';
+                                    watchedEl.style.visibility = 'visible';
+                                }
+                            }
+                        }, 50);
+                    };
+                    
+                    Lampa.Listener.follow('state:changed', handler);
+                    this._nslUnsubscribe = handler;
                 }
-                
-                Lampa.Listener.follow('state:changed', handler);
-                this._nslUnsubscribe = handler;
             };
             
             cardDisplayPatched = true;
@@ -2248,25 +2398,38 @@
             console.error('[NSL] Error patching card display:', e);
         }
     }
-
+    
     function applyCardDisplayMode() {
         const c = cfg();
         
+        // Сбрасываем патч при смене режима
+        cardDisplayPatched = false;
+        
+        // Применяем стили
         injectCardDisplayStyles();
+        
+        // Патчим карточки
         patchCardDisplay();
         
-        setTimeout(refreshAllCardStatuses, 500);
+        // Для режима lampa_default - патчим таймкоды и обновляем
+        if (c.card_display_mode === 'lampa_default') {
+            patchTimelineForDefaultMode();
+            setTimeout(forceRefreshTimelineCards, 500);
+        }
+        
+        // Для нашего режима - обновляем статусы
+        if (c.card_display_mode === 'nsl_status') {
+            setTimeout(refreshAllCardStatuses, 500);
+        }
         
         console.log('[NSL] Card display mode applied:', c.card_display_mode);
     }
-
+    
     function initCardDisplay() {
         if (!cfg().enabled) return;
         
         const c = cfg();
-        if (c.card_display_mode === 'nsl_status' || c.card_display_mode === 'none') {
-            applyCardDisplayMode();
-        }
+        applyCardDisplayMode();
     }
 
     // ======================
