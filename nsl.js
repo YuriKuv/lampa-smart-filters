@@ -2763,129 +2763,113 @@
                         const favs = getFavorites();
                         const found = favs.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
                         
-                        // 5. Получаем данные таймкода
-                        const timeline = getTimeline();
-                        let timelineItem = null;
-                        if (tmdbId || baseId) {
-                            for (const key in timeline) {
-                                const rec = timeline[key];
-                                const recBaseId = getBaseTmdbId(rec.tmdb_id || '');
-                                if (recBaseId === baseId || getBaseTmdbId(key) === baseId) {
-                                    if (!timelineItem || (rec.time || 0) > (timelineItem.time || 0)) {
-                                        timelineItem = rec;
-                                    }
-                                }
-                            }
-                        }
+                        // Если нет статуса — нечего показывать
+                        if (!found) return;
                         
-                        // 6. Формируем блоки для отображения
-                        const blocks = [];
+                        const badges = {
+                            'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50' },
+                            'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336' },
+                            'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3' },
+                            'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800' },
+                            'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107' },
+                            'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0' }
+                        };
                         
-                        // Блок таймкода
-                        if (timelineItem && timelineItem.time > 0 && c.show_timeline_on_cards) {
-                            const hours = Math.floor(timelineItem.time / 3600);
-                            const minutes = Math.floor((timelineItem.time % 3600) / 60);
-                            let timeStr;
-                            if (hours > 0) {
-                                timeStr = hours + ' Ч. ' + minutes + ' М.';
-                            } else {
-                                timeStr = minutes + ' М.';
-                            }
-                            blocks.push({
-                                type: 'timecode',
-                                html: '<span style="color:#aaa;">⏱</span><span style="color:#fff;">' + timeStr + '</span>',
-                                priority: 2
-                            });
-                        }
+                        const badge = badges[found.category];
+                        if (!badge) return;
                         
-                        // Блок статуса
-                        if (found) {
-                            var badges = {
-                                'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50' },
-                                'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336' },
-                                'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3' },
-                                'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800' },
-                                'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107' },
-                                'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0' }
-                            };
-                            var badge = badges[found.category];
-                            if (badge) {
-                                blocks.push({
-                                    type: 'status',
-                                    html: '<span style="color:' + badge.color + ';">' + badge.icon + '</span><span style="color:#fff;">' + badge.text + '</span>',
-                                    priority: 1
-                                });
-                            }
-                        }
+                        // 5. Создаём статус
+                        const statusEl = document.createElement('div');
+                        statusEl.className = 'nsl-card-status';
+                        statusEl.innerHTML = '<span style="color:' + badge.color + ';">' + badge.icon + '</span><span style="color:#fff;">' + badge.text + '</span>';
                         
-                        // Если нет ни одного блока — выходим
-                        if (blocks.length === 0) return;
-                        
-                        // Сортируем: статус первый, таймкод второй
-                        blocks.sort(function(a, b) { return a.priority - b.priority; });
-                        
-                        // 7. Создаём единый контейнер
-                        var container = document.createElement('div');
-                        container.className = 'nsl-card-status';
-                        container.style.cssText = 'position:absolute;left:0.8em;right:0.8em;z-index:6;pointer-events:none;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:nowrap;';
-                        
-                        // 8. Создаём подэлементы
-                        blocks.forEach(function(block) {
-                            var blockEl = document.createElement('div');
-                            blockEl.className = block.type === 'status' ? 'nsl-card-badge' : 'nsl-card-timecode';
-                            blockEl.style.cssText = 'padding:0.3em 0.8em;background:rgba(0,0,0,0.7);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);border-radius:0.5em;font-size:0.75em;font-weight:500;white-space:nowrap;display:flex;align-items:center;gap:0.3em;flex-shrink:0;';
-                            blockEl.innerHTML = block.html;
-                            container.appendChild(blockEl);
-                        });
-                        
-                        // 9. Определяем позицию контейнера
-                        var viewEl = el.querySelector('.card__view');
+                        // 6. Находим card-watched — к нему будем прилепляться
+                        const watchedEl = el.querySelector('.card-watched');
+                        const viewEl = el.querySelector('.card__view');
                         if (!viewEl) return;
                         
-                        var pos = c.timeline_position || 'bottom';
-                        var badgeOnTop = c.badge_on_top !== false;
+                        const pos = c.timeline_position || 'bottom';
                         
-                        // Сбрасываем все позиции
-                        container.style.top = 'auto';
-                        container.style.bottom = 'auto';
-                        container.style.transform = 'none';
-                        
-                        // Ищем штатный card-watched чтобы разместиться НАД ним
-                        var watchedEl = el.querySelector('.card-watched');
-                        if (watchedEl) {
-                            // Размещаемся ровно над card-watched с отступом 8px
-                            container.style.bottom = 'auto';
-                            container.style.top = 'auto';
+                        if (watchedEl && c.show_timeline_on_cards) {
+                            // Есть штатный таймкод — прилепляемся к нему
+                            statusEl.style.cssText = 
+                                'position:absolute;' +
+                                'left:0.8em;right:0.8em;' +
+                                'z-index:6;' +
+                                'pointer-events:none;' +
+                                'padding:0.3em 0.8em;' +
+                                'background:rgba(0,0,0,0.7);' +
+                                'backdrop-filter:blur(2px);' +
+                                '-webkit-backdrop-filter:blur(2px);' +
+                                'font-size:0.75em;' +
+                                'font-weight:500;' +
+                                'white-space:nowrap;' +
+                                'display:flex;' +
+                                'align-items:center;' +
+                                'justify-content:center;' +
+                                'gap:0.3em;';
                             
-                            // Позиционируем относительно низа card__view
-                            // card-watched имеет bottom: 3em (по CSS Lampa)
-                            // Мы размещаемся выше card-watched
+                            // Обнуляем все позиции
+                            statusEl.style.top = 'auto';
+                            statusEl.style.bottom = 'auto';
+                            statusEl.style.transform = 'none';
+                            
                             if (pos === 'center') {
-                                // Центр — размещаем над центром карточки, выше card-watched
-                                container.style.top = '30%';
-                                container.style.transform = 'none';
+                                // Таймкод в центре — статус всегда НАД ним
+                                statusEl.style.top = 'auto';
+                                statusEl.style.bottom = '100%';
+                                statusEl.style.marginBottom = '2px';
+                                statusEl.style.borderRadius = '0.5em 0.5em 0 0';
                             } else if (pos === 'top') {
-                                // Сверху
-                                container.style.top = badgeOnTop ? '0.5em' : '2.2em';
-                                container.style.bottom = 'auto';
+                                // Таймкод сверху — статус ПОД ним
+                                statusEl.style.top = '100%';
+                                statusEl.style.bottom = 'auto';
+                                statusEl.style.marginTop = '2px';
+                                statusEl.style.borderRadius = '0 0 0.5em 0.5em';
                             } else {
-                                // Снизу (по умолчанию) — размещаем НАД card-watched
-                                container.style.bottom = '4em'; // card-watched bottom: 3em + отступ 1em
-                                container.style.top = 'auto';
+                                // Таймкод снизу — статус НАД ним
+                                statusEl.style.top = 'auto';
+                                statusEl.style.bottom = '100%';
+                                statusEl.style.marginBottom = '2px';
+                                statusEl.style.borderRadius = '0.5em 0.5em 0 0';
                             }
+                            
+                            watchedEl.appendChild(statusEl);
                         } else {
-                            // Если card-watched нет — стандартное позиционирование
+                            // Нет таймкода — размещаем самостоятельно
+                            statusEl.style.cssText = 
+                                'position:absolute;' +
+                                'left:0.8em;right:0.8em;' +
+                                'z-index:6;' +
+                                'pointer-events:none;' +
+                                'padding:0.3em 0.8em;' +
+                                'background:rgba(0,0,0,0.7);' +
+                                'backdrop-filter:blur(2px);' +
+                                '-webkit-backdrop-filter:blur(2px);' +
+                                'border-radius:0.5em;' +
+                                'font-size:0.75em;' +
+                                'font-weight:500;' +
+                                'white-space:nowrap;' +
+                                'display:flex;' +
+                                'align-items:center;' +
+                                'justify-content:center;' +
+                                'gap:0.3em;';
+                            
+                            statusEl.style.top = 'auto';
+                            statusEl.style.bottom = 'auto';
+                            statusEl.style.transform = 'none';
+                            
                             if (pos === 'center') {
-                                container.style.top = '50%';
-                                container.style.transform = 'translateY(-50%)';
+                                statusEl.style.top = '50%';
+                                statusEl.style.transform = 'translateY(-50%)';
                             } else if (pos === 'top') {
-                                container.style.top = badgeOnTop ? '0.5em' : '2.2em';
+                                statusEl.style.top = '0.5em';
                             } else {
-                                container.style.bottom = badgeOnTop ? '3.5em' : '1.8em';
+                                statusEl.style.bottom = '1.8em';
                             }
+                            
+                            viewEl.appendChild(statusEl);
                         }
-                        
-                        viewEl.appendChild(container);
                     };
                     
                     // Первичное создание
