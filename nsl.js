@@ -2787,9 +2787,9 @@
                             const minutes = Math.floor((timelineItem.time % 3600) / 60);
                             let timeStr;
                             if (hours > 0) {
-                                timeStr = `${hours} Ч. ${minutes} М.`;
+                                timeStr = hours + ' Ч. ' + minutes + ' М.';
                             } else {
-                                timeStr = `${minutes} М.`;
+                                timeStr = minutes + ' М.';
                             }
                             blocks.push({
                                 type: 'timecode',
@@ -2827,7 +2827,7 @@
                         // 7. Создаём единый контейнер
                         var container = document.createElement('div');
                         container.className = 'nsl-card-status';
-                        container.style.cssText = 'position:absolute;left:0.8em;right:0.8em;z-index:4;pointer-events:none;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:nowrap;';
+                        container.style.cssText = 'position:absolute;left:0.8em;right:0.8em;z-index:6;pointer-events:none;display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:nowrap;';
                         
                         // 8. Создаём подэлементы
                         blocks.forEach(function(block) {
@@ -2850,13 +2850,39 @@
                         container.style.bottom = 'auto';
                         container.style.transform = 'none';
                         
-                        if (pos === 'center') {
-                            container.style.top = '50%';
-                            container.style.transform = 'translateY(-50%)';
-                        } else if (pos === 'top') {
-                            container.style.top = badgeOnTop ? '0.5em' : '2.2em';
+                        // Ищем штатный card-watched чтобы разместиться НАД ним
+                        var watchedEl = el.querySelector('.card-watched');
+                        if (watchedEl) {
+                            // Размещаемся ровно над card-watched с отступом 8px
+                            container.style.bottom = 'auto';
+                            container.style.top = 'auto';
+                            
+                            // Позиционируем относительно низа card__view
+                            // card-watched имеет bottom: 3em (по CSS Lampa)
+                            // Мы размещаемся выше card-watched
+                            if (pos === 'center') {
+                                // Центр — размещаем над центром карточки, выше card-watched
+                                container.style.top = '30%';
+                                container.style.transform = 'none';
+                            } else if (pos === 'top') {
+                                // Сверху
+                                container.style.top = badgeOnTop ? '0.5em' : '2.2em';
+                                container.style.bottom = 'auto';
+                            } else {
+                                // Снизу (по умолчанию) — размещаем НАД card-watched
+                                container.style.bottom = '4em'; // card-watched bottom: 3em + отступ 1em
+                                container.style.top = 'auto';
+                            }
                         } else {
-                            container.style.bottom = badgeOnTop ? '3.5em' : '1.8em';
+                            // Если card-watched нет — стандартное позиционирование
+                            if (pos === 'center') {
+                                container.style.top = '50%';
+                                container.style.transform = 'translateY(-50%)';
+                            } else if (pos === 'top') {
+                                container.style.top = badgeOnTop ? '0.5em' : '2.2em';
+                            } else {
+                                container.style.bottom = badgeOnTop ? '3.5em' : '1.8em';
+                            }
                         }
                         
                         viewEl.appendChild(container);
