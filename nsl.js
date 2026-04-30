@@ -2881,7 +2881,7 @@
             checkAutoRemoveWatched();
             checkUnfinishedWatching();
             checkUpcomingEpisodes();
-        }, });
+        }, 3000);
         
         Lampa.Listener.follow('state:changed', (e) => {
             if (e.target === 'nsl_favorites' || e.target === 'timeline') {
