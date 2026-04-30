@@ -68,7 +68,6 @@
         planned: { removeFrom: [] }
     };
 
-    let cardDisplayStylesInjected = false;
     let cardDisplayPatched = false;
     let favoriteButtonTimer = null;
     let seriesCheckTimer = null;
@@ -129,9 +128,7 @@
     }
     
     function getTimeline() { return Lampa.Storage.get(STORE_TIMELINE, {}) || {}; }
-    function saveTimeline(t) { 
-        Lampa.Storage.set(STORE_TIMELINE, t, true); 
-    }
+    function saveTimeline(t) { Lampa.Storage.set(STORE_TIMELINE, t, true); }
     
     function getMoveLog() { return Lampa.Storage.get(STORE_MOVE_LOG, []) || []; }
     function saveMoveLog(l) { 
@@ -275,7 +272,6 @@
             free: true
         }, (val) => {
             if (!val) {
-                // Отмена — возвращаем фокус
                 if (isAndroid) Lampa.Controller.toggle('content');
                 return;
             }
@@ -287,7 +283,6 @@
             notify('Сохранено');
             if (isAndroid) Lampa.Controller.toggle('content');
         }, () => {
-            // Колбэк отмены
             if (isAndroid) Lampa.Controller.toggle('content');
         });
     }
@@ -469,32 +464,20 @@
         history = history.filter(h => getBaseTmdbId(h.tmdb_id) !== baseId && h.id != baseId);
         saveHistory(history);
         
-        // Удаляем из штатного file_view Lampa (по хешу)
+        // Удаляем из штатного file_view Lampa
         const fileView = Lampa.Storage.get('file_view', {});
-        const hash = Lampa.Utils.hash(baseId);
-        if (fileView[hash]) {
-            delete fileView[hash];
-        }
-        // И для сериалов тоже — удаляем все ключи содержащие baseId
         for (const key in fileView) {
-            if (String(key).includes(baseId) || String(Lampa.Utils.hash(String(key))).includes(baseId)) {
+            if (String(key).includes(baseId)) {
                 delete fileView[key];
             }
         }
         Lampa.Storage.set('file_view', fileView, true);
         
-        // Удаляем из штатного избранного Lampa (история)
+        // Удаляем из штатного избранного Lampa
         const fav = Lampa.Storage.get('favorite', {});
         if (fav.history) {
             fav.history = fav.history.filter(id => String(id) !== baseId);
             Lampa.Storage.set('favorite', fav, true);
-        }
-        
-        // Очищаем кэш Lampa.Timeline
-        if (Lampa.Timeline) {
-            Lampa.Timeline.cache = {};
-            Lampa.Timeline.data = {};
-            Lampa.Timeline.read(true);
         }
         
         notify(`🗑️ "${title}" удалён полностью`);
@@ -571,7 +554,7 @@
         if (!c.auto_watching) return;
         
         const now = Date.now();
-        const remindAfter = 7 * 24 * 60 * 60 * 1000; // 7 дней
+        const remindAfter = 7 * 24 * 60 * 60 * 1000;
         const timeline = getTimeline();
         const favorites = getFavorites();
         
@@ -831,11 +814,9 @@
             }
             const video = document.querySelector('video');
             if (video && !isNaN(video.currentTime) && video.currentTime > 0) {
-                console.log('[NSL-DEBUG] Video time:', video.currentTime);
                 return video.currentTime;
             }
         } catch (e) {}
-        console.log('[NSL-DEBUG] No time found');
         return null;
     }
     
@@ -1159,7 +1140,6 @@
                             }, 100);
                         }
                         
-                        // Передаём сохранённое время в плеер если есть
                         const timeline = getTimeline();
                         let bestTime = 0;
                         for (const key in timeline) {
@@ -1184,6 +1164,7 @@
         });
         window.nslInsertButton = function() {};
     }
+
     // ======================
     // МЕНЮ (С ПОСТЕРАМИ И ГОДОМ)
     // ======================
@@ -1203,7 +1184,6 @@
         const badgeEl = $('.nsl-favorites-item .menu__text');
         if (!badgeEl.length) return;
         const newEpisodesCount = getNewEpisodesCount();
-        // Удаляем старый badge
         badgeEl.find('.nsl-badge').remove();
         if (newEpisodesCount > 0) {
             badgeEl.append(` <span class="nsl-badge" style="background:#f44336;color:#fff;border-radius:50%;padding:0 0.3em;font-size:0.8em;margin-left:0.5em;">🔔${newEpisodesCount}</span>`);
@@ -1347,7 +1327,6 @@
         let bestItem = null;
         let bestTime = 0;
         
-        // Ищем последний просмотренный с прогрессом 5-95%
         const watchingItems = favorites.filter(f => f.category === 'watching');
         
         watchingItems.forEach(f => {
@@ -1772,7 +1751,6 @@
             
             try {
                 const airDate = new Date(data.last_air_date).getTime();
-                // Если дата выхода в пределах следующих 24 часов
                 if (airDate > now && airDate < tomorrow) {
                     const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === key);
                     if (item && (item.category === 'watching' || item.category === 'planned')) {
@@ -1869,7 +1847,6 @@
         if (history.length > 50) history.length = 50;
         saveHistory(history);
         
-        // Синхронизируем с Gist
         const c = cfg();
         if (c.gist_token && c.gist_id) syncToGist('history', false);
     }
@@ -1984,7 +1961,6 @@
             `;
         }
         
-        // lampa_default - только скрываем наш статус, НЕ трогаем стили Lampa
         return '.nsl-card-status { display: none !important; }';
     }
     
@@ -1996,13 +1972,11 @@
         style.id = 'nsl-card-display-styles';
         style.textContent = getCardStyles();
         document.head.appendChild(style);
-        cardDisplayStylesInjected = true;
     }
     
     function removeCardDisplayStyles() {
         const s = document.getElementById('nsl-card-display-styles');
         if (s) s.remove();
-        cardDisplayStylesInjected = false;
     }
     
     function updateCardStatusElement(cardElement, cardData) {
@@ -2177,7 +2151,6 @@
             };
             
             cardDisplayPatched = true;
-            console.log('[NSL] Card display patched for NSL status mode');
         } catch(e) {
             console.error('[NSL] Error patching card display:', e);
         }
@@ -2187,14 +2160,12 @@
         const c = cfg();
         cardDisplayPatched = false;
         removeCardDisplayStyles();
-        injectCardDisplayStyles(); // Только скрываем .nsl-card-status
+        injectCardDisplayStyles();
         
         if (c.card_display_mode === 'nsl_status') {
             patchCardDisplay();
             setTimeout(refreshAllCardStatuses, 500);
         }
-        
-        console.log('[NSL] Card display mode:', c.card_display_mode);
     }
     
     function initCardDisplay() {
@@ -2269,32 +2240,27 @@
             success: (data) => {
                 try {
                     let changed = false;
-                    // Загружаем избранное
                     const favContent = data.files['nsl_favorites.json']?.content;
                     if (favContent) {
                         const favData = JSON.parse(favContent);
                         if (favData.favorites) { saveFavorites(favData.favorites); changed = true; }
                         if (favData.bookmarks) { saveBookmarks(favData.bookmarks); changed = true; }
                     }
-                    // Загружаем таймкоды
                     const timeContent = data.files['nsl_timeline.json']?.content;
                     if (timeContent) {
                         const timeData = JSON.parse(timeContent);
                         if (timeData.timeline) { saveTimeline(timeData.timeline); changed = true; }
                     }
-                    // Загружаем закладки
                     const bookContent = data.files['nsl_bookmarks.json']?.content;
                     if (bookContent) {
                         const bookData = JSON.parse(bookContent);
                         if (bookData.bookmarks) { saveBookmarks(bookData.bookmarks); changed = true; }
                     }
-                    // Загружаем историю
                     const hisContent = data.files['nsl_history.json']?.content;
                     if (hisContent) {
                         const hisData = JSON.parse(hisContent);
                         if (hisData.history) { saveHistory(hisData.history); changed = true; }
                     }
-                    // Если нет новых файлов — пробуем старый формат
                     if (!favContent && !timeContent) {
                         const oldContent = data.files['nsl_sync.json']?.content;
                         if (oldContent) {
@@ -2344,11 +2310,7 @@
         if (!c.auto_backup) return;
         
         if (autoBackupTimer) clearInterval(autoBackupTimer);
-        
-        // Первый бэкап через минуту после запуска
         setTimeout(() => doAutoBackup(), 60000);
-        
-        // Далее раз в сутки (или по настройке)
         const interval = (c.auto_backup_interval || 24) * 60 * 60 * 1000;
         autoBackupTimer = setInterval(() => doAutoBackup(), interval);
     }
@@ -2365,7 +2327,6 @@
             };
             Lampa.Storage.set(`nsl_autobackup_${PROFILE_ID}`, data);
             Lampa.Storage.set(`nsl_autobackup_time_${PROFILE_ID}`, Date.now());
-            console.log('[NSL] Auto-backup completed');
         } catch (e) {
             console.error('[NSL] Auto-backup failed:', e);
         }
@@ -2487,7 +2448,6 @@
     function applyHideLampaElements() {
         const c = cfg();
         
-        // Кнопка на странице фильма
         if (c.hide_lampa_bookmark_button) {
             $('.button--book').addClass('nsl-hidden-lampa-button');
         } else {
@@ -2546,18 +2506,9 @@
                     Lampa.Select.show({
                         title: 'Отображение на карточках',
                         items: [
-                            { 
-                                title: '❌ Выкл (ничего не показывать)', 
-                                action: 'none'
-                            },
-                            { 
-                                title: '⭐ Избранное+ (статус + таймкод)', 
-                                action: 'nsl_status'
-                            },
-                            { 
-                                title: '🔄 Стандарт Lampa', 
-                                action: 'lampa_default'
-                            }
+                            { title: '❌ Выкл (ничего не показывать)', action: 'none' },
+                            { title: '⭐ Избранное+ (статус + таймкод)', action: 'nsl_status' },
+                            { title: '🔄 Стандарт Lampa', action: 'lampa_default' }
                         ],
                         onSelect: (subItem) => {
                             if (subItem.action) {
@@ -2894,57 +2845,6 @@
     function init() {
         if (!cfg().enabled) return;
         console.log('[NSL] Init v26 for profile:', PROFILE_ID);
-        // Диагностика таймкодов
-        setTimeout(() => {
-            console.log('[NSL-DEBUG] === Диагностика таймкодов ===');
-            console.log('[NSL-DEBUG] card_display_mode:', cfg().card_display_mode);
-            console.log('[NSL-DEBUG] Lampa.Timeline exists:', !!Lampa.Timeline);
-            if (Lampa.Timeline) {
-                console.log('[NSL-DEBUG] Lampa.Timeline.cache size:', Object.keys(Lampa.Timeline.cache || {}).length);
-                console.log('[NSL-DEBUG] Lampa.Timeline.data size:', Object.keys(Lampa.Timeline.data || {}).length);
-                console.log('[NSL-DEBUG] Lampa.Timeline.enabled:', Lampa.Timeline.enabled);
-            }
-            console.log('[NSL-DEBUG] Lampa.Maker.map("Card"):', !!Lampa.Maker?.map?.('Card'));
-            if (Lampa.Maker?.map?.('Card')) {
-                console.log('[NSL-DEBUG] Card.Watched:', !!Lampa.Maker.map('Card').Watched);
-            }
-            console.log('[NSL-DEBUG] Our timeline items:', Object.keys(getTimeline()).length);
-            
-            // Проверим карточки на странице
-            const cards = document.querySelectorAll('.card');
-            console.log('[NSL-DEBUG] Cards on page:', cards.length);
-            cards.forEach((card, i) => {
-                const watched = card.querySelector('.card-watched');
-                const history = card.querySelector('.icon--history');
-                console.log(`[NSL-DEBUG] Card ${i}: watched=${!!watched}, watched.display=${watched?.style.display}, history=${!!history}`);
-            });
-        }, 3000);
-        
-        // Отслеживание событий таймлайна
-        if (Lampa.Timeline) {
-            const origRead = Lampa.Timeline.read;
-            Lampa.Timeline.read = function(...args) {
-                console.log('[NSL-DEBUG] Lampa.Timeline.read called, args:', args);
-                const result = origRead.apply(this, args);
-                console.log('[NSL-DEBUG] Lampa.Timeline.read result size:', Object.keys(result || {}).length);
-                return result;
-            };
-            
-            const origUpdate = Lampa.Timeline.update;
-            if (origUpdate) {
-                Lampa.Timeline.update = function(...args) {
-                    console.log('[NSL-DEBUG] Lampa.Timeline.update called, data:', args[0]);
-                    return origUpdate.apply(this, args);
-                };
-            }
-        }
-        
-        // Отслеживание событий state:changed
-        Lampa.Listener.follow('state:changed', (e) => {
-            if (e.target === 'timeline') {
-                console.log('[NSL-DEBUG] state:changed timeline:', e);
-            }
-        });
         
         $('<style>').text('.nsl-hidden-lampa-item{display:none!important}.nsl-hidden-lampa-button{display:none!important}').appendTo('head');
         
@@ -2981,7 +2881,7 @@
             checkAutoRemoveWatched();
             checkUnfinishedWatching();
             checkUpcomingEpisodes();
-        }, 3000);
+        }, });
         
         Lampa.Listener.follow('state:changed', (e) => {
             if (e.target === 'nsl_favorites' || e.target === 'timeline') {
