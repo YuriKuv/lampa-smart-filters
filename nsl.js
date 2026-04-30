@@ -867,7 +867,6 @@
             lastSavedProgress = currentTime;
             currentMovieTime = currentTime;
             if (tmdbId && currentTime > 60 && !returnedToWatchingMap[getBaseTmdbId(tmdbId)]) returnToWatching(tmdbId);
-            if (Lampa.Timeline?.update) Lampa.Timeline.update({ hash: movieKey, percent, time: currentTime, duration });
             return true;
         }
         return false;
