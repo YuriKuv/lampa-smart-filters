@@ -2027,22 +2027,28 @@
                     const c = cfg();
                     const self = this;
                     
-                    // Принудительно показываем таймкоды (как в старом рабочем коде)
+                    // Принудительно показываем таймкоды
                     if (c.show_timeline_on_cards) {
                         setTimeout(() => {
-                            // Просто вызываем emit, без манипуляций с focus!
-                            // Штатный watched.js сам разберётся
+                            // Временно добавляем focus для корректной работы watched
+                            self.html.addClass('focus');
                             self.emit('watched');
+                            // Убираем focus через 600мс (чуть больше штатных 500мс)
+                            setTimeout(() => self.html.removeClass('focus'), 600);
                         }, 300);
                     }
                     
                     // Добавляем наш статус
-                    setTimeout(() => addCardStatus(self), 350);
+                    setTimeout(() => addCardStatus(self), 400);
                     
                     // Подписка на обновление таймкодов
                     Lampa.Listener.follow('state:changed', (e) => {
                         if (e.target === 'timeline' && (e.reason === 'read' || e.reason === 'update')) {
-                            setTimeout(() => self.emit('watched'), 100);
+                            setTimeout(() => {
+                                self.html.addClass('focus');
+                                self.emit('watched');
+                                setTimeout(() => self.html.removeClass('focus'), 600);
+                            }, 100);
                         }
                         if (e.target === 'nsl_favorites' || e.target === 'nsl_settings') {
                             setTimeout(() => addCardStatus(self), 100);
@@ -2207,14 +2213,27 @@
             Lampa.Timeline.read(true);
         }
         
-        // Отправляем событие для обновления таймкодов и статусов
+        // Форсируем обновление всех карточек
+        setTimeout(() => {
+            document.querySelectorAll('.card').forEach(card => {
+                card.classList.add('focus');
+            });
+            
+            setTimeout(() => {
+                document.querySelectorAll('.card').forEach(card => {
+                    card.classList.remove('focus');
+                });
+            }, 600);
+        }, 200);
+        
+        // Отправляем события
         setTimeout(() => {
             Lampa.Listener.send('state:changed', { target: 'timeline', reason: 'read' });
-        }, 200);
+        }, 300);
         
         setTimeout(() => {
             Lampa.Listener.send('state:changed', { target: 'nsl_settings', reason: 'refresh' });
-        }, 400);
+        }, 500);
     }
         
     function enableTimelineOnCards() {
