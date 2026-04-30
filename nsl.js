@@ -2064,98 +2064,140 @@
     }
         
         // Функция добавления статуса на карточку
-        function addCardStatus(cardInstance) {
-            try {
-                const data = cardInstance.data;
-                if (!data?.id) return;
-                
-                const el = cardInstance.render().get(0);
-                if (!el) return;
-                
-                const c = cfg();
-                
-                // Управление значком лампы
-                const historyIcon = el.querySelector('.icon--history');
-                if (historyIcon) {
-                    historyIcon.style.display = c.hide_lampa_history_icon ? 'none' : '';
-                }
-                
-                // Удаляем старый статус
-                const oldStatus = el.querySelector('.nsl-card-status');
-                if (oldStatus) oldStatus.remove();
-                
-                // Если статус выключен — выходим
-                if (!c.show_badge_on_cards) return;
-                
-                // Получаем данные статуса
-                const tmdbId = extractTmdbId({ id: data.id });
-                const baseId = getBaseTmdbId(tmdbId || String(data.id));
-                const favs = getFavorites();
-                const found = favs.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
-                
-                if (!found) return;
-                
-                const badges = {
-                    'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50' },
-                    'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336' },
-                    'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3' },
-                    'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800' },
-                    'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107' },
-                    'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0' }
-                };
-                
-                const badge = badges[found.category];
-                if (!badge) return;
-                
-                // Создаём статус
-                const statusEl = document.createElement('div');
-                statusEl.className = 'nsl-card-status';
-                statusEl.innerHTML = '<span style="color:' + badge.color + ';">' + badge.icon + '</span> <span style="color:#fff;">' + badge.text + '</span>';
-                statusEl.style.cssText = 
-                    'position:absolute;left:0.8em;right:0.8em;z-index:6;pointer-events:none;' +
-                    'padding:0.3em 0.8em;background:rgba(0,0,0,0.7);backdrop-filter:blur(2px);' +
-                    '-webkit-backdrop-filter:blur(2px);border-radius:0.5em;font-size:0.75em;' +
-                    'font-weight:500;white-space:nowrap;display:flex;align-items:center;justify-content:center;gap:0.3em;';
-                
-                const watchedEl = el.querySelector('.card-watched');
-                const viewEl = el.querySelector('.card__view');
-                if (!viewEl) return;
-                
-                const pos = c.timeline_position || 'bottom';
-                
-                if (watchedEl && c.show_timeline_on_cards) {
-                    // Прилепляем к card-watched
-                    statusEl.style.left = '0';
-                    statusEl.style.right = '0';
-                    
-                    if (pos === 'top') {
-                        statusEl.style.top = '100%';
-                        statusEl.style.marginTop = '2px';
-                        statusEl.style.borderRadius = '0 0 0.5em 0.5em';
-                    } else {
-                        statusEl.style.bottom = '100%';
-                        statusEl.style.marginBottom = '2px';
-                        statusEl.style.borderRadius = '0.5em 0.5em 0 0';
-                    }
-                    
-                    watchedEl.appendChild(statusEl);
-                } else {
-                    // Самостоятельное позиционирование
-                    if (pos === 'center') {
-                        statusEl.style.top = '50%';
-                        statusEl.style.transform = 'translateY(-50%)';
-                    } else if (pos === 'top') {
-                        statusEl.style.top = '0.5em';
-                    } else {
-                        statusEl.style.bottom = '1.8em';
-                    }
-                    
-                    viewEl.appendChild(statusEl);
-                }
-            } catch(e) {
-                // Тихо игнорируем ошибки
+    function addCardStatus(cardInstance) {
+        try {
+            const data = cardInstance.data;
+            if (!data?.id) return;
+            
+            const el = cardInstance.render().get(0);
+            if (!el) return;
+            
+            const c = cfg();
+            
+            // Управление значком лампы
+            const historyIcon = el.querySelector('.icon--history');
+            if (historyIcon) {
+                historyIcon.style.display = c.hide_lampa_history_icon ? 'none' : '';
             }
+            
+            // Удаляем старый статус
+            const oldStatus = el.querySelector('.nsl-card-status');
+            if (oldStatus) oldStatus.remove();
+            
+            // Удаляем старый наш таймкод (если был)
+            const oldTimecode = el.querySelector('.nsl-card-timecode');
+            if (oldTimecode) oldTimecode.remove();
+            
+            // Если статус выключен — выходим
+            if (!c.show_badge_on_cards) return;
+            
+            // Получаем данные статуса
+            const tmdbId = extractTmdbId({ id: data.id });
+            const baseId = getBaseTmdbId(tmdbId || String(data.id));
+            const favs = getFavorites();
+            const found = favs.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
+            
+            // Если нет в избранном — нечего показывать
+            if (!found) return;
+            
+            // Ищем наши таймкоды
+            const timeline = getTimeline();
+            let totalTime = 0;
+            let totalDuration = 0;
+            let maxPercent = 0;
+            let episodeCount = 0;
+            
+            for (const key in timeline) {
+                const rec = timeline[key];
+                const recBaseId = getBaseTmdbId(rec.tmdb_id || '');
+                if (recBaseId === baseId || getBaseTmdbId(key) === baseId) {
+                    if (rec.time > 0) {
+                        totalTime = Math.max(totalTime, rec.time);
+                        totalDuration = Math.max(totalDuration, rec.duration || 0);
+                        maxPercent = Math.max(maxPercent, rec.percent || 0);
+                        if (key.indexOf('_s') !== -1 || key.indexOf('_e') !== -1) {
+                            episodeCount++;
+                        }
+                    }
+                }
+            }
+            
+            const badges = {
+                'watching':   { icon: '👁️', text: 'Смотрю',       color: '#4CAF50' },
+                'abandoned':  { icon: '❌', text: 'Брошено',      color: '#f44336' },
+                'watched':    { icon: '✅', text: 'Просмотрено',   color: '#2196F3' },
+                'planned':    { icon: '📋', text: 'Буду смотреть', color: '#FF9800' },
+                'favorite':   { icon: '⭐', text: 'В избранном',   color: '#FFC107' },
+                'collection': { icon: '📦', text: 'В коллекции',   color: '#9C27B0' }
+            };
+            
+            const badge = badges[found.category];
+            if (!badge) return;
+            
+            // Формируем текст статуса с таймкодом
+            let statusText = badge.text;
+            if (totalTime > 0 && (found.category === 'watching' || found.category === 'watched')) {
+                const hours = Math.floor(totalTime / 3600);
+                const minutes = Math.floor((totalTime % 3600) / 60);
+                if (hours > 0) {
+                    statusText += ' ' + hours + ' ч. ' + minutes + ' м.';
+                } else {
+                    statusText += ' ' + minutes + ' м.';
+                }
+                if (episodeCount > 0) {
+                    statusText += ' (' + episodeCount + ' эп.)';
+                }
+            }
+            
+            // Создаём статус
+            const statusEl = document.createElement('div');
+            statusEl.className = 'nsl-card-status';
+            statusEl.innerHTML = '<span style="color:' + badge.color + ';">' + badge.icon + '</span> <span style="color:#fff;">' + statusText + '</span>';
+            statusEl.style.cssText = 
+                'position:absolute;left:0.8em;right:0.8em;z-index:6;pointer-events:none;' +
+                'padding:0.3em 0.8em;background:rgba(0,0,0,0.7);backdrop-filter:blur(2px);' +
+                '-webkit-backdrop-filter:blur(2px);border-radius:0.5em;font-size:0.75em;' +
+                'font-weight:500;white-space:nowrap;display:flex;align-items:center;justify-content:center;gap:0.3em;';
+            
+            const watchedEl = el.querySelector('.card-watched');
+            const viewEl = el.querySelector('.card__view');
+            if (!viewEl) return;
+            
+            const pos = c.timeline_position || 'bottom';
+            
+            if (watchedEl && c.show_timeline_on_cards) {
+                // Прилепляем к card-watched
+                statusEl.style.left = '0';
+                statusEl.style.right = '0';
+                
+                if (pos === 'top') {
+                    statusEl.style.top = '100%';
+                    statusEl.style.marginTop = '2px';
+                    statusEl.style.borderRadius = '0 0 0.5em 0.5em';
+                } else {
+                    statusEl.style.bottom = '100%';
+                    statusEl.style.marginBottom = '2px';
+                    statusEl.style.borderRadius = '0.5em 0.5em 0 0';
+                }
+                
+                watchedEl.appendChild(statusEl);
+            } else {
+                // Самостоятельное позиционирование
+                if (pos === 'center') {
+                    statusEl.style.top = '50%';
+                    statusEl.style.transform = 'translateY(-50%)';
+                } else if (pos === 'top') {
+                    statusEl.style.top = '0.5em';
+                } else {
+                    statusEl.style.bottom = '1.8em';
+                }
+                
+                viewEl.appendChild(statusEl);
+            }
+        } catch(e) {
+            // Тихо игнорируем ошибки
         }
+    }
         
         // Заглушка для обратной совместимости
         function patchCardStatus() {
