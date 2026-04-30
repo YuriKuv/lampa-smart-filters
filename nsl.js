@@ -1940,28 +1940,13 @@
     
     function getCardStyles() {
         const c = cfg();
-        const styles = {
-            none: '',
-            nsl_status: '',
-            lampa_default: ''
-        };
-    
+        
         if (c.card_display_mode === 'nsl_status') {
-            styles.nsl_status = `
-                /* Скрываем штатные таймкоды */
-                .card .card-watched {
-                    display: none !important;
-                }
-                .card-watched__item {
-                    display: none !important;
-                }
+            return `
+                .card .card-watched { display: none !important; }
+                .card-watched__item { display: none !important; }
+                .card .icon--history { display: none !important; }
                 
-                /* Скрываем штатный значок истории */
-                .card .icon--history {
-                    display: none !important;
-                }
-                
-                /* Наш статус */
                 .nsl-card-status {
                     position: absolute;
                     left: 0.8em;
@@ -1981,79 +1966,27 @@
                     white-space: nowrap;
                     overflow: hidden;
                 }
-                
-                .nsl-card-status__icon {
-                    flex-shrink: 0;
-                    font-size: 1.2em;
-                    line-height: 1;
-                }
-                
-                .nsl-card-status__text {
-                    flex-shrink: 0;
-                    color: #fff;
-                    font-weight: 500;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                }
-                
-                .nsl-card-status__time {
-                    margin-left: auto;
-                    flex-shrink: 0;
-                    color: rgba(255,255,255,0.8);
-                    font-size: 0.9em;
-                    padding-left: 0.5em;
-                }
-                
-                .nsl-card-status--top {
-                    top: 0.5em;
-                    bottom: auto;
-                }
-                
-                .nsl-card-status--center {
-                    top: 50%;
-                    bottom: auto;
-                    transform: translateY(-50%);
-                }
-                
-                .nsl-card-status--bottom {
-                    bottom: 2.5em;
-                    top: auto;
-                }
-                
+                .nsl-card-status__icon { flex-shrink: 0; font-size: 1.2em; line-height: 1; }
+                .nsl-card-status__text { flex-shrink: 0; color: #fff; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+                .nsl-card-status__time { margin-left: auto; flex-shrink: 0; color: rgba(255,255,255,0.8); font-size: 0.9em; padding-left: 0.5em; }
+                .nsl-card-status--top { top: 0.5em; bottom: auto; }
+                .nsl-card-status--center { top: 50%; bottom: auto; transform: translateY(-50%); }
+                .nsl-card-status--bottom { bottom: 2.5em; top: auto; }
                 @media screen and (max-width: 480px) {
-                    .nsl-card-status {
-                        left: 0.5em;
-                        right: 0.5em;
-                        font-size: 0.7em;
-                    }
+                    .nsl-card-status { left: 0.5em; right: 0.5em; font-size: 0.7em; }
                 }
             `;
-        } else if (c.card_display_mode === 'lampa_default') {
-            // Только скрываем наш статус, не трогаем стандартные стили Lampa
-            styles.lampa_default = `
-                .nsl-card-status {
-                    display: none !important;
-                }
-            `;
-        } else {
-            // Режим 'none' - скрываем всё
-            styles.none = `
-                .card .card-watched {
-                    display: none !important;
-                }
-                .card-watched__item {
-                    display: none !important;
-                }
-                .card .icon--history {
-                    display: none !important;
-                }
-                .nsl-card-status {
-                    display: none !important;
-                }
+        } else if (c.card_display_mode === 'none') {
+            return `
+                .card .card-watched { display: none !important; }
+                .card-watched__item { display: none !important; }
+                .card .icon--history { display: none !important; }
+                .nsl-card-status { display: none !important; }
             `;
         }
-    
-        return styles[c.card_display_mode] || '';
+        
+        // lampa_default - только скрываем наш статус, НЕ трогаем стили Lampa
+        return '.nsl-card-status { display: none !important; }';
     }
     
     function injectCardDisplayStyles() {
@@ -2253,25 +2186,10 @@
     
     function applyCardDisplayMode() {
         const c = cfg();
-        
-        // Сбрасываем состояние патча
         cardDisplayPatched = false;
-        
-        // Удаляем старые стили
         removeCardDisplayStyles();
         
-        if (c.card_display_mode === 'lampa_default') {
-            // Только скрываем наш статус, больше ничего не трогаем
-            const style = document.createElement('style');
-            style.id = 'nsl-card-display-styles';
-            style.textContent = '.nsl-card-status { display: none !important; }';
-            document.head.appendChild(style);
-            cardDisplayStylesInjected = true;
-            console.log('[NSL] Card display mode: lampa_default (no intervention)');
-            return;
-        }
-        
-        // Для остальных режимов применяем полные стили
+        // Всегда добавляем стили (для lampa_default только скрываем .nsl-card-status)
         injectCardDisplayStyles();
         
         if (c.card_display_mode === 'nsl_status') {
