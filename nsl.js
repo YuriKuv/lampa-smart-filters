@@ -2021,33 +2021,28 @@
                 const originalOnCreate = cardMap.Watched.onCreate;
                 
                 cardMap.Watched.onCreate = function() {
-                    // ВАЖНО: сначала вызываем оригинал, который настраивает
-                    // события hover:focus, hover:touch, подписку на timeline и т.д.
+                    // Вызываем оригинал
                     if (originalOnCreate) originalOnCreate.call(this);
                     
                     const c = cfg();
                     const self = this;
                     
-                    // Принудительно показываем таймкоды (emit 'watched')
+                    // Принудительно показываем таймкоды (как в старом рабочем коде)
                     if (c.show_timeline_on_cards) {
                         setTimeout(() => {
-                            this.html.addClass('focus');
-                            this.emit('watched');
-                            setTimeout(() => this.html.removeClass('focus'), 50);
-                        }, 200);
+                            // Просто вызываем emit, без манипуляций с focus!
+                            // Штатный watched.js сам разберётся
+                            self.emit('watched');
+                        }, 300);
                     }
                     
-                    // Добавляем НАШ статус (не трогая штатные таймкоды)
-                    setTimeout(() => addCardStatus(self), 250);
+                    // Добавляем наш статус
+                    setTimeout(() => addCardStatus(self), 350);
                     
-                    // Подписка на обновления
+                    // Подписка на обновление таймкодов
                     Lampa.Listener.follow('state:changed', (e) => {
                         if (e.target === 'timeline' && (e.reason === 'read' || e.reason === 'update')) {
-                            setTimeout(() => {
-                                self.html.addClass('focus');
-                                self.emit('watched');
-                                setTimeout(() => self.html.removeClass('focus'), 50);
-                            }, 50);
+                            setTimeout(() => self.emit('watched'), 100);
                         }
                         if (e.target === 'nsl_favorites' || e.target === 'nsl_settings') {
                             setTimeout(() => addCardStatus(self), 100);
@@ -2204,38 +2199,35 @@
             // Логика перенесена в patchTimelineModule + addCardStatus
         }
         
-        function forceRefreshCards() {
-            const c = cfg();
-            if (!c.show_timeline_on_cards) return;
-            
-            if (Lampa.Timeline && Lampa.Timeline.read) {
-                Lampa.Timeline.read(true);
-            }
-            
-            setTimeout(() => {
-                document.querySelectorAll('.card').forEach(card => {
-                    card.classList.add('focus');
-                    setTimeout(() => card.classList.remove('focus'), 50);
-                });
-            }, 200);
-            
-            // Отправляем событие для обновления статусов
-            setTimeout(() => {
-                Lampa.Listener.send('state:changed', { target: 'nsl_settings', reason: 'refresh' });
-            }, 300);
+    function forceRefreshCards() {
+        const c = cfg();
+        if (!c.show_timeline_on_cards) return;
+        
+        if (Lampa.Timeline && Lampa.Timeline.read) {
+            Lampa.Timeline.read(true);
         }
         
-        function enableTimelineOnCards() {
-            injectTimelineStyles();
-            patchTimelineModule();
-            forceRefreshCards();
-            console.log('[NSL] Таймкоды на карточках включены');
-        }
+        // Отправляем событие для обновления таймкодов и статусов
+        setTimeout(() => {
+            Lampa.Listener.send('state:changed', { target: 'timeline', reason: 'read' });
+        }, 200);
         
-        function disableTimelineOnCards() {
-            removeTimelineStyles();
-            console.log('[NSL] Таймкоды на карточках выключены');
-        }
+        setTimeout(() => {
+            Lampa.Listener.send('state:changed', { target: 'nsl_settings', reason: 'refresh' });
+        }, 400);
+    }
+        
+    function enableTimelineOnCards() {
+        injectTimelineStyles();
+        patchTimelineModule();
+        forceRefreshCards();
+        console.log('[NSL] Таймкоды на карточках включены');
+    }
+        
+    function disableTimelineOnCards() {
+        removeTimelineStyles();
+        console.log('[NSL] Таймкоды на карточках выключены');
+    }
 
     // ======================
     // GITHUB GIST СИНХРОНИЗАЦИЯ (РАЗДЕЛЁННАЯ)
