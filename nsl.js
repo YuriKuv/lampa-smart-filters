@@ -2183,67 +2183,18 @@
         }
     }
     
-function applyCardDisplayMode() {
-    const c = cfg();
-    cardDisplayPatched = false;
-    removeCardDisplayStyles();
-    
-    if (c.card_display_mode === 'lampa_default') {
-        // Скрываем наш статус
-        injectCardDisplayStyles();
-        // Патчим карточки для показа таймкодов
-        patchTimelineForDefaultMode();
-        setTimeout(forceRefreshTimelineCards, 500);
-        console.log('[NSL] Card display mode: lampa_default');
-        return;
-    }
-    
-    if (c.card_display_mode === 'nsl_status') {
-        injectCardDisplayStyles();
-        patchCardDisplay();
-        setTimeout(refreshAllCardStatuses, 500);
-        console.log('[NSL] Card display mode: nsl_status');
-        return;
-    }
-    
-    if (c.card_display_mode === 'none') {
-        injectCardDisplayStyles();
-        console.log('[NSL] Card display mode: none');
-        return;
-    }
-}
-
-    function patchTimelineForDefaultMode() {
-        if (!Lampa.Maker?.map) {
-            setTimeout(patchTimelineForDefaultMode, 1000);
-            return;
+    function applyCardDisplayMode() {
+        const c = cfg();
+        cardDisplayPatched = false;
+        removeCardDisplayStyles();
+        injectCardDisplayStyles(); // Только скрываем .nsl-card-status
+        
+        if (c.card_display_mode === 'nsl_status') {
+            patchCardDisplay();
+            setTimeout(refreshAllCardStatuses, 500);
         }
         
-        try {
-            const cardMap = Lampa.Maker.map('Card');
-            if (cardMap?.Watched) {
-                const orig = cardMap.Watched.onCreate;
-                cardMap.Watched.onCreate = function() {
-                    if (orig) orig.call(this);
-                    setTimeout(() => this.emit('watched'), 100);
-                    Lampa.Listener.follow('state:changed', (e) => { 
-                        if (e.target === 'timeline' && (e.reason === 'read' || e.reason === 'update')) 
-                            setTimeout(() => this.emit('watched'), 50); 
-                    });
-                };
-                console.log('[NSL] Timeline patched for default mode');
-            }
-        } catch(e) {}
-    }
-    
-    function forceRefreshTimelineCards() {
-        if (Lampa.Timeline?.read) Lampa.Timeline.read(true);
-        setTimeout(() => {
-            document.querySelectorAll('.card').forEach(card => {
-                card.classList.add('focus');
-                setTimeout(() => card.classList.remove('focus'), 50);
-            });
-        }, 200);
+        console.log('[NSL] Card display mode:', c.card_display_mode);
     }
     
     function initCardDisplay() {
