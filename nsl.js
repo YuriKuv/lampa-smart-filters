@@ -2037,29 +2037,6 @@
             Lampa.Listener.send('state:changed', { target: 'nsl_settings', reason: 'refresh' });
         }, 150);
     }
-        
-        // NSL-специфичное обновление: ищем все созданные карточки и вызываем их _nslUpdate
-        setTimeout(() => {
-            if (Lampa.Maker?.map) {
-                const cardMap = Lampa.Maker.map('Card');
-                if (cardMap?.Watched) {
-                    // Пробуем вызвать обновление на всех активных карточках
-                    document.querySelectorAll('.card').forEach(cardEl => {
-                        // Ищем данные карточки в Lampa (если есть API для этого)
-                        const cardId = cardEl.getAttribute('data-id') || cardEl.querySelector('[data-id]')?.getAttribute('data-id');
-                        if (cardId) {
-                            // Эмитируем событие watched для перерисовки
-                            const event = new CustomEvent('nsl:refresh-card', { detail: { id: cardId } });
-                            cardEl.dispatchEvent(event);
-                        }
-                    });
-                }
-            }
-            
-            // Фолбэк: эмулируем изменение состояния для триггера всех подписок
-            Lampa.Listener.send('state:changed', { target: 'nsl_settings', reason: 'refresh' });
-        }, 150);
-    }
     
     function enableTimelineOnCards() { 
         injectTimelineStyles(); 
