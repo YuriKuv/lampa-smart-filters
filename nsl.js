@@ -2725,7 +2725,7 @@
         const c = cfg();
         if (c.sync_on_start && c.gist_token && c.gist_id) setTimeout(() => syncFromGist(false), 5000);
     }
-
+    
     function patchCardStatus() {
         if (!Lampa.Maker?.map) return;
         try {
@@ -2754,10 +2754,7 @@
                         // 2. Удаляем старые элементы NSL
                         el.querySelector('.nsl-card-status')?.remove();
                         
-                        // 3. Если статус на карточках выключен — выходим
-                        if (!c.show_badge_on_cards) return;
-                        
-                        // 4. Получаем данные статуса
+                        // 3. Получаем данные статуса
                         const tmdbId = extractTmdbId({ id: data.id });
                         const baseId = getBaseTmdbId(tmdbId || String(data.id));
                         const favs = getFavorites();
@@ -2778,12 +2775,30 @@
                         const badge = badges[found.category];
                         if (!badge) return;
                         
-                        // 5. Создаём статус
+                        // 4. Создаём статус
                         const statusEl = document.createElement('div');
                         statusEl.className = 'nsl-card-status';
                         statusEl.innerHTML = '<span style="color:' + badge.color + ';">' + badge.icon + '</span><span style="color:#fff;">' + badge.text + '</span>';
                         
-                        // 6. Находим card-watched — к нему будем прилепляться
+                        // Базовые стили статуса
+                        var baseStyle = 
+                            'position:absolute;' +
+                            'left:0;right:0;' +
+                            'z-index:6;' +
+                            'pointer-events:none;' +
+                            'padding:0.3em 0.8em;' +
+                            'background:rgba(0,0,0,0.7);' +
+                            'backdrop-filter:blur(2px);' +
+                            '-webkit-backdrop-filter:blur(2px);' +
+                            'font-size:0.75em;' +
+                            'font-weight:500;' +
+                            'white-space:nowrap;' +
+                            'display:flex;' +
+                            'align-items:center;' +
+                            'justify-content:center;' +
+                            'gap:0.3em;';
+                        
+                        // 5. Находим card-watched — к нему будем прилепляться
                         const watchedEl = el.querySelector('.card-watched');
                         const viewEl = el.querySelector('.card__view');
                         if (!viewEl) return;
@@ -2792,72 +2807,47 @@
                         
                         if (watchedEl && c.show_timeline_on_cards) {
                             // Есть штатный таймкод — прилепляемся к нему
-                            statusEl.style.cssText = 
-                                'position:absolute;' +
-                                'left:0.8em;right:0.8em;' +
-                                'z-index:6;' +
-                                'pointer-events:none;' +
-                                'padding:0.3em 0.8em;' +
-                                'background:rgba(0,0,0,0.7);' +
-                                'backdrop-filter:blur(2px);' +
-                                '-webkit-backdrop-filter:blur(2px);' +
-                                'font-size:0.75em;' +
-                                'font-weight:500;' +
-                                'white-space:nowrap;' +
-                                'display:flex;' +
-                                'align-items:center;' +
-                                'justify-content:center;' +
-                                'gap:0.3em;';
                             
                             // Обнуляем все позиции
-                            statusEl.style.top = 'auto';
-                            statusEl.style.bottom = 'auto';
-                            statusEl.style.transform = 'none';
+                            statusEl.style.cssText = baseStyle +
+                                'top:auto;' +
+                                'bottom:auto;' +
+                                'transform:none;';
                             
-                            if (pos === 'center') {
-                                // Таймкод в центре — статус всегда НАД ним
-                                statusEl.style.top = 'auto';
-                                statusEl.style.bottom = '100%';
-                                statusEl.style.marginBottom = '2px';
-                                statusEl.style.borderRadius = '0.5em 0.5em 0 0';
-                            } else if (pos === 'top') {
-                                // Таймкод сверху — статус ПОД ним
+                            if (pos === 'top') {
+                                // Таймкод сверху — статус ПОД ним (снизу card-watched)
                                 statusEl.style.top = '100%';
                                 statusEl.style.bottom = 'auto';
-                                statusEl.style.marginTop = '2px';
                                 statusEl.style.borderRadius = '0 0 0.5em 0.5em';
+                                
+                                // Убираем нижний радиус у card-watched
+                                watchedEl.style.borderRadius = '0.5em 0.5em 0 0';
                             } else {
-                                // Таймкод снизу — статус НАД ним
+                                // Таймкод в центре или снизу — статус НАД ним (сверху card-watched)
                                 statusEl.style.top = 'auto';
                                 statusEl.style.bottom = '100%';
-                                statusEl.style.marginBottom = '2px';
                                 statusEl.style.borderRadius = '0.5em 0.5em 0 0';
+                                
+                                // Убираем верхний радиус у card-watched
+                                watchedEl.style.borderRadius = '0 0 0.5em 0.5em';
+                            }
+                            
+                            // Если show_badge_on_cards выключен — показываем только при фокусе
+                            if (!c.show_badge_on_cards) {
+                                statusEl.style.display = 'none';
+                                // Добавляем класс для CSS-показа при фокусе
+                                statusEl.classList.add('nsl-show-on-focus');
                             }
                             
                             watchedEl.appendChild(statusEl);
                         } else {
                             // Нет таймкода — размещаем самостоятельно
-                            statusEl.style.cssText = 
-                                'position:absolute;' +
+                            statusEl.style.cssText = baseStyle +
                                 'left:0.8em;right:0.8em;' +
-                                'z-index:6;' +
-                                'pointer-events:none;' +
-                                'padding:0.3em 0.8em;' +
-                                'background:rgba(0,0,0,0.7);' +
-                                'backdrop-filter:blur(2px);' +
-                                '-webkit-backdrop-filter:blur(2px);' +
                                 'border-radius:0.5em;' +
-                                'font-size:0.75em;' +
-                                'font-weight:500;' +
-                                'white-space:nowrap;' +
-                                'display:flex;' +
-                                'align-items:center;' +
-                                'justify-content:center;' +
-                                'gap:0.3em;';
-                            
-                            statusEl.style.top = 'auto';
-                            statusEl.style.bottom = 'auto';
-                            statusEl.style.transform = 'none';
+                                'top:auto;' +
+                                'bottom:auto;' +
+                                'transform:none;';
                             
                             if (pos === 'center') {
                                 statusEl.style.top = '50%';
@@ -2866,6 +2856,12 @@
                                 statusEl.style.top = '0.5em';
                             } else {
                                 statusEl.style.bottom = '1.8em';
+                            }
+                            
+                            // Если show_badge_on_cards выключен — показываем только при фокусе
+                            if (!c.show_badge_on_cards) {
+                                statusEl.style.display = 'none';
+                                statusEl.classList.add('nsl-show-on-focus');
                             }
                             
                             viewEl.appendChild(statusEl);
@@ -2892,6 +2888,20 @@
     function init() {
         if (!cfg().enabled) return;
         console.log('[NSL] Init v26 for profile:', PROFILE_ID);
+        // Добавляем CSS для отображения статуса при фокусе
+        $('<style>').text([
+            '.card.focus .nsl-show-on-focus,',
+            '.card.hover .nsl-show-on-focus {',
+            '  display: flex !important;',
+            '}',
+            '.nsl-card-status {',
+            '  margin: 0 !important;',
+            '  border: none !important;',
+            '}',
+            '.card-watched {',
+            '  overflow: visible !important;',
+            '}'
+        ].join('')).appendTo('head');
         
         $('<style>').text('.nsl-hidden-lampa-item{display:none!important}.nsl-hidden-lampa-button{display:none!important}').appendTo('head');
         
