@@ -967,19 +967,41 @@
         if (category === 'watching' && tmdbId) {
             const timeline = getTimeline();
             const baseId = getBaseTmdbId(tmdbId);
-            let timelineItem = null;
-            for (const key in timeline) { if (getBaseTmdbId(timeline[key].tmdb_id) === baseId) { timelineItem = timeline[key]; break; } }
-            if (timelineItem) {
-                const time = timelineItem.time || 0;
-                const duration = timelineItem.duration || 0;
-                const percent = timelineItem.percent || 0;
+            
+            // Ищем ВСЕ таймкоды для этого сериала и берём лучший
+            let bestTimelineItem = null;
+            let bestKey = '';
+            let bestTime = 0;
+            
+            for (const key in timeline) {
+                if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
+                    const t = timeline[key].time || 0;
+                    if (t > bestTime) {
+                        bestTime = t;
+                        bestTimelineItem = timeline[key];
+                        bestKey = key;
+                    }
+                }
+            }
+            
+            if (bestTimelineItem && bestTimelineItem.time > 0) {
+                const time = bestTimelineItem.time || 0;
+                const duration = bestTimelineItem.duration || 0;
+                const percent = bestTimelineItem.percent || 0;
+                
+                // Пытаемся извлечь сезон и серию из ключа
+                let seasonEpisodeStr = '';
+                const match = bestKey.match(/_s(\d+)_e(\d+)/);
+                if (match) {
+                    seasonEpisodeStr = ` сез.${match[1]} сер.${match[2]}`;
+                }
                 
                 if (duration > 0) {
-                    extraInfo = ` ${formatTime(time)} из ${formatTime(duration)}`;
+                    extraInfo = `${seasonEpisodeStr} ${formatTime(time)} из ${formatTime(duration)}`;
                     extraText = `Прогресс: ${percent}% (${formatTime(time)} из ${formatTime(duration)})`;
                 } else {
-                    extraInfo = ` ${percent}%`;
-                    extraText = `Прогресс: ${percent}%`;
+                    extraInfo = `${seasonEpisodeStr} ${formatTime(time)}`;
+                    extraText = `Прогресс: ${formatTime(time)}`;
                 }
             }
         }
@@ -2040,7 +2062,22 @@
         
         if (status) {
             iconHtml = `<span class="nsl-card-status__icon" style="color:${status.color}">${status.icon}</span>`;
-            textHtml = `<span class="nsl-card-status__text">${status.text}</span>`;
+            
+            // Для сериалов добавляем информацию о сезоне/серии если есть
+            let statusText = status.text;
+            if (timelineItem && timelineItem.time > 0) {
+                const match = Object.keys(timeline).find(k => 
+                    getBaseTmdbId(timeline[k]?.tmdb_id) === getBaseTmdbId(cardData?.id?.toString()) && 
+                    timeline[k] === timelineItem
+                );
+                if (match) {
+                    const m = match.match(/_s(\d+)_e(\d+)/);
+                    if (m) {
+                        statusText += ` сез.${m[1]} сер.${m[2]}`;
+                    }
+                }
+            }
+            textHtml = `<span class="nsl-card-status__text">${statusText}</span>`;
         }
         
         if (timelineItem && timelineItem.time > 0) {
