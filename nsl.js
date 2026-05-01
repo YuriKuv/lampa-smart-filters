@@ -1913,7 +1913,7 @@
     // ======================
     // ОТОБРАЖЕНИЕ НА КАРТОЧКАХ
     // ======================
-    
+
     function getCardStyles() {
         const c = cfg();
         
@@ -1980,97 +1980,13 @@
     }
     
     function updateCardStatusElement(cardElement, cardData) {
-        if (!cardElement || !cardData?.id) return;
-        
-        const c = cfg();
-        if (c.card_display_mode !== 'nsl_status') {
-            const existing = cardElement.querySelector('.nsl-card-status');
-            if (existing) existing.remove();
-            return;
-        }
-        
-        const tmdbId = extractTmdbId(cardData);
-        if (!tmdbId) return;
-        
-        const baseId = getBaseTmdbId(tmdbId);
-        const favorites = getFavorites();
-        const timeline = getTimeline();
-        
-        const favItem = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
-        if (!favItem) {
-            let hasTimelineData = false;
-            for (const key in timeline) {
-                if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId && timeline[key]?.time > 0) {
-                    hasTimelineData = true;
-                    break;
-                }
-            }
-            
-            if (!hasTimelineData) {
-                const existing = cardElement.querySelector('.nsl-card-status');
-                if (existing) existing.remove();
-                return;
-            }
-            
-            updateCardStatusElementWithTime(cardElement, cardData, null, timeline);
-            return;
-        }
-        
-        const status = getMovieStatus(cardData);
-        if (!status) return;
-        
-        let timelineItem = null;
-        for (const key in timeline) {
-            if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
-                if (!timelineItem || (timeline[key].time || 0) > (timelineItem.time || 0)) {
-                    timelineItem = timeline[key];
-                }
-            }
-        }
-        
-        updateCardStatusElementWithTime(cardElement, cardData, status, timeline, timelineItem);
+        // ЗАКОММЕНТИРОВАНО ДЛЯ ТЕСТА
+        return;
     }
     
     function updateCardStatusElementWithTime(cardElement, cardData, status, timeline, timelineItem) {
-        let existing = cardElement.querySelector('.nsl-card-status');
-        
-        let iconHtml = '';
-        let textHtml = '';
-        let timeHtml = '';
-        
-        if (status) {
-            iconHtml = `<span class="nsl-card-status__icon" style="color:${status.color}">${status.icon}</span>`;
-            textHtml = `<span class="nsl-card-status__text">${status.text}</span>`;
-        }
-        
-        if (timelineItem && timelineItem.time > 0) {
-            const time = formatTimeShort(timelineItem.time);
-            const percent = timelineItem.percent || 0;
-            timeHtml = `<span class="nsl-card-status__time">${time}${percent > 0 && !status ? ` (${percent}%)` : ''}</span>`;
-        } else if (!status) {
-            if (existing) existing.remove();
-            return;
-        }
-        
-        const contentHtml = iconHtml + textHtml + timeHtml;
-        
-        if (existing) {
-            existing.innerHTML = contentHtml;
-        } else {
-            const div = document.createElement('div');
-            div.className = 'nsl-card-status';
-            div.innerHTML = contentHtml;
-            
-            const viewEl = cardElement.querySelector('.card__view');
-            if (viewEl) {
-                viewEl.appendChild(div);
-                existing = div;
-            } else {
-                return;
-            }
-        }
-        
-        updateCardStatusPosition(existing);
+        // ЗАКОММЕНТИРОВАНО ДЛЯ ТЕСТА
+        return;
     }
     
     function formatTimeShort(seconds) {
@@ -2088,72 +2004,18 @@
     }
     
     function updateCardStatusPosition(element) {
-        if (!element) return;
-        const c = cfg();
-        const pos = c.nsl_status_position || 'bottom';
-        
-        element.classList.remove('nsl-card-status--top', 'nsl-card-status--center', 'nsl-card-status--bottom');
-        element.classList.add(`nsl-card-status--${pos}`);
+        // ЗАКОММЕНТИРОВАНО ДЛЯ ТЕСТА
+        return;
     }
     
     function refreshAllCardStatuses() {
-        document.querySelectorAll('.card').forEach(card => {
-            const cardData = card._data || card.__data;
-            if (cardData) {
-                updateCardStatusElement(card, cardData);
-            }
-        });
+        // ЗАКОММЕНТИРОВАНО ДЛЯ ТЕСТА
+        return;
     }
     
     function patchCardDisplay() {
-        const c = cfg();
-        if (c.card_display_mode !== 'nsl_status') {
-            cardDisplayPatched = false;
-            return;
-        }
-        
-        if (cardDisplayPatched) return;
-        if (!Lampa.Maker?.map) {
-            setTimeout(patchCardDisplay, 1000);
-            return;
-        }
-        
-        try {
-            const cardMap = Lampa.Maker.map('Card');
-            if (!cardMap?.Watched) {
-                setTimeout(patchCardDisplay, 1000);
-                return;
-            }
-            
-            const origCreate = cardMap.Watched.onCreate;
-            
-            cardMap.Watched.onCreate = function() {
-                if (origCreate) origCreate.call(this);
-                
-                const updateCard = () => {
-                    const data = this.data;
-                    if (!data?.id) return;
-                    const el = this.render().get(0);
-                    if (!el) return;
-                    updateCardStatusElement(el, data);
-                };
-                
-                setTimeout(updateCard, 150);
-                
-                const handler = () => setTimeout(updateCard, 100);
-                
-                if (this._nslUnsubscribe) {
-                    Lampa.Listener.unfollow('state:changed', this._nslUnsubscribe);
-                }
-                
-                Lampa.Listener.follow('state:changed', handler);
-                this._nslUnsubscribe = handler;
-            };
-            
-            cardDisplayPatched = true;
-        } catch(e) {
-            console.error('[NSL] Error patching card display:', e);
-        }
+        // ЗАКОММЕНТИРОВАНО ДЛЯ ТЕСТА
+        return;
     }
     
     function applyCardDisplayMode() {
@@ -2162,10 +2024,11 @@
         removeCardDisplayStyles();
         injectCardDisplayStyles();
         
-        if (c.card_display_mode === 'nsl_status') {
-            patchCardDisplay();
-            setTimeout(refreshAllCardStatuses, 500);
-        }
+        // ЗАКОММЕНТИРОВАНО ДЛЯ ТЕСТА
+        // if (c.card_display_mode === 'nsl_status') {
+        //     patchCardDisplay();
+        //     setTimeout(refreshAllCardStatuses, 500);
+        // }
     }
     
     function initCardDisplay() {
