@@ -2063,19 +2063,37 @@
         if (status) {
             iconHtml = `<span class="nsl-card-status__icon" style="color:${status.color}">${status.icon}</span>`;
             
-            // Для сериалов добавляем информацию о сезоне/серии если есть
+            // Для сериалов добавляем информацию о сезоне/серии
             let statusText = status.text;
             if (timelineItem && timelineItem.time > 0) {
-                const match = Object.keys(timeline).find(k => 
-                    getBaseTmdbId(timeline[k]?.tmdb_id) === getBaseTmdbId(cardData?.id?.toString()) && 
-                    timeline[k] === timelineItem
-                );
-                if (match) {
-                    const m = match.match(/_s(\d+)_e(\d+)/);
-                    if (m) {
-                        statusText += ` сез.${m[1]} сер.${m[2]}`;
+                // Ищем ключ в timeline, который совпадает с этим timelineItem и содержит _s_ и _e_
+                let seasonEpInfo = '';
+                const baseId = getBaseTmdbId(extractTmdbId(cardData));
+                
+                for (const key in timeline) {
+                    if (timeline[key] === timelineItem && key.includes('_s') && key.includes('_e')) {
+                        const match = key.match(/_s(\d+)_e(\d+)/);
+                        if (match) {
+                            seasonEpInfo = ` сез.${match[1]} сер.${match[2]}`;
+                        }
+                        break;
                     }
                 }
+                
+                // Если не нашли по совпадению объекта, ищем по baseId
+                if (!seasonEpInfo && baseId) {
+                    for (const key in timeline) {
+                        if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId && key.includes('_s') && key.includes('_e')) {
+                            const match = key.match(/_s(\d+)_e(\d+)/);
+                            if (match) {
+                                seasonEpInfo = ` сез.${match[1]} сер.${match[2]}`;
+                            }
+                            break;
+                        }
+                    }
+                }
+                
+                statusText += seasonEpInfo;
             }
             textHtml = `<span class="nsl-card-status__text">${statusText}</span>`;
         }
