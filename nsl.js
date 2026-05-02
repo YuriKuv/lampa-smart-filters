@@ -830,28 +830,46 @@
         return 0;
     }
     
-    function saveProgress(timeInSeconds, force) {
-        const c = cfg();
-        if (!c.auto_save && !force) return false;
-        const movieKey = getCurrentMovieKey();
-        if (!movieKey) return false;
-        const currentTime = Math.floor(timeInSeconds);
-        const timeline = getTimeline();
-        const savedTime = timeline[movieKey]?.time || 0;
-        if (force || Math.abs(currentTime - savedTime) >= 10) {
-            let duration = getVideoDuration();
-            if (!duration && timeline[movieKey]?.duration) duration = timeline[movieKey].duration;
-            const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
-            const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
-            timeline[movieKey] = { time: currentTime, percent, duration, updated: Date.now(), tmdb_id: tmdbId };
-            saveTimeline(timeline);
-            lastSavedProgress = currentTime;
-            currentMovieTime = currentTime;
-            if (tmdbId && currentTime > 60 && !returnedToWatchingMap[getBaseTmdbId(tmdbId)]) returnToWatching(tmdbId);
-            return true;
-        }
-        return false;
+function saveProgress(timeInSeconds, force) {
+    const c = cfg();
+    if (!c.auto_save && !force) return false;
+    const movieKey = getCurrentMovieKey();
+    if (!movieKey) return false;
+    const currentTime = Math.floor(timeInSeconds);
+    const timeline = getTimeline();
+    const savedTime = timeline[movieKey]?.time || 0;
+    if (force || Math.abs(currentTime - savedTime) >= 10) {
+        let duration = getVideoDuration();
+        if (!duration && timeline[movieKey]?.duration) duration = timeline[movieKey].duration;
+        const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
+        const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
+        timeline[movieKey] = { time: currentTime, percent, duration, updated: Date.now(), tmdb_id: tmdbId };
+        saveTimeline(timeline);
+        lastSavedProgress = currentTime;
+        currentMovieTime = currentTime;
+        if (tmdbId && currentTime > 60 && !returnedToWatchingMap[getBaseTmdbId(tmdbId)]) returnToWatching(tmdbId);
+        
+        // === НОВОЕ: сохраняем также в штатное хранилище Lampa ===
+        try {
+            const playerData = Lampa.Player.playdata();
+            if (playerData?.timeline?.hash) {
+                const lampaHash = playerData.timeline.hash;
+                const fileView = Lampa.Storage.get('file_view', {});
+                fileView[lampaHash] = {
+                    duration: duration,
+                    time: currentTime,
+                    percent: percent,
+                    profile: 0
+                };
+                Lampa.Storage.set('file_view', fileView, true);
+            }
+        } catch(e) {}
+        // =====================================================
+        
+        return true;
     }
+    return false;
+}
     
     function initPlayerHandler() {
         let wasPlayerOpen = false;
