@@ -696,6 +696,30 @@
         }
         return changed;
     }
+
+    function isLastEpisodeOfLastSeason(baseId, season, episode) {
+        const timetableData = Lampa.TimeTable?.all() || [];
+        const showData = timetableData.find(d => d.id == baseId);
+        
+        if (!showData || !showData.season || !showData.episodes?.length) {
+            return false;
+        }
+        
+        // Текущий сезон должен быть последним
+        if (season !== showData.season) {
+            return false;
+        }
+        
+        // Ищем последний эпизод
+        let lastEpNum = 0;
+        showData.episodes.forEach(ep => {
+            if (ep.episode_number > lastEpNum) {
+                lastEpNum = ep.episode_number;
+            }
+        });
+        
+        return episode >= lastEpNum;
+    }
     
     function syncTimelineWithCategories() {
         const c = cfg();
@@ -704,17 +728,18 @@
         const favorites = getFavorites();
         let changed = false;
         
-        // Собираем все ID сериалов, которые нужно проверить
-        const seriesToCheck = [];
-        
         for (const [key, item] of Object.entries(timeline)) {
             const tmdbId = item.tmdb_id;
             if (!tmdbId) continue;
             const baseId = getBaseTmdbId(tmdbId);
             const percent = item.percent || 0;
             
+            // Не трогаем заброшенные
             const isAbandoned = favorites.some(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'abandoned');
             if (isAbandoned) continue;
+            
+            // Не трогаем вручную возвращённые в Смотрю
+            if (returnedToWatchingMap[baseId]) continue;
             
             const existingWatching = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watching');
             const existingWatched = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watched');
@@ -726,39 +751,7 @@
             const isSeries = key.includes('_s') || key.includes('_e');
             const mediaType = isSeries ? 'tv' : 'movie';
             
-            // Сразу обрабатываем фильмы
-            if (!isSeries) {
-                if (c.auto_watched && !existingWatched && percent >= c.watched_min_progress) {
-                    if (existingWatching) {
-                        existingWatching.category = 'watched'; existingWatching.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watched', favorites);
-                        logMove('auto_watched', title, 'watching', 'watched'); changed = true;
-                    } else if (existingPlanned) {
-                        existingPlanned.category = 'watched'; existingPlanned.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watched', favorites);
-                        logMove('auto_watched', title, 'planned', 'watched'); changed = true;
-                    }
-                    continue;
-                }
-                
-                if (c.auto_watching && !existingWatching && !existingWatched && percent >= c.watching_min_progress && percent <= c.watching_max_progress) {
-                    if (existingPlanned) {
-                        existingPlanned.category = 'watching'; existingPlanned.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watching', favorites);
-                        logMove('auto_watching', title, 'planned', 'watching'); changed = true;
-                    } else if (existingFavorite) {
-                        existingFavorite.category = 'watching'; existingFavorite.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watching', favorites);
-                        logMove('auto_watching', title, 'favorite', 'watching'); changed = true;
-                    } else {
-                        favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watching', data: cardData, added: Date.now(), updated: Date.now() });
-                        logMove('auto_watching', title, null, 'watching'); changed = true;
-                    }
-                }
-                continue;
-            }
-            
-            // Для сериалов — сначала авто в Смотрю (это можно сделать сразу)
+            // Авто в Смотрю — для любых серий с прогрессом
             if (c.auto_watching && !existingWatching && !existingWatched && percent >= c.watching_min_progress && percent <= c.watching_max_progress) {
                 if (existingPlanned) {
                     existingPlanned.category = 'watching'; existingPlanned.updated = Date.now();
@@ -774,21 +767,30 @@
                 }
             }
             
-            // Для авто в Просмотрено — добавляем в очередь на проверку
-            if (c.auto_watched && !existingWatched && existingWatching && percent >= c.watched_min_progress) {
-                const match = key.match(/_s(\d+)_e(\d+)/);
-                if (match) {
-                    seriesToCheck.push({
-                        baseId,
-                        tmdbId,
-                        key,
-                        season: parseInt(match[1]),
-                        episode: parseInt(match[2]),
-                        percent,
-                        existingWatching,
-                        title,
-                        favorites
-                    });
+            // Авто в Просмотрено — только для последней серии последнего сезона
+            if (c.auto_watched && !existingWatched && percent >= c.watched_min_progress) {
+                let shouldMove = false;
+                
+                if (!isSeries) {
+                    // Для фильмов — всегда
+                    shouldMove = true;
+                } else {
+                    const match = key.match(/_s(\d+)_e(\d+)/);
+                    if (match) {
+                        shouldMove = isLastEpisodeOfLastSeason(baseId, parseInt(match[1]), parseInt(match[2]));
+                    }
+                }
+                
+                if (shouldMove) {
+                    if (existingWatching) {
+                        existingWatching.category = 'watched'; existingWatching.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watched', favorites);
+                        logMove('auto_watched', title, 'watching', 'watched'); changed = true;
+                    } else if (existingPlanned) {
+                        existingPlanned.category = 'watched'; existingPlanned.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watched', favorites);
+                        logMove('auto_watched', title, 'planned', 'watched'); changed = true;
+                    }
                 }
             }
         }
@@ -796,59 +798,6 @@
         if (changed) {
             saveFavorites(favorites);
             refreshNewEpisodesBadge();
-        }
-        
-        // Отложенная проверка сериалов — ждём загрузки TimeTable
-        if (seriesToCheck.length > 0) {
-            setTimeout(() => {
-                let changedLater = false;
-                const currentFavorites = getFavorites();
-                
-                seriesToCheck.forEach(item => {
-                    // Перепроверяем, не изменился ли статус за время ожидания
-                    const stillWatching = currentFavorites.find(f => 
-                        getBaseTmdbId(f.tmdb_id) === item.baseId && f.category === 'watching'
-                    );
-                    if (!stillWatching) return;
-                    
-                    const showData = Lampa.TimeTable?.all()?.find(d => d.id == item.baseId);
-                    
-                    let isLastEpisode = false;
-                    
-                    if (showData && showData.season > 0 && showData.episodes.length > 0) {
-                        // Текущий сезон === последний сезон?
-                        if (item.season === showData.season) {
-                            let lastEpNum = 0;
-                            showData.episodes.forEach(ep => {
-                                if (ep.episode_number > lastEpNum) lastEpNum = ep.episode_number;
-                            });
-                            // Текущий эпизод — последний или больше?
-                            if (item.episode >= lastEpNum) {
-                                isLastEpisode = true;
-                            }
-                        }
-                    }
-                    
-                    if (isLastEpisode && item.percent >= cfg().watched_min_progress) {
-                        const fav = currentFavorites.find(f => 
-                            getBaseTmdbId(f.tmdb_id) === item.baseId && f.category === 'watching'
-                        );
-                        if (fav) {
-                            const oldCategory = fav.category;
-                            fav.category = 'watched';
-                            fav.updated = Date.now();
-                            applyCategoryRules(item.tmdbId, 'watched', currentFavorites);
-                            logMove('auto_watched', item.title, oldCategory, 'watched');
-                            changedLater = true;
-                        }
-                    }
-                });
-                
-                if (changedLater) {
-                    saveFavorites(currentFavorites);
-                    refreshNewEpisodesBadge();
-                }
-            }, 5000); // Ждём 5 секунд для загрузки TimeTable
         }
     }
     
@@ -891,19 +840,43 @@
             const tmdbId = extractTmdbId(movie);
             if (!tmdbId) return null;
             const playerData = Lampa.Player.playdata();
-            console.log('[NSL-KEY] playerData.season:', playerData?.season, 'playerData.episode:', playerData?.episode);
-            if (playerData && (playerData.season || playerData.episode))
-                return `${tmdbId}_s${playerData.season || 1}_e${playerData.episode || 1}`;
-            return String(tmdbId);
+            
+            // Всегда пытаемся получить season/episode из playdata
+            const season = playerData?.season;
+            const episode = playerData?.episode;
+            
+            if (season || episode) {
+                return `${tmdbId}_s${season || 1}_e${episode || 1}`;
+            }
+            
+            // Если нет в playdata, проверяем video элемент
+            const video = document.querySelector('video');
+            if (video && video.src) {
+                // Пытаемся извлечь из пути файла
+                const match = video.src.match(/[Ss](\d+)[Ee](\d+)/);
+                if (match) {
+                    return `${tmdbId}_s${match[1]}_e${match[2]}`;
+                }
+            }
+            
+            // Для фильмов — просто tmdbId
+            if (!movie.original_name) {
+                return String(tmdbId);
+            }
+            
+            // Для сериалов без информации — не сохраняем
+            return null;
         } catch (e) { return null; }
     }
     
     function getCurrentPlayerTime() {
         try {
+            // Сначала проверяем штатный плеер
             if (Lampa.Player.opened()) {
                 const playerData = Lampa.Player.playdata();
                 if (playerData?.timeline?.time !== undefined) return playerData.timeline.time;
             }
+            // Потом video элемент (для сторонних плееров)
             const video = document.querySelector('video');
             if (video && !isNaN(video.currentTime) && video.currentTime > 0) {
                 return video.currentTime;
@@ -927,15 +900,11 @@
         if (!c.auto_save && !force) return false;
         const movieKey = getCurrentMovieKey();
         if (!movieKey) return false;
-        // ДИАГНОСТИКА
-        console.log('[NSL-SAVE] saveProgress called, key:', movieKey, 'time:', timeInSeconds);
         
         const currentTime = Math.floor(timeInSeconds);
         const timeline = getTimeline();
         const savedTime = timeline[movieKey]?.time || 0;
         
-        // ДИАГНОСТИКА
-        console.log('[NSL-SAVE] savedTime:', savedTime, 'currentTime:', currentTime, 'diff:', Math.abs(currentTime - savedTime));
         if (force || Math.abs(currentTime - savedTime) >= 10) {
             let duration = getVideoDuration();
             if (!duration && timeline[movieKey]?.duration) duration = timeline[movieKey].duration;
@@ -945,17 +914,22 @@
             saveTimeline(timeline);
             lastSavedProgress = currentTime;
             currentMovieTime = currentTime;
-            if (tmdbId && currentTime > 60 && !returnedToWatchingMap[getBaseTmdbId(tmdbId)]) returnToWatching(tmdbId);
+            
+            // Возвращаем в "Смотрю" если нужно
+            if (tmdbId && currentTime > 60 && !returnedToWatchingMap[getBaseTmdbId(tmdbId)]) {
+                returnToWatching(tmdbId);
+            }
+            
             return true;
         }
         return false;
     }
     
     function initPlayerHandler() {
-        let wasPlayerOpen = false;
-        let wasVideoPlaying = false;
+        let wasActive = false;
         let lastSyncToGist = 0;
         let checkCount = 0;
+        let lastMovieKey = null;
         
         if (playerInterval) clearInterval(playerInterval);
         
@@ -963,91 +937,107 @@
             const c = cfg();
             if (!c.enabled) return;
             
-            const isPlayerOpen = Lampa.Player.opened();
             const video = document.querySelector('video');
+            const isPlayerOpen = Lampa.Player.opened();
             const isVideoPlaying = video && !video.paused && video.currentTime > 0;
             const isActive = isPlayerOpen || isVideoPlaying;
             
-            if (!isActive && !wasPlayerOpen && !wasVideoPlaying) {
-                checkCount++;
-                if (checkCount < 5) return;
-                checkCount = 0;
-            }
-            
-            const currentTime = getCurrentPlayerTime();
-            
-            if (isActive && !wasPlayerOpen && !wasVideoPlaying) {
-                checkCount = 0;
+            // Обнаружили начало просмотра
+            if (isActive && !wasActive) {
                 returnedToWatchingMap = {};
                 videoDuration = getVideoDuration();
+                lastMovieKey = null;
+                checkCount = 0;
             }
             
-            if ((wasPlayerOpen || wasVideoPlaying) && !isActive) {
+            // Обнаружили конец просмотра
+            if (!isActive && wasActive) {
                 if (currentMovieTime > 0) {
                     saveProgress(currentMovieTime, true);
                     syncTimelineWithCategories();
-                    if (c.auto_sync && c.gist_token && c.gist_id) syncToGist('timeline', false);
+                    if (c.auto_sync && c.gist_token && c.gist_id) {
+                        syncToGist('timeline', false);
+                    }
                 }
                 currentMovieTime = 0;
                 currentMovieKey = null;
                 lastSavedProgress = 0;
                 videoDuration = 0;
+                lastMovieKey = null;
             }
             
-            wasPlayerOpen = isPlayerOpen;
-            wasVideoPlaying = isVideoPlaying;
+            wasActive = isActive;
             
-            if (isActive && currentTime !== null && currentTime > 0) {
-                currentMovieTime = currentTime;
-                const movieKey = getCurrentMovieKey();
-                if (movieKey && movieKey !== currentMovieKey) {
-                    currentMovieKey = movieKey;
-                    lastSavedProgress = 0;
-                    videoDuration = 0;
-                }
-                if (c.auto_save && Math.floor(currentTime) - lastSavedProgress >= 10) {
-                    if (saveProgress(currentTime, false)) {
-                        const now = Date.now();
-                        if (c.auto_sync && (now - lastSyncToGist) >= c.sync_interval * 1000) {
-                            syncToGist('timeline', false);
-                            lastSyncToGist = now;
-                        }
+            // Если не активно — пропускаем
+            if (!isActive) {
+                checkCount++;
+                return;
+            }
+            
+            // Активно — получаем время
+            const currentTime = getCurrentPlayerTime();
+            if (currentTime === null || currentTime <= 0) return;
+            
+            currentMovieTime = currentTime;
+            const movieKey = getCurrentMovieKey();
+            
+            // Обнаружили смену серии/фильма
+            if (movieKey && movieKey !== lastMovieKey) {
+                lastMovieKey = movieKey;
+                currentMovieKey = movieKey;
+                lastSavedProgress = 0;
+                videoDuration = getVideoDuration();
+            }
+            
+            // Сохраняем прогресс
+            if (c.auto_save && movieKey && Math.floor(currentTime) - lastSavedProgress >= 10) {
+                if (saveProgress(currentTime, false)) {
+                    const now = Date.now();
+                    if (c.auto_sync && (now - lastSyncToGist) >= c.sync_interval * 1000) {
+                        syncToGist('timeline', false);
+                        lastSyncToGist = now;
                     }
                 }
             }
         }, 1000);
     }
-    
-    function cleanupTimeline() {
-        const c = cfg();
-        if (!c.cleanup_older_days && !c.cleanup_completed) return;
-        const now = Date.now();
-        const olderThan = c.cleanup_older_days * 24 * 60 * 60 * 1000;
-        const timeline = getTimeline();
-        let changed = false;
-        for (const key in timeline) {
-            const record = timeline[key];
-            if (olderThan > 0 && record.updated && (now - record.updated) > olderThan) { delete timeline[key]; changed = true; }
-            else if (c.cleanup_completed && record.percent >= 95) { delete timeline[key]; changed = true; }
-        }
-        if (changed) { saveTimeline(timeline); notify('🧹 Таймкоды очищены'); }
-    }
-    
-    function clearAllTimeline() {
-        Lampa.Select.show({
-            title: '⚠️ Очистить все таймкоды?',
-            items: [
-                { title: '✅ Да, очистить', action: 'clear' },
-                { title: '❌ Отмена', action: 'cancel' }
-            ],
-            onSelect: (opt) => { if (opt.action === 'clear') { saveTimeline({}); notify('🗑️ Таймкоды очищены'); } },
-            onBack: () => Lampa.Controller.toggle('content')
-        });
-    }
 
     // ======================
     // СТАТУС НА КАРТОЧКЕ
     // ======================
+
+    function getBestTimelineItem(tmdbId) {
+        const timeline = getTimeline();
+        const baseId = getBaseTmdbId(tmdbId);
+        let bestKey = '';
+        let bestItem = null;
+        let bestTime = 0;
+        
+        for (const key in timeline) {
+            if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
+                const t = timeline[key]?.time || 0;
+                const hasEpisode = key.includes('_s') && key.includes('_e');
+                
+                // Приоритет: ключи с _s_ и _e_ всегда побеждают
+                if (hasEpisode) {
+                    if (t >= bestTime) {
+                        bestTime = t;
+                        bestItem = timeline[key];
+                        bestKey = key;
+                    }
+                } else if (!bestItem) {
+                    // Ключ без эпизода только если нет эпизодных ключей
+                    if (t > bestTime) {
+                        bestTime = t;
+                        bestItem = timeline[key];
+                        bestKey = key;
+                    }
+                }
+            }
+        }
+        
+        return { key: bestKey, item: bestItem, time: bestTime };
+    }
 
     function getCategoryDisplay(category, tmdbId) {
         const displays = {
@@ -1063,44 +1053,33 @@
         let extraInfo = '', extraText = '';
         
         if (category === 'watching' && tmdbId) {
-            const timeline = getTimeline();
-            const baseId = getBaseTmdbId(tmdbId);
+            const best = getBestTimelineItem(tmdbId);
             
-            // Ищем лучший таймкод: приоритет ключам с _s_ и _e_
-            let bestTimelineItem = null;
-            let bestKey = '';
-            let maxTime = 0;
-            
-            for (const key in timeline) {
-                if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
-                    const t = timeline[key]?.time || 0;
-                    const isEpisodeKey = key.includes('_s') && key.includes('_e');
-                    
-                    // Ключи с _s_ и _e_ всегда приоритетнее
-                    if (isEpisodeKey && t >= maxTime) {
-                        maxTime = t;
-                        bestTimelineItem = timeline[key];
-                        bestKey = key;
-                    } else if (!isEpisodeKey && !bestTimelineItem) {
-                        // Ключ без _s_ и _e_ только если нет ни одного эпизодного ключа
-                        if (t > maxTime) {
-                            maxTime = t;
-                            bestTimelineItem = timeline[key];
-                            bestKey = key;
-                        }
-                    }
-                }
-            }
-            
-            if (bestTimelineItem && maxTime > 0) {
-                const time = bestTimelineItem.time || 0;
-                const duration = bestTimelineItem.duration || 0;
-                const percent = bestTimelineItem.percent || 0;
+            if (best.item && best.time > 0) {
+                const time = best.item.time || 0;
+                const duration = best.item.duration || 0;
+                const percent = best.item.percent || 0;
                 
+                // Извлекаем сезон и серию
                 let seasonEpisodeStr = '';
-                const match = bestKey.match(/_s(\d+)_e(\d+)/);
+                const match = best.key.match(/_s(\d+)_e(\d+)/);
                 if (match) {
-                    seasonEpisodeStr = ` сез.${match[1]} сер.${match[2]}`;
+                    const timetableData = Lampa.TimeTable?.all() || [];
+                    const showData = timetableData.find(d => d.id == getBaseTmdbId(tmdbId));
+                    const totalSeasons = showData?.season || 0;
+                    const currentSeason = parseInt(match[1]);
+                    const currentEpisode = parseInt(match[2]);
+                    const totalEpisodesInSeason = showData?.episodes?.length || 0;
+                    
+                    if (totalSeasons > 0 && totalEpisodesInSeason > 0) {
+                        seasonEpisodeStr = ` сез.${currentSeason} из ${totalSeasons} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
+                    } else if (totalSeasons > 0) {
+                        seasonEpisodeStr = ` сез.${currentSeason} из ${totalSeasons} сер.${match[2]}`;
+                    } else if (totalEpisodesInSeason > 0) {
+                        seasonEpisodeStr = ` сез.${match[1]} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
+                    } else {
+                        seasonEpisodeStr = ` сез.${match[1]} сер.${match[2]}`;
+                    }
                 }
                 
                 if (duration > 0) {
@@ -1125,6 +1104,7 @@
         }
         return { ...base, displayText: base.text + extraInfo, extraText, category };
     }
+
     function getDaysWord(days) {
         if (days % 10 === 1 && days % 100 !== 11) return 'день';
         if (days % 10 >= 2 && days % 10 <= 4 && (days % 100 < 10 || days % 100 >= 20)) return 'дня';
