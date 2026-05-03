@@ -990,8 +990,13 @@
                         // Fallback: проверяем через seriesCheck
                         const seriesCheck = getSeriesCheck();
                         const checkData = seriesCheck[item.baseId];
-                        if (checkData && checkData.last_season_number > 0) {
-                            isLastEpisode = (item.season >= checkData.last_season_number);
+                        if (checkData && checkData.seasons_count > 0) {
+                            // Серия считается последней только если:
+                            // 1. Текущий сезон === последний сезон (seasons_count)
+                            // 2. Текущий эпизод >= общее количество эпизодов в сезоне (total_episodes)
+                            if (item.season === checkData.seasons_count && checkData.total_episodes > 0) {
+                                isLastEpisode = (item.episode >= checkData.total_episodes);
+                            }
                         }
                     }
                     
