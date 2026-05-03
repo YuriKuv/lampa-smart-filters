@@ -1037,6 +1037,21 @@
         return { key: bestKey, item: bestItem, time: bestTime };
     }
 
+    function getSeriesInfo(tmdbId) {
+        const baseId = getBaseTmdbId(tmdbId);
+        const seriesCheck = getSeriesCheck();
+        const checkData = seriesCheck[baseId];
+        
+        if (checkData) {
+            return {
+                totalSeasons: checkData.seasons_count || 0,
+                totalEpisodesInSeason: checkData.total_episodes || 0,
+                lastSeasonNumber: checkData.last_season_number || 0
+            };
+        }
+        return { totalSeasons: 0, totalEpisodesInSeason: 0, lastSeasonNumber: 0 };
+    }
+
     function getCategoryDisplay(category, tmdbId) {
         const displays = {
             'watching': { text: 'Смотрю', icon: '👁️', color: '#4CAF50', bgColor: 'rgba(76, 175, 80, 0.15)' },
@@ -1061,12 +1076,11 @@
                 let seasonEpisodeStr = '';
                 const match = best.key.match(/_s(\d+)_e(\d+)/);
                 if (match) {
-                    const timetableData = Lampa.TimeTable?.all() || [];
-                    const showData = timetableData.find(d => d.id == getBaseTmdbId(tmdbId));
-                    const totalSeasons = showData?.season || 0;
+                    const seriesInfo = getSeriesInfo(tmdbId);
+                    const totalSeasons = seriesInfo.totalSeasons;
+                    const totalEpisodesInSeason = seriesInfo.totalEpisodesInSeason;
                     const currentSeason = parseInt(match[1]);
                     const currentEpisode = parseInt(match[2]);
-                    const totalEpisodesInSeason = showData?.episodes?.length || 0;
                     
                     if (totalSeasons > 0 && totalEpisodesInSeason > 0) {
                         seasonEpisodeStr = ` сез.${currentSeason} из ${totalSeasons} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
@@ -2097,48 +2111,29 @@
         const tmdbId = extractTmdbId(cardData);
         if (!tmdbId) return;
         
-        const baseId = getBaseTmdbId(tmdbId);
+        const best = getBestTimelineItem(tmdbId);
+        
         const favorites = getFavorites();
-        const timeline = getTimeline();
-        
-        // Ищем лучший таймкод: приоритет ключам с _s_ и _e_
-        let bestTimelineItem = null;
-        let maxTime = 0;
-        for (const key in timeline) {
-            if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
-                const t = timeline[key]?.time || 0;
-                const isEpisodeKey = key.includes('_s') && key.includes('_e');
-                
-                if (isEpisodeKey && t >= maxTime) {
-                    maxTime = t;
-                    bestTimelineItem = timeline[key];
-                } else if (!isEpisodeKey && !bestTimelineItem) {
-                    if (t > maxTime) {
-                        maxTime = t;
-                        bestTimelineItem = timeline[key];
-                    }
-                }
-            }
-        }
-        
+        const baseId = getBaseTmdbId(tmdbId);
         const favItem = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
+        
         if (!favItem) {
-            if (!bestTimelineItem) {
+            if (!best.item) {
                 const existing = cardElement.querySelector('.nsl-card-status');
                 if (existing) existing.remove();
                 return;
             }
-            updateCardStatusElementWithTime(cardElement, cardData, null, timeline, bestTimelineItem);
+            updateCardStatusElementWithTime(cardElement, cardData, null, best.item, best.key);
             return;
         }
         
         const status = getMovieStatus(cardData);
         if (!status) return;
         
-        updateCardStatusElementWithTime(cardElement, cardData, status, timeline, bestTimelineItem);
+        updateCardStatusElementWithTime(cardElement, cardData, status, best.item, best.key);
     }
-    
-    function updateCardStatusElementWithTime(cardElement, cardData, status, timeline, timelineItem) {
+
+    function updateCardStatusElementWithTime(cardElement, cardData, status, timelineItem, bestKey) {
         let existing = cardElement.querySelector('.nsl-card-status');
         
         let iconHtml = '';
@@ -2149,15 +2144,23 @@
             iconHtml = `<span class="nsl-card-status__icon" style="color:${status.color}">${status.icon}</span>`;
             
             let statusText = status.text;
-            if (timelineItem && timelineItem.time > 0) {
-                const baseId = getBaseTmdbId(extractTmdbId(cardData));
-                for (const key in timeline) {
-                    if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId && timeline[key] === timelineItem) {
-                        const match = key.match(/_s(\d+)_e(\d+)/);
-                        if (match) {
-                            statusText += ` сез.${match[1]} сер.${match[2]}`;
-                        }
-                        break;
+            if (timelineItem && timelineItem.time > 0 && bestKey) {
+                const match = bestKey.match(/_s(\d+)_e(\d+)/);
+                if (match) {
+                    const seriesInfo = getSeriesInfo(extractTmdbId(cardData));
+                    const totalSeasons = seriesInfo.totalSeasons;
+                    const totalEpisodesInSeason = seriesInfo.totalEpisodesInSeason;
+                    const currentSeason = parseInt(match[1]);
+                    const currentEpisode = parseInt(match[2]);
+                    
+                    if (totalSeasons > 0 && totalEpisodesInSeason > 0) {
+                        statusText += ` сез.${currentSeason} из ${totalSeasons} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
+                    } else if (totalSeasons > 0) {
+                        statusText += ` сез.${currentSeason} из ${totalSeasons} сер.${match[2]}`;
+                    } else if (totalEpisodesInSeason > 0) {
+                        statusText += ` сез.${match[1]} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
+                    } else {
+                        statusText += ` сез.${match[1]} сер.${match[2]}`;
                     }
                 }
             }
