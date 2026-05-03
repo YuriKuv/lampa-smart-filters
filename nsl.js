@@ -1082,20 +1082,8 @@
                     const currentSeason = parseInt(match[1]);
                     const currentEpisode = parseInt(match[2]);
                     
-                    let seasonStr = '';
-                    let episodeStr = '';
-                    
-                    if (totalSeasons > 0) {
-                        seasonStr = `Сезон ${currentSeason} из ${totalSeasons}`;
-                    } else {
-                        seasonStr = `Сезон ${currentSeason}`;
-                    }
-                    
-                    if (totalEpisodesInSeason > 0) {
-                        episodeStr = `Серия ${currentEpisode} из ${totalEpisodesInSeason}`;
-                    } else {
-                        episodeStr = `Серия ${currentEpisode}`;
-                    }
+                    const seasonStr = totalSeasons > 0 ? `Сезон ${currentSeason} из ${totalSeasons}` : `Сезон ${currentSeason}`;
+                    const episodeStr = totalEpisodesInSeason > 0 ? `Серия ${currentEpisode} из ${totalEpisodesInSeason}` : `Серия ${currentEpisode}`;
                     
                     seasonEpisodeStr = `: ${seasonStr}; ${episodeStr}`;
                 }
@@ -1104,7 +1092,7 @@
                     extraInfo = `${seasonEpisodeStr}; ${formatTime(time)} из ${formatTime(duration)}`;
                     extraText = `Прогресс: ${percent}% (${formatTime(time)} из ${formatTime(duration)})`;
                 } else {
-                    extraInfo = `${seasonEpisodeStr} ${formatTime(time)}`;
+                    extraInfo = `${seasonEpisodeStr}; ${formatTime(time)}`;
                     extraText = `Прогресс: ${formatTime(time)}`;
                 }
             }
@@ -2152,7 +2140,9 @@
         if (status) {
             iconHtml = `<span class="nsl-card-status__icon" style="color:${status.color}">${status.icon}</span>`;
             
-            let statusText = status.text;
+            let line1 = status.text;
+            let line2 = '';
+            
             if (timelineItem && timelineItem.time > 0 && bestKey) {
                 const match = bestKey.match(/_s(\d+)_e(\d+)/);
                 if (match) {
@@ -2162,37 +2152,27 @@
                     const currentSeason = parseInt(match[1]);
                     const currentEpisode = parseInt(match[2]);
                     
-                    let seasonStr = '';
-                    let episodeStr = '';
-                    
-                    if (totalSeasons > 0) {
-                        seasonStr = `Сезон ${currentSeason} из ${totalSeasons}`;
-                    } else {
-                        seasonStr = `Сезон ${currentSeason}`;
+                    let seasonStr = totalSeasons > 0 ? `Сезон ${currentSeason} из ${totalSeasons}` : `Сезон ${currentSeason}`;
+                    let episodeStr = totalEpisodesInSeason > 0 ? `Серия ${currentEpisode} из ${totalEpisodesInSeason}` : `Серия ${currentEpisode}`;
+                    let timeStr = formatTimeShort(timelineItem.time);
+                    if (timelineItem.duration > 0) {
+                        timeStr += ` из ${formatTimeShort(timelineItem.duration)}`;
                     }
                     
-                    if (totalEpisodesInSeason > 0) {
-                        episodeStr = `Серия ${currentEpisode} из ${totalEpisodesInSeason}`;
-                    } else {
-                        episodeStr = `Серия ${currentEpisode}`;
-                    }
-                    
-                    statusText += `<br>${seasonStr}; ${episodeStr}`;
+                    line1 += `: ${seasonStr}; ${episodeStr}`;
+                    line2 = timeStr;
                 }
             }
-            textHtml = `<span class="nsl-card-status__text">${statusText}</span>`;
+            
+            textHtml = `<span class="nsl-card-status__text">${line1}<br>${line2}</span>`;
         }
         
-        if (timelineItem && timelineItem.time > 0) {
-            const time = formatTimeShort(timelineItem.time);
-            const percent = timelineItem.percent || 0;
-            timeHtml = `<span class="nsl-card-status__time">${time}${percent > 0 && !status ? ` (${percent}%)` : ''}</span>`;
-        } else if (!status) {
+        if (!status) {
             if (existing) existing.remove();
             return;
         }
         
-        const contentHtml = iconHtml + textHtml + timeHtml;
+        const contentHtml = iconHtml + textHtml;
         
         if (existing) {
             existing.innerHTML = contentHtml;
