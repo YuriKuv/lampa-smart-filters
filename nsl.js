@@ -1037,108 +1037,150 @@
         return { key: bestKey, item: bestItem, time: bestTime };
     }
 
-
-    function updateCardStatusElement(cardElement, cardData) {
-        if (!cardElement || !cardData?.id) return;
+    function getCategoryDisplay(category, tmdbId) {
+        const displays = {
+            'watching': { text: 'Смотрю', icon: '👁️', color: '#4CAF50', bgColor: 'rgba(76, 175, 80, 0.15)' },
+            'abandoned': { text: 'Брошено', icon: '❌', color: '#f44336', bgColor: 'rgba(244, 67, 54, 0.15)' },
+            'watched': { text: 'Просмотрено', icon: '✅', color: '#2196F3', bgColor: 'rgba(33, 150, 243, 0.15)' },
+            'planned': { text: 'Буду смотреть', icon: '📋', color: '#FF9800', bgColor: 'rgba(255, 152, 0, 0.15)' },
+            'favorite': { text: 'В избранном', icon: '⭐', color: '#FFC107', bgColor: 'rgba(255, 193, 7, 0.15)' },
+            'collection': { text: 'В коллекции', icon: '📦', color: '#9C27B0', bgColor: 'rgba(156, 39, 176, 0.15)' }
+        };
+        const base = displays[category];
+        if (!base) return null;
+        let extraInfo = '', extraText = '';
         
-        const c = cfg();
-        if (c.card_display_mode !== 'nsl_status') {
-            const existing = cardElement.querySelector('.nsl-card-status');
-            if (existing) existing.remove();
-            return;
-        }
-        
-        const tmdbId = extractTmdbId(cardData);
-        if (!tmdbId) return;
-        
-        const baseId = getBaseTmdbId(tmdbId);
-        const favorites = getFavorites();
-        const timeline = getTimeline();
-        
-
-        const best = getBestTimelineItem(tmdbId);
-        
-        const favItem = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
-        if (!favItem) {
-            if (!best.item) {
-                const existing = cardElement.querySelector('.nsl-card-status');
-                if (existing) existing.remove();
-                return;
-            }
-            updateCardStatusElementWithTime(cardElement, cardData, null, timeline, best.item, best.key);
-            return;
-        }
-        
-        const status = getMovieStatus(cardData);
-        if (!status) return;
-        
-        updateCardStatusElementWithTime(cardElement, cardData, status, timeline, best.item, best.key);
-    }
-
-    function updateCardStatusElementWithTime(cardElement, cardData, status, timeline, timelineItem, bestKey) {
-        let existing = cardElement.querySelector('.nsl-card-status');
-        
-        let iconHtml = '';
-        let textHtml = '';
-        let timeHtml = '';
-        
-        if (status) {
-            iconHtml = `<span class="nsl-card-status__icon" style="color:${status.color}">${status.icon}</span>`;
+        if (category === 'watching' && tmdbId) {
+            const best = getBestTimelineItem(tmdbId);
             
-            let statusText = status.text;
-            if (timelineItem && timelineItem.time > 0 && bestKey) {
-                const match = bestKey.match(/_s(\d+)_e(\d+)/);
+            if (best.item && best.time > 0) {
+                const time = best.item.time || 0;
+                const duration = best.item.duration || 0;
+                const percent = best.item.percent || 0;
+                
+                let seasonEpisodeStr = '';
+                const match = best.key.match(/_s(\d+)_e(\d+)/);
                 if (match) {
                     const timetableData = Lampa.TimeTable?.all() || [];
-                    const baseId = getBaseTmdbId(extractTmdbId(cardData));
-                    const showData = timetableData.find(d => d.id == baseId);
+                    const showData = timetableData.find(d => d.id == getBaseTmdbId(tmdbId));
                     const totalSeasons = showData?.season || 0;
                     const currentSeason = parseInt(match[1]);
                     const currentEpisode = parseInt(match[2]);
                     const totalEpisodesInSeason = showData?.episodes?.length || 0;
                     
                     if (totalSeasons > 0 && totalEpisodesInSeason > 0) {
-                        statusText += ` сез.${currentSeason} из ${totalSeasons} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
+                        seasonEpisodeStr = ` сез.${currentSeason} из ${totalSeasons} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
                     } else if (totalSeasons > 0) {
-                        statusText += ` сез.${currentSeason} из ${totalSeasons} сер.${match[2]}`;
+                        seasonEpisodeStr = ` сез.${currentSeason} из ${totalSeasons} сер.${match[2]}`;
                     } else if (totalEpisodesInSeason > 0) {
-                        statusText += ` сез.${match[1]} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
+                        seasonEpisodeStr = ` сез.${match[1]} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
                     } else {
-                        statusText += ` сез.${match[1]} сер.${match[2]}`;
+                        seasonEpisodeStr = ` сез.${match[1]} сер.${match[2]}`;
                     }
                 }
-            }
-            textHtml = `<span class="nsl-card-status__text">${statusText}</span>`;
-        }
-        
-        if (timelineItem && timelineItem.time > 0) {
-            const time = formatTimeShort(timelineItem.time);
-            const percent = timelineItem.percent || 0;
-            timeHtml = `<span class="nsl-card-status__time">${time}${percent > 0 && !status ? ` (${percent}%)` : ''}</span>`;
-        } else if (!status) {
-            if (existing) existing.remove();
-            return;
-        }
-        
-        const contentHtml = iconHtml + textHtml + timeHtml;
-        
-        if (existing) {
-            existing.innerHTML = contentHtml;
-        } else {
-            const div = document.createElement('div');
-            div.className = 'nsl-card-status';
-            div.innerHTML = contentHtml;
-            
-            const viewEl = cardElement.querySelector('.card__view');
-            if (viewEl) {
-                viewEl.appendChild(div);
-                existing = div;
-            } else {
-                return;
+                
+                if (duration > 0) {
+                    extraInfo = `${seasonEpisodeStr} ${formatTime(time)} из ${formatTime(duration)}`;
+                    extraText = `Прогресс: ${percent}% (${formatTime(time)} из ${formatTime(duration)})`;
+                } else {
+                    extraInfo = `${seasonEpisodeStr} ${formatTime(time)}`;
+                    extraText = `Прогресс: ${formatTime(time)}`;
+                }
             }
         }
         
-        updateCardStatusPosition(existing);
+        if (category === 'abandoned' && tmdbId) {
+            const favorites = getFavorites();
+            const baseId = getBaseTmdbId(tmdbId);
+            const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'abandoned');
+            if (item) {
+                const lastUpdate = item.updated || item.added;
+                const daysAgo = Math.floor((Date.now() - lastUpdate) / (1000 * 60 * 60 * 24));
+                if (daysAgo > 0) { extraInfo = daysAgo === 1 ? ' 1 день' : ` ${daysAgo} дн.`; extraText = `Не смотрели ${daysAgo} ${getDaysWord(daysAgo)}`; }
+            }
+        }
+        return { ...base, displayText: base.text + extraInfo, extraText, category };
+    }
+
+    function getDaysWord(days) {
+        if (days % 10 === 1 && days % 100 !== 11) return 'день';
+        if (days % 10 >= 2 && days % 10 <= 4 && (days % 100 < 10 || days % 100 >= 20)) return 'дня';
+        return 'дней';
+    }
+
+    function getMovieStatus(movie) {
+        const tmdbId = extractTmdbId(movie);
+        if (!tmdbId) return null;
+        const baseId = getBaseTmdbId(tmdbId);
+        const favorites = getFavorites();
+        const movieCategories = favorites.filter(f => getBaseTmdbId(f.tmdb_id) === baseId).map(f => f.category);
+        if (movieCategories.length === 0) return null;
+        let bestCategory = null, bestPriority = 999;
+        for (const cat of movieCategories) {
+            const priority = STATUS_PRIORITY[cat] || 999;
+            if (priority < bestPriority) { bestPriority = priority; bestCategory = cat; }
+        }
+        if (bestCategory === 'collection' && movieCategories.length > 1) {
+            for (const cat of movieCategories) {
+                if (cat !== 'collection') {
+                    const priority = STATUS_PRIORITY[cat] || 999;
+                    if (priority < bestPriority) { bestPriority = priority; bestCategory = cat; }
+                }
+            }
+        }
+        if (bestCategory === 'favorite' && movieCategories.length > 1) {
+            for (const cat of movieCategories) {
+                if (cat !== 'favorite' && cat !== 'collection') return getCategoryDisplay(cat, tmdbId);
+            }
+        }
+        return getCategoryDisplay(bestCategory, tmdbId);
+    }
+
+    function addStatusToCard() {
+        Lampa.Listener.follow('full', function (e) {
+            if (e.type == 'complite') {
+                setTimeout(() => {
+                    try {
+                        const movie = e.data.movie || e.data.card;
+                        if (!movie || !movie.id) return;
+                        if (!e.object || !e.object.activity) return;
+                        const render = e.object.activity.render();
+                        const statusContainer = render.find('.full-start__status').first();
+                        if (!statusContainer.length) return;
+                        render.find('.nsl-movie-status').remove();
+                        const status = getMovieStatus(movie);
+                        if (!status) return;
+                        const statusEl = $(`<div class="full-start__status nsl-movie-status" style="margin-left:8px;display:flex;align-items:center;gap:6px;padding:0 12px;height:32px;border-radius:4px;background-color:rgba(0,0,0,0.4);color:rgba(255,255,255,0.9)!important;font-size:16px!important;font-weight:400;cursor:help;white-space:nowrap;border:none;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);" title="${status.extraText || status.text}"><span style="font-size:16px!important;line-height:1;">${status.icon}</span><span style="font-size:16px!important;line-height:1;">${status.displayText}</span></div>`);
+                        statusContainer.after(statusEl);
+                    } catch (err) { console.error('[NSL] Error adding status:', err); }
+                }, 300);
+            }
+        });
+    }
+    
+    function refreshCardStatus() {
+        const activity = Lampa.Activity.active();
+        const movie = activity?.movie || activity?.card;
+        if (!movie) return;
+        $('.nsl-movie-status').remove();
+        const status = getMovieStatus(movie);
+        if (!status) return;
+        const statusContainer = $('.full-start__status').first();
+        if (!statusContainer.length) return;
+        const statusEl = $(`<div class="full-start__status nsl-movie-status" style="margin-left:8px;display:flex;align-items:center;gap:6px;padding:0 12px;height:32px;border-radius:4px;background-color:rgba(0,0,0,0.4);color:rgba(255,255,255,0.9)!important;font-size:16px!important;font-weight:400;cursor:help;white-space:nowrap;border:none;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);" title="${status.extraText || status.text}"><span style="font-size:16px!important;line-height:1;">${status.icon}</span><span style="font-size:16px!important;line-height:1;">${status.displayText}</span></div>`);
+        statusContainer.after(statusEl);
+    }
+
+    function refreshFavoriteButton() {
+        const movie = Lampa.Activity.active()?.movie;
+        if (!movie) return;
+        const button = $('.nsl-favorite-button');
+        if (!button.length) return;
+        const tmdbId = extractTmdbId(movie);
+        const baseId = getBaseTmdbId(tmdbId);
+        const favorites = getFavorites();
+        const isAny = favorites.some(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category !== 'collection');
+        button.find('path').attr('fill', isAny ? 'currentColor' : 'none');
     }
 
     // ======================
