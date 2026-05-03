@@ -1083,13 +1083,13 @@
                     const currentEpisode = parseInt(match[2]);
                     
                     if (totalSeasons > 0 && totalEpisodesInSeason > 0) {
-                        seasonEpisodeStr = ` сез.${currentSeason} из ${totalSeasons} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
+                        seasonEpisodeStr = `: сез.${currentSeason} из ${totalSeasons}; сер.${currentEpisode} из ${totalEpisodesInSeason}`;
                     } else if (totalSeasons > 0) {
-                        seasonEpisodeStr = ` сез.${currentSeason} из ${totalSeasons} сер.${match[2]}`;
+                        seasonEpisodeStr = `: сез.${currentSeason} из ${totalSeasons}; сер.${match[2]}`;
                     } else if (totalEpisodesInSeason > 0) {
-                        seasonEpisodeStr = ` сез.${match[1]} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
+                        seasonEpisodeStr = `: сез.${match[1]}; сер.${currentEpisode} из ${totalEpisodesInSeason}`;
                     } else {
-                        seasonEpisodeStr = ` сез.${match[1]} сер.${match[2]}`;
+                        seasonEpisodeStr = `: сез.${match[1]}; сер.${match[2]}`;
                     }
                 }
                 
