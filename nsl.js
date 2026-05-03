@@ -891,6 +891,7 @@
             const tmdbId = extractTmdbId(movie);
             if (!tmdbId) return null;
             const playerData = Lampa.Player.playdata();
+            console.log('[NSL-KEY] playerData.season:', playerData?.season, 'playerData.episode:', playerData?.episode);
             if (playerData && (playerData.season || playerData.episode))
                 return `${tmdbId}_s${playerData.season || 1}_e${playerData.episode || 1}`;
             return String(tmdbId);
