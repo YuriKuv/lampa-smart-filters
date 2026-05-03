@@ -955,15 +955,22 @@
     
     function getCurrentPlayerTime() {
         try {
-            // Сначала проверяем штатный плеер
+            // 1. Штатный плеер Lampa
             if (Lampa.Player.opened()) {
                 const playerData = Lampa.Player.playdata();
                 if (playerData?.timeline?.time !== undefined) return playerData.timeline.time;
             }
-            // Потом video элемент (для сторонних плееров)
+            
+            // 2. Video элемент (для сторонних плееров в WebView/оверлее)
             const video = document.querySelector('video');
             if (video && !isNaN(video.currentTime) && video.currentTime > 0) {
                 return video.currentTime;
+            }
+            
+            // 3. Для Android: получаем время через AndroidJS (если плеер поддерживает)
+            if (typeof AndroidJS !== 'undefined' && typeof AndroidJS.getPlayerTime === 'function') {
+                const time = AndroidJS.getPlayerTime();
+                if (time > 0) return time;
             }
         } catch (e) {}
         return null;
@@ -971,18 +978,58 @@
     
     function getVideoDuration() {
         try {
+            // 1. Штатный плеер
             const playerData = Lampa.Player.playdata();
             if (playerData?.timeline?.duration && playerData.timeline.duration > 0) return playerData.timeline.duration;
+            
+            // 2. Video элемент
             const video = document.querySelector('video');
-            if (video && video.duration && !isNaN(video.duration) && video.duration > 0) return video.duration;
+            if (video && video.duration && !isNaN(video.duration) && video.duration > 0 && video.duration < 36000) {
+                return video.duration;
+            }
+            
+            // 3. Android плеер
+            if (typeof AndroidJS !== 'undefined' && typeof AndroidJS.getPlayerDuration === 'function') {
+                const duration = AndroidJS.getPlayerDuration();
+                if (duration > 0) return duration;
+            }
         } catch (e) {}
         return 0;
+    }
+    
+    function isExternalPlayerActive() {
+        // Проверяем, активно ли стороннее приложение-плеер
+        if (typeof AndroidJS !== 'undefined') {
+            try {
+                // AndroidJS может сообщать, активно ли внешнее приложение
+                if (typeof AndroidJS.isExternalPlayerActive === 'function') {
+                    return AndroidJS.isExternalPlayerActive();
+                }
+                
+                // Fallback: проверяем, открыт ли Intent с видео
+                if (typeof AndroidJS.getPlayerTime === 'function') {
+                    const time = AndroidJS.getPlayerTime();
+                    return time >= 0; // Если метод существует и возвращает число — плеер активен
+                }
+            } catch(e) {}
+        }
+        
+        // Проверяем video элемент как fallback
+        const video = document.querySelector('video');
+        return video && !video.paused && video.currentTime > 0;
     }
     
     function saveProgress(timeInSeconds, force) {
         const c = cfg();
         if (!c.auto_save && !force) return false;
-        const movieKey = getCurrentMovieKey();
+        
+        let movieKey = getCurrentMovieKey();
+        
+        // Для внешних плееров, если ключ не определён — используем сохранённый
+        if (!movieKey && currentMovieKey) {
+            movieKey = currentMovieKey;
+        }
+        
         if (!movieKey) return false;
         
         const currentTime = Math.floor(timeInSeconds);
@@ -993,8 +1040,17 @@
             let duration = getVideoDuration();
             if (!duration && timeline[movieKey]?.duration) duration = timeline[movieKey].duration;
             const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
-            const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
-            timeline[movieKey] = { time: currentTime, percent, duration, updated: Date.now(), tmdb_id: tmdbId };
+            const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie) || 
+                           timeline[movieKey]?.tmdb_id || 
+                           getBaseTmdbId(movieKey);
+            
+            timeline[movieKey] = { 
+                time: currentTime, 
+                percent, 
+                duration, 
+                updated: Date.now(), 
+                tmdb_id: tmdbId 
+            };
             saveTimeline(timeline);
             lastSavedProgress = currentTime;
             currentMovieTime = currentTime;
@@ -1009,31 +1065,64 @@
         return false;
     }
     
+    // Обновлённая функция для внешних плееров на Android
+    function onExternalPlayerTimeUpdate(time, duration) {
+        if (time > 0) {
+            currentMovieTime = time;
+            if (duration > 0) videoDuration = duration;
+            saveProgress(time, false);
+        }
+    }
+    
+    // Экспортируем для возможного вызова из AndroidJS
+    window.NSL = window.NSL || {};
+    window.NSL.onExternalPlayerTimeUpdate = onExternalPlayerTimeUpdate;
+    window.NSL.isExternalPlayerActive = isExternalPlayerActive;
+    
     function initPlayerHandler() {
         let wasActive = false;
         let lastSyncToGist = 0;
         let checkCount = 0;
         let lastMovieKey = null;
         let currentBaseId = null;
+        let externalPlayerCheckInterval = null;
         
         if (playerInterval) clearInterval(playerInterval);
+        if (externalPlayerCheckInterval) clearInterval(externalPlayerCheckInterval);
         
+        // Основной цикл проверки (для всех плееров)
         playerInterval = setInterval(() => {
             const c = cfg();
             if (!c.enabled) return;
             
-            const video = document.querySelector('video');
             const isPlayerOpen = Lampa.Player.opened();
-            const isVideoPlaying = video && !video.paused && video.currentTime > 0;
-            const isActive = isPlayerOpen || isVideoPlaying;
+            const isExternalActive = !isPlayerOpen && isExternalPlayerActive();
+            const isActive = isPlayerOpen || isExternalActive;
             
             // Обнаружили начало просмотра
             if (isActive && !wasActive) {
+                console.log('[NSL] Playback started', isPlayerOpen ? '(internal)' : '(external)');
                 returnedToWatchingMap = {};
                 videoDuration = getVideoDuration();
                 lastMovieKey = null;
                 currentBaseId = null;
                 checkCount = 0;
+                
+                // Для сторонних плееров — сохраняем информацию о начале просмотра
+                if (!isPlayerOpen) {
+                    const activity = Lampa.Activity.active();
+                    if (activity && activity.movie) {
+                        const tmdbId = extractTmdbId(activity.movie);
+                        if (tmdbId) {
+                            currentBaseId = getBaseTmdbId(tmdbId);
+                            // Сохраняем минимальный ключ для отслеживания
+                            const movieKey = activity.movie.original_name ? 
+                                `${tmdbId}_s1_e1` : String(tmdbId);
+                            currentMovieKey = movieKey;
+                            lastMovieKey = movieKey;
+                        }
+                    }
+                }
             }
             
             // Обнаружили конец просмотра
@@ -1066,7 +1155,22 @@
             if (currentTime === null || currentTime <= 0) return;
             
             currentMovieTime = currentTime;
-            const movieKey = getCurrentMovieKey();
+            
+            // Для внутреннего плеера получаем точный ключ
+            let movieKey;
+            if (isPlayerOpen) {
+                movieKey = getCurrentMovieKey();
+            } else {
+                // Для внешнего плеера используем сохранённый ключ
+                movieKey = currentMovieKey;
+                
+                // Пробуем уточнить ключ, если есть video элемент
+                const video = document.querySelector('video');
+                if (video && video.src) {
+                    const newKey = getCurrentMovieKey();
+                    if (newKey) movieKey = newKey;
+                }
+            }
             
             // Обнаружили смену серии/фильма
             if (movieKey && movieKey !== lastMovieKey) {
@@ -1084,13 +1188,13 @@
                 videoDuration = getVideoDuration();
                 
                 // Сохраняем текущий baseId
-                const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
-                if (tmdbId) {
-                    currentBaseId = getBaseTmdbId(tmdbId);
+                if (isPlayerOpen) {
+                    const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
+                    if (tmdbId) currentBaseId = getBaseTmdbId(tmdbId);
                 }
             }
             
-            // Сохраняем прогресс
+            // Сохраняем прогресс (каждые 10 секунд)
             if (c.auto_save && movieKey && Math.floor(currentTime) - lastSavedProgress >= 10) {
                 if (saveProgress(currentTime, false)) {
                     const now = Date.now();
@@ -1101,6 +1205,22 @@
                 }
             }
         }, 1000);
+        
+        // Дополнительный цикл для Android: чаще проверяем состояние внешнего плеера
+        if (typeof AndroidJS !== 'undefined') {
+            externalPlayerCheckInterval = setInterval(() => {
+                const isPlayerOpen = Lampa.Player.opened();
+                if (!isPlayerOpen && typeof AndroidJS.getPlayerTime === 'function') {
+                    try {
+                        const time = AndroidJS.getPlayerTime();
+                        if (time > 0 && time !== currentMovieTime) {
+                            currentMovieTime = time;
+                            videoDuration = AndroidJS.getPlayerDuration() || getVideoDuration();
+                        }
+                    } catch(e) {}
+                }
+            }, 2000);
+        }
     }
 
     // ======================
