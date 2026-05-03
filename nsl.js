@@ -833,7 +833,6 @@
     let videoDuration = 0;
     
     function getCurrentMovieKey() {
-        console.log('[NSL-KEY] tmdbId:', tmdbId, 'season:', season, 'episode:', episode);
         try {
             const activity = Lampa.Activity.active();
             if (!activity || !activity.movie) return null;
