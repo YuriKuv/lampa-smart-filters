@@ -1102,6 +1102,19 @@
                     extraText = `Прогресс: ${formatTime(time)}`;
                 }
             }
+        }
+        
+        if (category === 'abandoned' && tmdbId) {
+            const favorites = getFavorites();
+            const baseId = getBaseTmdbId(tmdbId);
+            const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'abandoned');
+            if (item) {
+                const lastUpdate = item.updated || item.added;
+                const daysAgo = Math.floor((Date.now() - lastUpdate) / (1000 * 60 * 60 * 24));
+                if (daysAgo > 0) { extraInfo = daysAgo === 1 ? ' 1 день' : ` ${daysAgo} дн.`; extraText = `Не смотрели ${daysAgo} ${getDaysWord(daysAgo)}`; }
+            }
+        }
+        return { ...base, displayText: base.text + extraInfo, extraText, category };
     }
 
     function getDaysWord(days) {
@@ -2103,39 +2116,34 @@
         const favorites = getFavorites();
         const timeline = getTimeline();
         
-        const favItem = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
-        if (!favItem) {
-            let hasTimelineData = false;
-            for (const key in timeline) {
-                if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId && timeline[key]?.time > 0) {
-                    hasTimelineData = true;
-                    break;
+        // Ищем лучший таймкод (с максимальным временем)
+        let bestTimelineItem = null;
+        let maxTime = 0;
+        for (const key in timeline) {
+            if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
+                const t = timeline[key]?.time || 0;
+                if (t > maxTime) {
+                    maxTime = t;
+                    bestTimelineItem = timeline[key];
                 }
             }
-            
-            if (!hasTimelineData) {
+        }
+        
+        const favItem = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId);
+        if (!favItem) {
+            if (!bestTimelineItem) {
                 const existing = cardElement.querySelector('.nsl-card-status');
                 if (existing) existing.remove();
                 return;
             }
-            
-            updateCardStatusElementWithTime(cardElement, cardData, null, timeline);
+            updateCardStatusElementWithTime(cardElement, cardData, null, timeline, bestTimelineItem);
             return;
         }
         
         const status = getMovieStatus(cardData);
         if (!status) return;
         
-        let timelineItem = null;
-        for (const key in timeline) {
-            if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
-                if (!timelineItem || (timeline[key].time || 0) > (timelineItem.time || 0)) {
-                    timelineItem = timeline[key];
-                }
-            }
-        }
-        
-        updateCardStatusElementWithTime(cardElement, cardData, status, timeline, timelineItem);
+        updateCardStatusElementWithTime(cardElement, cardData, status, timeline, bestTimelineItem);
     }
     
     function updateCardStatusElementWithTime(cardElement, cardData, status, timeline, timelineItem) {
@@ -2148,37 +2156,19 @@
         if (status) {
             iconHtml = `<span class="nsl-card-status__icon" style="color:${status.color}">${status.icon}</span>`;
             
-            // Для сериалов добавляем информацию о сезоне/серии
             let statusText = status.text;
             if (timelineItem && timelineItem.time > 0) {
-                // Ищем ключ в timeline, который совпадает с этим timelineItem и содержит _s_ и _e_
-                let seasonEpInfo = '';
+                // Ищем ключ в timeline по базовому ID и извлекаем сезон/серию
                 const baseId = getBaseTmdbId(extractTmdbId(cardData));
-                
                 for (const key in timeline) {
-                    if (timeline[key] === timelineItem && key.includes('_s') && key.includes('_e')) {
+                    if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId && timeline[key] === timelineItem) {
                         const match = key.match(/_s(\d+)_e(\d+)/);
                         if (match) {
-                            seasonEpInfo = ` сез.${match[1]} сер.${match[2]}`;
+                            statusText += ` сез.${match[1]} сер.${match[2]}`;
                         }
                         break;
                     }
                 }
-                
-                // Если не нашли по совпадению объекта, ищем по baseId
-                if (!seasonEpInfo && baseId) {
-                    for (const key in timeline) {
-                        if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId && key.includes('_s') && key.includes('_e')) {
-                            const match = key.match(/_s(\d+)_e(\d+)/);
-                            if (match) {
-                                seasonEpInfo = ` сез.${match[1]} сер.${match[2]}`;
-                            }
-                            break;
-                        }
-                    }
-                }
-                
-                statusText += seasonEpInfo;
             }
             textHtml = `<span class="nsl-card-status__text">${statusText}</span>`;
         }
