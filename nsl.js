@@ -1094,7 +1094,7 @@
                 }
                 
                 if (duration > 0) {
-                    extraInfo = `${seasonEpisodeStr} ${formatTime(time)} из ${formatTime(duration)}`;
+                    extraInfo = `${seasonEpisodeStr}; ${formatTime(time)} из ${formatTime(duration)}`;
                     extraText = `Прогресс: ${percent}% (${formatTime(time)} из ${formatTime(duration)})`;
                 } else {
                     extraInfo = `${seasonEpisodeStr} ${formatTime(time)}`;
@@ -2154,13 +2154,13 @@
                     const currentEpisode = parseInt(match[2]);
                     
                     if (totalSeasons > 0 && totalEpisodesInSeason > 0) {
-                        statusText += ` сез.${currentSeason} из ${totalSeasons} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
+                        statusText += `: сез.${currentSeason} из ${totalSeasons}; сер.${currentEpisode} из ${totalEpisodesInSeason}`;
                     } else if (totalSeasons > 0) {
-                        statusText += ` сез.${currentSeason} из ${totalSeasons} сер.${match[2]}`;
+                        statusText += `: сез.${currentSeason} из ${totalSeasons}; сер.${match[2]}`;
                     } else if (totalEpisodesInSeason > 0) {
-                        statusText += ` сез.${match[1]} сер.${currentEpisode} из ${totalEpisodesInSeason}`;
+                        statusText += `: сез.${match[1]}; сер.${currentEpisode} из ${totalEpisodesInSeason}`;
                     } else {
-                        statusText += ` сез.${match[1]} сер.${match[2]}`;
+                        statusText += `: сез.${match[1]}; сер.${match[2]}`;
                     }
                 }
             }
