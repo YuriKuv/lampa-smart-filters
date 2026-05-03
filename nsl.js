@@ -1082,8 +1082,8 @@
                     const currentSeason = parseInt(match[1]);
                     const currentEpisode = parseInt(match[2]);
                     
-                    const seasonStr = totalSeasons > 0 ? `Сезон ${currentSeason} из ${totalSeasons}` : `Сезон ${currentSeason}`;
-                    const episodeStr = totalEpisodesInSeason > 0 ? `Серия ${currentEpisode} из ${totalEpisodesInSeason}` : `Серия ${currentEpisode}`;
+                    const seasonStr = totalSeasons > 0 ? `Сез. ${currentSeason} из ${totalSeasons}` : `Сез. ${currentSeason}`;
+                    const episodeStr = totalEpisodesInSeason > 0 ? `Сер. ${currentEpisode} из ${totalEpisodesInSeason}` : `Сер. ${currentEpisode}`;
                     
                     seasonEpisodeStr = `: ${seasonStr}; ${episodeStr}`;
                 }
@@ -2148,8 +2148,8 @@
                 const currentSeason = parseInt(match[1]);
                 const currentEpisode = parseInt(match[2]);
                 
-                const seasonStr = totalSeasons > 0 ? `Сезон ${currentSeason} из ${totalSeasons}` : `Сезон ${currentSeason}`;
-                const episodeStr = totalEpisodesInSeason > 0 ? `Серия ${currentEpisode} из ${totalEpisodesInSeason}` : `Серия ${currentEpisode}`;
+                const seasonStr = totalSeasons > 0 ? `Сез. ${currentSeason} из ${totalSeasons}` : `Сез. ${currentSeason}`;
+                const episodeStr = totalEpisodesInSeason > 0 ? `Сер. ${currentEpisode} из ${totalEpisodesInSeason}` : `Сер. ${currentEpisode}`;
                 const timeStr = formatTimeShort(timelineItem.time) + (timelineItem.duration > 0 ? ` из ${formatTimeShort(timelineItem.duration)}` : '');
                 
                 line1 += `: ${seasonStr}`;
@@ -2188,7 +2188,7 @@
         } else if (minutes > 0) {
             return `${minutes} м.`;
         } else {
-            return `${Math.floor(seconds)} сек.`;
+            return `${Math.floor(seconds)} с.`;
         }
     }
     
@@ -2496,7 +2496,7 @@
     }
     
     function formatTotalTime(seconds) {
-        if (seconds < 60) return `${seconds} сек`;
+        if (seconds < 60) return `${seconds} с`;
         const hours = Math.floor(seconds / 3600), minutes = Math.floor((seconds % 3600) / 60);
         if (hours > 0) return `${hours} ч ${minutes} мин`;
         return `${minutes} мин`;
