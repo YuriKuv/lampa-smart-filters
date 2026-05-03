@@ -646,7 +646,7 @@
     
     let returnedToWatchingMap = {};
     let syncTimelineRunning = false;
-    let syncTimelineQueued = false;
+    let syncTimelineTimer = null;
 
     function returnToWatching(tmdbId) {
         const favorites = getFavorites();
@@ -831,45 +831,23 @@
         return { id: tmdbId, title: 'ID: ' + getBaseTmdbId(tmdbId) };
     }
 
-
     function syncTimelineWithCategories() {
-        if (syncTimelineRunning) {
-            syncTimelineQueued = true;
-            return;
-        }
-        
         const c = cfg();
         if (!c.auto_watching && !c.auto_watched) return;
         
-        syncTimelineRunning = true;
-        syncTimelineQueued = false;
+        // Защита от повторных вызовов — сбрасываем таймер
+        if (syncTimelineTimer) {
+            clearTimeout(syncTimelineTimer);
+            syncTimelineTimer = null;
+        }
         
         const timeline = getTimeline();
         const favorites = getFavorites();
         let changed = false;
-        let pendingChecks = 0;
-        let checkCompleted = false;
         
-        // Собираем уникальные baseId сериалов, которым нужна проверка IndexedDB
-        const seriesToCheck = new Map();
+        // Собираем все ID сериалов, которые нужно проверить
+        const seriesToCheck = [];
         
-        function checkDone() {
-            if (checkCompleted) return;
-            pendingChecks--;
-            if (pendingChecks <= 0) {
-                checkCompleted = true;
-                if (changed) {
-                    saveFavorites(favorites);
-                    refreshNewEpisodesBadge();
-                }
-                syncTimelineRunning = false;
-                if (syncTimelineQueued) {
-                    syncTimelineWithCategories();
-                }
-            }
-        }
-        
-        // Первый проход: собираем все проверки
         for (const [key, item] of Object.entries(timeline)) {
             const tmdbId = item.tmdb_id;
             if (!tmdbId) continue;
@@ -886,12 +864,46 @@
             const existingPlanned = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'planned');
             const existingFavorite = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'favorite');
             const existingAny = existingWatching || existingWatched || existingPlanned || existingFavorite;
-            const cardData = existingAny?.data || getCardDataFromActivity(tmdbId);
+            const cardData = existingAny?.data || { id: tmdbId, title: 'ID: ' + baseId };
             const title = cardData.title || cardData.name || 'ID: ' + baseId;
             const isSeries = key.includes('_s') || key.includes('_e');
             const mediaType = isSeries ? 'tv' : 'movie';
             
-            // Авто в Смотрю (это безопасно, можно делать сразу)
+            // ФИЛЬМЫ — обрабатываем сразу
+            if (!isSeries) {
+                if (c.auto_watched && !existingWatched && percent >= c.watched_min_progress) {
+                    if (existingWatching) {
+                        existingWatching.category = 'watched'; existingWatching.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watched', favorites);
+                        logMove('auto_watched', title, 'watching', 'watched'); changed = true;
+                    } else if (existingPlanned) {
+                        existingPlanned.category = 'watched'; existingPlanned.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watched', favorites);
+                        logMove('auto_watched', title, 'planned', 'watched'); changed = true;
+                    } else if (!existingWatched) {
+                        favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watched', data: cardData, added: Date.now(), updated: Date.now() });
+                        logMove('auto_watched', title, null, 'watched'); changed = true;
+                    }
+                }
+                
+                if (c.auto_watching && !existingWatching && !existingWatched && percent >= c.watching_min_progress && percent <= c.watching_max_progress) {
+                    if (existingPlanned) {
+                        existingPlanned.category = 'watching'; existingPlanned.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watching', favorites);
+                        logMove('auto_watching', title, 'planned', 'watching'); changed = true;
+                    } else if (existingFavorite) {
+                        existingFavorite.category = 'watching'; existingFavorite.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watching', favorites);
+                        logMove('auto_watching', title, 'favorite', 'watching'); changed = true;
+                    } else {
+                        favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watching', data: cardData, added: Date.now(), updated: Date.now() });
+                        logMove('auto_watching', title, null, 'watching'); changed = true;
+                    }
+                }
+                continue;
+            }
+            
+            // СЕРИАЛЫ — авто в Смотрю (можно сразу)
             if (c.auto_watching && !existingWatching && !existingWatched && percent >= c.watching_min_progress && percent <= c.watching_max_progress) {
                 if (existingPlanned) {
                     existingPlanned.category = 'watching'; existingPlanned.updated = Date.now();
@@ -902,100 +914,109 @@
                     applyCategoryRules(tmdbId, 'watching', favorites);
                     logMove('auto_watching', title, 'favorite', 'watching'); changed = true;
                 } else {
-                    favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watching', data: getCardDataFromActivity(tmdbId), added: Date.now(), updated: Date.now() });
+                    favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watching', data: cardData, added: Date.now(), updated: Date.now() });
                     logMove('auto_watching', title, null, 'watching'); changed = true;
                 }
             }
             
-            // Авто в Просмотрено — требует проверки для сериалов
-            if (c.auto_watched && !existingWatched && percent >= c.watched_min_progress) {
-                if (!isSeries) {
-                    // Фильмы — сразу в просмотрено
-                    if (existingWatching) {
-                        existingWatching.category = 'watched'; existingWatching.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watched', favorites);
-                        logMove('auto_watched', title, 'watching', 'watched'); changed = true;
-                    } else if (existingPlanned) {
-                        existingPlanned.category = 'watched'; existingPlanned.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watched', favorites);
-                        logMove('auto_watched', title, 'planned', 'watched'); changed = true;
-                    } else if (!existingWatched) {
-                        favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watched', data: getCardDataFromActivity(tmdbId), added: Date.now(), updated: Date.now() });
-                        logMove('auto_watched', title, null, 'watched'); changed = true;
-                    }
-                } else {
-                    const match = key.match(/_s(\d+)_e(\d+)/);
-                    if (match) {
-                        // Собираем все ключи сериала для одного baseId
-                        if (!seriesToCheck.has(baseId)) {
-                            seriesToCheck.set(baseId, {
-                                baseId,
-                                keys: [],
-                                existingWatching,
-                                existingPlanned,
-                                existingWatched,
-                                mediaType,
-                                title
-                            });
+            // СЕРИАЛЫ — авто в Просмотрено: добавляем в очередь
+            if (c.auto_watched && !existingWatched && existingWatching && percent >= c.watched_min_progress) {
+                const match = key.match(/_s(\d+)_e(\d+)/);
+                if (match) {
+                    // Проверяем, нет ли уже такого же baseId в очереди с большим эпизодом
+                    const existingCheck = seriesToCheck.find(s => s.baseId === baseId);
+                    const newSeason = parseInt(match[1]);
+                    const newEpisode = parseInt(match[2]);
+                    
+                    if (existingCheck) {
+                        if (newSeason > existingCheck.season || 
+                            (newSeason === existingCheck.season && newEpisode > existingCheck.episode)) {
+                            existingCheck.season = newSeason;
+                            existingCheck.episode = newEpisode;
+                            existingCheck.percent = percent;
                         }
-                        seriesToCheck.get(baseId).keys.push({
-                            key,
+                    } else {
+                        seriesToCheck.push({
+                            baseId,
                             tmdbId,
-                            season: parseInt(match[1]),
-                            episode: parseInt(match[2]),
+                            season: newSeason,
+                            episode: newEpisode,
                             percent,
-                            time: item.time || 0
+                            title
                         });
                     }
                 }
             }
         }
         
-        // Второй проход: для каждого сериала делаем ОДНУ проверку через IndexedDB
-        if (seriesToCheck.size > 0) {
-            seriesToCheck.forEach((seriesData) => {
-                const { baseId, keys, existingWatching, existingPlanned, existingWatched, mediaType, title } = seriesData;
+        // Сохраняем изменения от авто-в-смотрю и фильмов
+        if (changed) {
+            saveFavorites(favorites);
+            refreshNewEpisodesBadge();
+        }
+        
+        // Отложенная проверка сериалов — ждём загрузки TimeTable
+        if (seriesToCheck.length > 0) {
+            syncTimelineTimer = setTimeout(() => {
+                syncTimelineTimer = null;
+                const currentFavorites = getFavorites();
+                let changedLater = false;
                 
-                // Находим максимальный эпизод среди всех ключей
-                let maxSeason = 0;
-                let maxEpisode = 0;
-                keys.forEach(k => {
-                    if (k.season > maxSeason || (k.season === maxSeason && k.episode > maxEpisode)) {
-                        maxSeason = k.season;
-                        maxEpisode = k.episode;
-                    }
-                });
+                const tableData = Lampa.TimeTable?.all() || [];
                 
-                pendingChecks++;
-                
-                isLastEpisodeOfLastSeason(baseId, maxSeason, maxEpisode, (isLast) => {
-                    if (isLast) {
-                        // Перепроверяем актуальное состояние
-                        const freshFavorites = getFavorites();
-                        const freshWatched = freshFavorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watched');
-                        
-                        if (!freshWatched) {
-                            const freshWatching = freshFavorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watching');
-                            const freshPlanned = freshFavorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'planned');
-                            
-                            if (freshWatching) {
-                                freshWatching.category = 'watched'; freshWatching.updated = Date.now();
-                                applyCategoryRules(baseId, 'watched', favorites);
-                                logMove('auto_watched', title, 'watching', 'watched'); changed = true;
-                            } else if (freshPlanned) {
-                                freshPlanned.category = 'watched'; freshPlanned.updated = Date.now();
-                                applyCategoryRules(baseId, 'watched', favorites);
-                                logMove('auto_watched', title, 'planned', 'watched'); changed = true;
-                            } else if (!freshWatched) {
-                                favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watched', data: getCardDataFromActivity(baseId), added: Date.now(), updated: Date.now() });
-                                logMove('auto_watched', title, null, 'watched'); changed = true;
+                seriesToCheck.forEach(item => {
+                    // Перепроверяем, не изменился ли статус
+                    const watchingItem = currentFavorites.find(f => 
+                        getBaseTmdbId(f.tmdb_id) === item.baseId && f.category === 'watching'
+                    );
+                    if (!watchingItem) return;
+                    
+                    const showData = tableData.find(d => d.id == item.baseId);
+                    
+                    let isLastEpisode = false;
+                    
+                    if (showData && showData.season > 0 && showData.episodes && showData.episodes.length > 0) {
+                        // Текущий сезон === последний сезон?
+                        if (item.season === showData.season) {
+                            let lastEpNum = 0;
+                            showData.episodes.forEach(ep => {
+                                if (ep.episode_number > lastEpNum) lastEpNum = ep.episode_number;
+                            });
+                            if (item.episode >= lastEpNum) {
+                                isLastEpisode = true;
                             }
                         }
+                    } else {
+                        // Fallback: проверяем через seriesCheck
+                        const seriesCheck = getSeriesCheck();
+                        const checkData = seriesCheck[item.baseId];
+                        if (checkData && checkData.last_season_number > 0) {
+                            isLastEpisode = (item.season >= checkData.last_season_number);
+                        }
                     }
-                    checkDone();
+                    
+                    if (isLastEpisode && item.percent >= cfg().watched_min_progress) {
+                        const fav = currentFavorites.find(f => 
+                            getBaseTmdbId(f.tmdb_id) === item.baseId && f.category === 'watching'
+                        );
+                        if (fav) {
+                            const oldCategory = fav.category;
+                            fav.category = 'watched';
+                            fav.updated = Date.now();
+                            applyCategoryRules(item.tmdbId, 'watched', currentFavorites);
+                            logMove('auto_watched', item.title, oldCategory, 'watched');
+                            changedLater = true;
+                        }
+                    }
                 });
-            });
+                
+                if (changedLater) {
+                    saveFavorites(currentFavorites);
+                    refreshNewEpisodesBadge();
+                }
+            }, 5000);
         }
+    }
         
         // Если нет сериалов для проверки — сохраняем сразу
         if (pendingChecks === 0) {
