@@ -1011,6 +1011,7 @@
         const baseId = getBaseTmdbId(tmdbId);
         let bestKey = '';
         let bestItem = null;
+        let bestEpisode = 0;
         let bestTime = 0;
         
         for (const key in timeline) {
@@ -1019,7 +1020,12 @@
                 const hasEpisode = key.includes('_s') && key.includes('_e');
                 
                 if (hasEpisode) {
-                    if (t >= bestTime) {
+                    const match = key.match(/_s(\d+)_e(\d+)/);
+                    const epNum = match ? parseInt(match[2]) : 0;
+                    
+                    // Приоритет: больше номер серии, при равных — больше время
+                    if (epNum > bestEpisode || (epNum === bestEpisode && t >= bestTime)) {
+                        bestEpisode = epNum;
                         bestTime = t;
                         bestItem = timeline[key];
                         bestKey = key;
