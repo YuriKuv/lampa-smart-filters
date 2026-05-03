@@ -480,6 +480,15 @@
             Lampa.Storage.set('favorite', fav, true);
         }
         
+        // Удаляем таймкоды из IndexedDB (кеш timetable)
+        if (typeof Lampa !== 'undefined' && Lampa.Cache && typeof Lampa.Cache.rewriteData === 'function') {
+            Lampa.Cache.rewriteData('timetable', baseId, null).then(() => {
+                console.log('[NSL] Timetable cache cleared for', baseId);
+            }).catch(() => {
+                // Игнорируем ошибки очистки кеша
+            });
+        }
+        
         notify(`🗑️ "${title}" удалён полностью`);
         logMove('delete', title, item.category, null);
         refreshNewEpisodesBadge();
@@ -697,28 +706,54 @@
         return changed;
     }
 
-    function isLastEpisodeOfLastSeason(baseId, season, episode) {
-        const timetableData = Lampa.TimeTable?.all() || [];
-        const showData = timetableData.find(d => d.id == baseId);
-        
-        if (!showData || !showData.season || !showData.episodes?.length) {
-            return false;
+    function isLastEpisodeOfLastSeason(baseId, season, episode, callback) {
+        // Пробуем получить эпизоды из кэша IndexedDB
+        if (typeof Lampa !== 'undefined' && Lampa.Cache && typeof Lampa.Cache.getData === 'function') {
+            Lampa.Cache.getData('timetable', baseId).then(data => {
+                if (data && data.episodes && data.episodes.length) {
+                    const episodes = data.episodes;
+                    let maxSeason = 0;
+                    let lastEpNum = 0;
+                    
+                    episodes.forEach(ep => {
+                        if (ep.season_number > maxSeason) {
+                            maxSeason = ep.season_number;
+                            lastEpNum = 0;
+                        }
+                        if (ep.season_number === maxSeason && ep.episode_number > lastEpNum) {
+                            lastEpNum = ep.episode_number;
+                        }
+                    });
+                    
+                    callback(season >= maxSeason && episode >= lastEpNum);
+                } else {
+                    // Fallback: пробуем через TimeTable.next
+                    fallbackCheck();
+                }
+            }).catch(() => {
+                fallbackCheck();
+            });
+        } else {
+            fallbackCheck();
         }
         
-        // Текущий сезон должен быть последним
-        if (season !== showData.season) {
-            return false;
-        }
-        
-        // Ищем последний эпизод
-        let lastEpNum = 0;
-        showData.episodes.forEach(ep => {
-            if (ep.episode_number > lastEpNum) {
-                lastEpNum = ep.episode_number;
+        function fallbackCheck() {
+            const timetableData = Lampa.TimeTable?.all() || [];
+            const showData = timetableData.find(d => d.id == baseId);
+            
+            if (showData && showData.next) {
+                callback(season >= showData.next.season_number && episode >= showData.next.episode_number);
+            } else {
+                // Последняя проверка: через сохранённый last_episode_to_air
+                const seriesCheck = getSeriesCheck();
+                const checkData = seriesCheck[baseId];
+                if (checkData && checkData.last_season_number > 0) {
+                    callback(season >= checkData.last_season_number);
+                } else {
+                    callback(false);
+                }
             }
-        });
-        
-        return episode >= lastEpNum;
+        }
     }
 
     function getCardDataFromActivity(tmdbId) {
@@ -742,6 +777,15 @@
         const timeline = getTimeline();
         const favorites = getFavorites();
         let changed = false;
+        let pendingChecks = 0;
+        
+        function checkDone() {
+            pendingChecks--;
+            if (pendingChecks <= 0 && changed) {
+                saveFavorites(favorites);
+                refreshNewEpisodesBadge();
+            }
+        }
         
         for (const [key, item] of Object.entries(timeline)) {
             const tmdbId = item.tmdb_id;
@@ -782,35 +826,42 @@
             
             // Авто в Просмотрено
             if (c.auto_watched && !existingWatched && percent >= c.watched_min_progress) {
-                let shouldMove = false;
-                
                 if (!isSeries) {
-                    shouldMove = true;
+                    // Фильмы — сразу в просмотрено
+                    moveToWatched();
                 } else {
+                    // Сериалы — проверяем через isLastEpisodeOfLastSeason
                     const match = key.match(/_s(\d+)_e(\d+)/);
                     if (match) {
-                        shouldMove = isLastEpisodeOfLastSeason(baseId, parseInt(match[1]), parseInt(match[2]));
+                        pendingChecks++;
+                        isLastEpisodeOfLastSeason(baseId, parseInt(match[1]), parseInt(match[2]), (isLast) => {
+                            if (isLast) {
+                                moveToWatched();
+                            }
+                            checkDone();
+                        });
                     }
                 }
-                
-                if (shouldMove) {
-                    if (existingWatching) {
-                        existingWatching.category = 'watched'; existingWatching.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watched', favorites);
-                        logMove('auto_watched', title, 'watching', 'watched'); changed = true;
-                    } else if (existingPlanned) {
-                        existingPlanned.category = 'watched'; existingPlanned.updated = Date.now();
-                        applyCategoryRules(tmdbId, 'watched', favorites);
-                        logMove('auto_watched', title, 'planned', 'watched'); changed = true;
-                    } else {
-                        favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watched', data: getCardDataFromActivity(tmdbId), added: Date.now(), updated: Date.now() });
-                        logMove('auto_watched', title, null, 'watched'); changed = true;
-                    }
+            }
+            
+            function moveToWatched() {
+                if (existingWatching) {
+                    existingWatching.category = 'watched'; existingWatching.updated = Date.now();
+                    applyCategoryRules(tmdbId, 'watched', favorites);
+                    logMove('auto_watched', title, 'watching', 'watched'); changed = true;
+                } else if (existingPlanned) {
+                    existingPlanned.category = 'watched'; existingPlanned.updated = Date.now();
+                    applyCategoryRules(tmdbId, 'watched', favorites);
+                    logMove('auto_watched', title, 'planned', 'watched'); changed = true;
+                } else if (!existingWatched && !existingWatching && !existingPlanned) {
+                    favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watched', data: getCardDataFromActivity(tmdbId), added: Date.now(), updated: Date.now() });
+                    logMove('auto_watched', title, null, 'watched'); changed = true;
                 }
             }
         }
         
-        if (changed) {
+        // Если нет отложенных проверок — сохраняем сразу
+        if (pendingChecks === 0 && changed) {
             saveFavorites(favorites);
             refreshNewEpisodesBadge();
         }
@@ -854,32 +905,50 @@
             const movie = activity.movie;
             const tmdbId = extractTmdbId(movie);
             if (!tmdbId) return null;
+            
+            // 1. Из playdata (сторонние источники могут передавать)
             const playerData = Lampa.Player.playdata();
-            
-            // Всегда пытаемся получить season/episode из playdata
-            const season = playerData?.season;
-            const episode = playerData?.episode;
-            
-            if (season || episode) {
-                return `${tmdbId}_s${season || 1}_e${episode || 1}`;
+            if (playerData?.season || playerData?.episode) {
+                return `${tmdbId}_s${playerData.season || 1}_e${playerData.episode || 1}`;
             }
             
-            // Если нет в playdata, проверяем video элемент
+            // 2. Из Playlist Lampa (название текущего элемента плейлиста)
+            try {
+                if (typeof Lampa.Playlist !== 'undefined' && typeof Lampa.Playlist.get === 'function') {
+                    const playlist = Lampa.Playlist.get();
+                    if (playlist && playlist.length) {
+                        // Ищем активный элемент плейлиста
+                        const current = playlist.find(p => p.active || p.current) || playlist[0];
+                        if (current) {
+                            // Парсим из URL или title
+                            const urlMatch = (current.url || '').match(/[Ss](\d+)[Ee](\d+)/);
+                            if (urlMatch) {
+                                return `${tmdbId}_s${urlMatch[1]}_e${urlMatch[2]}`;
+                            }
+                            const titleMatch = (current.title || '').match(/[Ss](\d+)[Ee](\d+)/);
+                            if (titleMatch) {
+                                return `${tmdbId}_s${titleMatch[1]}_e${titleMatch[2]}`;
+                            }
+                        }
+                    }
+                }
+            } catch(e) {}
+            
+            // 3. Из video.src
             const video = document.querySelector('video');
             if (video && video.src) {
-                // Пытаемся извлечь из пути файла
                 const match = video.src.match(/[Ss](\d+)[Ee](\d+)/);
                 if (match) {
                     return `${tmdbId}_s${match[1]}_e${match[2]}`;
                 }
             }
             
-            // Для фильмов — просто tmdbId
+            // 4. Для фильмов — просто tmdbId
             if (!movie.original_name) {
                 return String(tmdbId);
             }
             
-            // Для сериалов без информации — не сохраняем
+            // 5. Для сериалов без информации — не сохраняем
             return null;
         } catch (e) { return null; }
     }
@@ -945,6 +1014,7 @@
         let lastSyncToGist = 0;
         let checkCount = 0;
         let lastMovieKey = null;
+        let currentBaseId = null;
         
         if (playerInterval) clearInterval(playerInterval);
         
@@ -962,6 +1032,7 @@
                 returnedToWatchingMap = {};
                 videoDuration = getVideoDuration();
                 lastMovieKey = null;
+                currentBaseId = null;
                 checkCount = 0;
             }
             
@@ -979,6 +1050,7 @@
                 lastSavedProgress = 0;
                 videoDuration = 0;
                 lastMovieKey = null;
+                currentBaseId = null;
             }
             
             wasActive = isActive;
@@ -998,10 +1070,24 @@
             
             // Обнаружили смену серии/фильма
             if (movieKey && movieKey !== lastMovieKey) {
+                // Очищаем блокировку для предыдущего фильма при смене серии
+                if (currentBaseId && movieKey.indexOf(currentBaseId) === 0) {
+                    // Та же карточка, просто другая серия — не сбрасываем returnedToWatchingMap
+                } else {
+                    // Новая карточка — сбрасываем
+                    returnedToWatchingMap = {};
+                }
+                
                 lastMovieKey = movieKey;
                 currentMovieKey = movieKey;
                 lastSavedProgress = 0;
                 videoDuration = getVideoDuration();
+                
+                // Сохраняем текущий baseId
+                const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
+                if (tmdbId) {
+                    currentBaseId = getBaseTmdbId(tmdbId);
+                }
             }
             
             // Сохраняем прогресс
@@ -1817,34 +1903,79 @@
         const seriesCheck = getSeriesCheck();
         const now = Date.now();
         const checkInterval = (c.new_episodes_check_interval || 24) * 60 * 60 * 1000;
-        const seriesToCheck = favorites.filter(f => (f.category === 'watching' || f.category === 'planned') && (f.media_type === 'tv' || f.data?.original_name));
-        let checkCount = 0, newFound = 0;
+        
+        // Фильтруем сериалы из watching и planned
+        const seriesToCheck = favorites.filter(f => 
+            (f.category === 'watching' || f.category === 'planned') && 
+            (f.media_type === 'tv' || f.data?.original_name)
+        );
+        
+        if (seriesToCheck.length === 0) {
+            if (showNotifyFlag) notify('Нет сериалов для проверки');
+            return;
+        }
+        
+        let checkCount = 0;
+        let newFound = 0;
+        let completedChecks = 0;
+        
         seriesToCheck.forEach(item => {
             const baseId = getBaseTmdbId(item.tmdb_id);
             if (!baseId) return;
+            
             const lastCheck = seriesCheck[baseId]?.checked_at || 0;
-            if (now - lastCheck < checkInterval) { if (seriesCheck[baseId]?.has_new) newFound++; return; }
+            const lastError = seriesCheck[baseId]?.error;
+            
+            // Если проверяли недавно и нет ошибки — пропускаем
+            if (now - lastCheck < checkInterval && !lastError) {
+                if (seriesCheck[baseId]?.has_new) newFound++;
+                completedChecks++;
+                return;
+            }
+            
             checkCount++;
             const tmdbId = baseId;
+            
             try {
                 if (typeof Lampa.TMDB !== 'undefined' && Lampa.TMDB.api) {
                     const url = Lampa.TMDB.api('tv/' + tmdbId + '?api_key=' + Lampa.TMDB.key());
+                    
                     $.ajax({
-                        url, method: 'GET', timeout: 10000,
+                        url,
+                        method: 'GET',
+                        timeout: 10000,
                         success: (data) => {
+                            completedChecks++;
                             const newSeasons = data.number_of_seasons || 0;
                             const oldSeasons = seriesCheck[baseId]?.seasons_count || item.data?.number_of_seasons || 0;
                             const hasNew = newSeasons > oldSeasons && oldSeasons > 0;
                             const lastSeason = data.seasons ? data.seasons[data.seasons.length - 1] : null;
                             const totalEpisodes = lastSeason ? lastSeason.episode_count || 0 : 0;
                             const airedEpisodes = lastSeason ? countAiredEpisodes(lastSeason) : 0;
-                            seriesCheck[baseId] = { checked_at: now, seasons_count: newSeasons, old_seasons: oldSeasons, new_seasons: newSeasons, has_new: hasNew, last_air_date: data.last_air_date || '', title: data.name || item.data?.title || item.data?.name || '', total_episodes: totalEpisodes, aired_episodes: airedEpisodes, last_season_number: lastSeason ? lastSeason.season_number : 0 };
+                            
+                            seriesCheck[baseId] = {
+                                checked_at: now,
+                                seasons_count: newSeasons,
+                                old_seasons: oldSeasons,
+                                new_seasons: newSeasons,
+                                has_new: hasNew,
+                                last_air_date: data.last_air_date || '',
+                                title: data.name || item.data?.title || item.data?.name || '',
+                                total_episodes: totalEpisodes,
+                                aired_episodes: airedEpisodes,
+                                last_season_number: lastSeason ? lastSeason.season_number : 0,
+                                error: false
+                            };
+                            
+                            // Обновляем данные в избранном
                             if (data.number_of_seasons && data.number_of_seasons !== item.data?.number_of_seasons) {
                                 item.data.number_of_seasons = data.number_of_seasons;
                                 item.data.number_of_episodes = data.number_of_episodes;
                                 item.data.last_air_date = data.last_air_date;
+                                item.updated = now;
                                 saveFavorites(favorites);
                             }
+                            
                             if (hasNew) {
                                 newFound++;
                                 if (c.new_episodes_notify && showNotifyFlag) {
@@ -1853,19 +1984,50 @@
                                     notify(`🔔 Новый сезон: "${title}" S${newSeasons}${epInfo}`);
                                 }
                             }
+                            
                             saveSeriesCheck(seriesCheck);
                             refreshNewEpisodesBadge();
+                            checkFinalNotify();
                         },
                         error: () => {
-                            seriesCheck[baseId] = { checked_at: now, seasons_count: item.data?.number_of_seasons || 0, old_seasons: item.data?.number_of_seasons || 0, new_seasons: item.data?.number_of_seasons || 0, has_new: false, last_air_date: item.data?.last_air_date || '', title: item.data?.title || item.data?.name || '', total_episodes: 0, aired_episodes: 0, error: true };
+                            completedChecks++;
+                            seriesCheck[baseId] = {
+                                checked_at: now,
+                                seasons_count: item.data?.number_of_seasons || 0,
+                                old_seasons: item.data?.number_of_seasons || 0,
+                                new_seasons: item.data?.number_of_seasons || 0,
+                                has_new: false,
+                                last_air_date: item.data?.last_air_date || '',
+                                title: item.data?.title || item.data?.name || '',
+                                total_episodes: seriesCheck[baseId]?.total_episodes || 0,
+                                aired_episodes: seriesCheck[baseId]?.aired_episodes || 0,
+                                last_season_number: seriesCheck[baseId]?.last_season_number || 0,
+                                error: true
+                            };
                             saveSeriesCheck(seriesCheck);
+                            checkFinalNotify();
                         }
                     });
+                } else {
+                    completedChecks++;
                 }
-            } catch (e) { console.error('[NSL] Error checking episodes:', e); }
+            } catch (e) {
+                completedChecks++;
+                console.error('[NSL] Error checking episodes:', e);
+            }
         });
-        if (showNotifyFlag && newFound > 0) notify(`🔔 Найдено новых серий: ${newFound}`);
-        else if (showNotifyFlag && checkCount > 0 && newFound === 0) notify('✅ Новых серий нет');
+        
+        function checkFinalNotify() {
+            if (completedChecks >= seriesToCheck.length) {
+                if (showNotifyFlag) {
+                    if (checkCount > 0 && newFound > 0) {
+                        notify(`🔔 Найдено новых серий: ${newFound}`);
+                    } else if (checkCount > 0 && newFound === 0) {
+                        notify('✅ Новых серий нет');
+                    }
+                }
+            }
+        }
     }
 
     function checkUpcomingEpisodes() {
@@ -1874,8 +2036,9 @@
         
         const seriesCheck = getSeriesCheck();
         const favorites = getFavorites();
-        const now = Date.now();
-        const tomorrow = now + 24 * 60 * 60 * 1000;
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const tomorrow = today + 24 * 60 * 60 * 1000;
         
         const upcoming = [];
         
@@ -1884,13 +2047,17 @@
             if (!data.last_air_date) continue;
             
             try {
-                const airDate = new Date(data.last_air_date).getTime();
-                if (airDate > now && airDate < tomorrow) {
+                const airDate = new Date(data.last_air_date);
+                const airTime = new Date(airDate.getFullYear(), airDate.getMonth(), airDate.getDate()).getTime();
+                
+                // Проверяем: дата выхода — сегодня или завтра
+                if (airTime >= today && airTime < tomorrow) {
                     const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === key);
                     if (item && (item.category === 'watching' || item.category === 'planned')) {
                         upcoming.push({
                             title: data.title || item.data?.title || item.data?.name || 'Без названия',
-                            date: data.last_air_date
+                            date: data.last_air_date,
+                            hasNew: data.has_new
                         });
                     }
                 }
@@ -1898,8 +2065,38 @@
         }
         
         if (upcoming.length > 0) {
-            const titles = upcoming.slice(0, 3).map(u => `"${u.title}"`).join(', ');
-            notify(`📅 Премьера сегодня: ${titles}`);
+            // Разделяем на "сегодня" и "завтра"
+            const todayList = upcoming.filter(u => {
+                const d = new Date(u.date);
+                return d.getFullYear() === now.getFullYear() && 
+                       d.getMonth() === now.getMonth() && 
+                       d.getDate() === now.getDate();
+            });
+            const tomorrowList = upcoming.filter(u => {
+                const d = new Date(u.date);
+                const tomorrow = new Date(now);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                return d.getFullYear() === tomorrow.getFullYear() && 
+                       d.getMonth() === tomorrow.getMonth() && 
+                       d.getDate() === tomorrow.getDate();
+            });
+            
+            if (todayList.length > 0) {
+                const titles = todayList.slice(0, 3).map(u => {
+                    const emoji = u.hasNew ? '🔔 ' : '';
+                    return emoji + '"' + u.title + '"';
+                }).join(', ');
+                notify(`📅 Премьера сегодня: ${titles}${todayList.length > 3 ? ' и ещё ' + (todayList.length - 3) : ''}`);
+            }
+            if (tomorrowList.length > 0) {
+                setTimeout(() => {
+                    const titles = tomorrowList.slice(0, 3).map(u => {
+                        const emoji = u.hasNew ? '🔔 ' : '';
+                        return emoji + '"' + u.title + '"';
+                    }).join(', ');
+                    notify(`📅 Завтра: ${titles}${tomorrowList.length > 3 ? ' и ещё ' + (tomorrowList.length - 3) : ''}`);
+                }, 3000);
+            }
         }
     }
     
