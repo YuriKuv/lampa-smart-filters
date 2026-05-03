@@ -2152,8 +2152,8 @@
                 const episodeStr = totalEpisodesInSeason > 0 ? `Серия ${currentEpisode} из ${totalEpisodesInSeason}` : `Серия ${currentEpisode}`;
                 const timeStr = formatTimeShort(timelineItem.time) + (timelineItem.duration > 0 ? ` из ${formatTimeShort(timelineItem.duration)}` : '');
                 
-                line1 += `: ${seasonStr}; ${episodeStr}`;
-                line2 = timeStr;
+                line1 += `: ${seasonStr}`;
+                line2 = `${episodeStr}; ${timeStr}`;
             }
         }
         
