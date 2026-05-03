@@ -709,8 +709,13 @@
             if (!tmdbId) continue;
             const baseId = getBaseTmdbId(tmdbId);
             const percent = item.percent || 0;
+            
+            // НЕ трогаем заброшенные
             const isAbandoned = favorites.some(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'abandoned');
             if (isAbandoned) continue;
+            
+            // НЕ трогаем то, что пользователь вручную вернул в Смотрю
+            if (returnedToWatchingMap[baseId]) continue;
             
             const existingWatching = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watching');
             const existingWatched = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watched');
@@ -722,8 +727,8 @@
             const isSeries = key.includes('_s') || key.includes('_e');
             const mediaType = isSeries ? 'tv' : 'movie';
             
-            // Проверяем, является ли эта серия последней в последнем сезоне
-            let isLastEpisode = false;
+            // Для сериалов — проверяем, последняя ли это серия
+            let isLastEpisode = !isSeries; // Для фильмов всегда true
             
             if (isSeries) {
                 const match = key.match(/_s(\d+)_e(\d+)/);
@@ -731,39 +736,24 @@
                     const currentSeason = parseInt(match[1]);
                     const currentEpisode = parseInt(match[2]);
                     
-                    // Получаем данные о сезонах через TimeTable
                     const timetableData = Lampa.TimeTable?.all() || [];
                     const showData = timetableData.find(d => d.id == baseId);
                     
                     if (showData && showData.season > 0) {
-                        // showData.season — это номер последнего сезона
-                        // showData.episodes — эпизоды последнего сезона
                         if (currentSeason === showData.season && showData.episodes.length > 0) {
-                            // Ищем последний эпизод (с максимальным номером)
                             let lastEpNum = 0;
                             showData.episodes.forEach(ep => {
-                                if (ep.episode_number > lastEpNum) {
-                                    lastEpNum = ep.episode_number;
-                                }
+                                if (ep.episode_number > lastEpNum) lastEpNum = ep.episode_number;
                             });
-                            
-                            if (currentEpisode >= lastEpNum) {
-                                isLastEpisode = true;
-                            }
+                            if (currentEpisode >= lastEpNum) isLastEpisode = true;
                         }
-                    } else if (cardData.number_of_seasons && cardData.number_of_episodes) {
-                        // Если TimeTable пуст, используем данные из карточки
-                        if (currentSeason === cardData.number_of_seasons) {
-                            isLastEpisode = true;
-                        }
+                    } else if (cardData.number_of_seasons) {
+                        if (currentSeason === cardData.number_of_seasons) isLastEpisode = true;
                     }
                 }
-            } else {
-                // Для фильмов — всегда может перемещаться
-                isLastEpisode = true;
             }
             
-            // Авто в Просмотрено — только для последней серии
+            // В Просмотрено — только последняя серия с высоким прогрессом, и только если ещё не в просмотрено
             if (c.auto_watched && !existingWatched && percent >= c.watched_min_progress && isLastEpisode) {
                 if (existingWatching) {
                     existingWatching.category = 'watched'; existingWatching.updated = Date.now();
@@ -773,18 +763,11 @@
                     existingPlanned.category = 'watched'; existingPlanned.updated = Date.now();
                     applyCategoryRules(tmdbId, 'watched', favorites);
                     logMove('auto_watched', title, 'planned', 'watched'); changed = true;
-                } else if (existingFavorite) {
-                    existingFavorite.category = 'watched'; existingFavorite.updated = Date.now();
-                    applyCategoryRules(tmdbId, 'watched', favorites);
-                    logMove('auto_watched', title, 'favorite', 'watched'); changed = true;
-                } else {
-                    favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watched', data: cardData, added: Date.now(), updated: Date.now() });
-                    logMove('auto_watched', title, null, 'watched'); changed = true;
                 }
                 continue;
             }
             
-            // Авто в Смотрю — любая серия с прогрессом
+            // В Смотрю — любая серия с прогрессом
             if (c.auto_watching && !existingWatching && !existingWatched && percent >= c.watching_min_progress && percent <= c.watching_max_progress) {
                 if (existingPlanned) {
                     existingPlanned.category = 'watching'; existingPlanned.updated = Date.now();
