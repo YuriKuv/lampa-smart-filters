@@ -76,6 +76,7 @@
     let gistSyncingTime = false;
     let gistSyncingBook = false;
     let gistSyncingHis = false;
+    let syncingFromGist = false;
 
     function cfg() {
         return Lampa.Storage.get(CFG, {
@@ -2642,7 +2643,7 @@
                 
                 // Очищаем предыдущий обработчик
                 if (this._nslUnsubscribe) {
-                    Lampa.Listener.remove('state:changed', this._nslUnsubscribe);
+                    Lampa.Listener.unfollow('state:changed', this._nslUnsubscribe);
                 }
                 
                 Lampa.Listener.follow('state:changed', handler);
@@ -2652,7 +2653,7 @@
             // Добавляем очистку при разрушении карточки
             cardMap.Watched.onDestroy = function() {
                 if (this._nslUnsubscribe) {
-                    Lampa.Listener.remove('state:changed', this._nslUnsubscribe);
+                    Lampa.Listener.unfollow('state:changed', this._nslUnsubscribe);
                     this._nslUnsubscribe = null;
                 }
                 if (origDestroy) origDestroy.call(this);
@@ -2728,8 +2729,6 @@
             timeout: 15000, crossDomain: true
         });
     }
-
-    let syncingFromGist = false;
     
     function syncFromGist(showNotify) {
         const gist = getGistData();
@@ -3293,7 +3292,63 @@
             onBack: () => showMainMenu()
         });
     }
-
+    
+    function clearAllTimeline() {
+        Lampa.Select.show({
+            title: '⚠️ Очистить все таймкоды?',
+            items: [
+                { title: '✅ Да, очистить всё', action: 'confirm' },
+                { title: '❌ Отмена', action: 'cancel' }
+            ],
+            onSelect: (opt) => { 
+                if (opt.action === 'confirm') { 
+                    saveTimeline({});
+                    notify('🗑️ Все таймкоды очищены');
+                    const c = cfg();
+                    if (c.sync_on_remove && c.gist_token && c.gist_id) syncToGist('timeline', false);
+                } 
+            },
+            onBack: () => Lampa.Controller.toggle('content')
+        });
+    }
+    
+    function cleanupTimeline() {
+        const c = cfg();
+        const timeline = getTimeline();
+        const now = Date.now();
+        let removed = 0;
+        
+        // Удаление старых таймкодов
+        if (c.cleanup_older_days > 0) {
+            const olderThan = c.cleanup_older_days * 24 * 60 * 60 * 1000;
+            for (const key in timeline) {
+                const updated = timeline[key]?.updated || 0;
+                if (updated > 0 && (now - updated) > olderThan) {
+                    delete timeline[key];
+                    removed++;
+                }
+            }
+        }
+        
+        // Удаление завершённых таймкодов (>= 95%)
+        if (c.cleanup_completed) {
+            for (const key in timeline) {
+                const percent = timeline[key]?.percent || 0;
+                if (percent >= 95) {
+                    delete timeline[key];
+                    removed++;
+                }
+            }
+        }
+        
+        if (removed > 0) {
+            saveTimeline(timeline);
+            notify(`🧹 Удалено таймкодов: ${removed}`);
+        } else {
+            notify('✅ Нечего очищать');
+        }
+    }
+    
     function getSyncStatus() {
         const lastSync = Lampa.Storage.get(GIST_CACHE + '_last_sync', 0);
         if (!lastSync) return 'Никогда';
