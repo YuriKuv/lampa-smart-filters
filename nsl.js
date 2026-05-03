@@ -2043,10 +2043,8 @@
                     right: 0.8em;
                     z-index: 5;
                     display: flex;
-                    flex-wrap: wrap;
-                    align-items: center;
-                    justify-content: center;
-                    gap: 0.2em 0.5em;
+                    align-items: flex-start;
+                    gap: 0.4em;
                     padding: 0.5em 0.8em;
                     background: rgba(0,0,0,0.75);
                     backdrop-filter: blur(4px);
@@ -2055,11 +2053,9 @@
                     pointer-events: none;
                     font-size: 0.7em;
                     line-height: 1.5;
-                    white-space: normal;
-                    text-align: center;
                 }
-                .nsl-card-status__icon { flex-shrink: 0; font-size: 1.2em; line-height: 1; }
-                .nsl-card-status__text { color: #fff; font-weight: 500; text-align: center; width: 100%; }
+                .nsl-card-status__icon { flex-shrink: 0; font-size: 1.2em; line-height: 1; margin-top: 0.1em; }
+                .nsl-card-status__text { color: #fff; font-weight: 500; text-align: left; flex: 1; min-width: 0; }
                 .nsl-card-status__time { color: rgba(255,255,255,0.8); font-size: 0.9em; }
                 .nsl-card-status--top { top: 0.5em; bottom: auto; }
                 .nsl-card-status--center { top: 50%; bottom: auto; transform: translateY(-50%); }
@@ -2133,45 +2129,35 @@
     function updateCardStatusElementWithTime(cardElement, cardData, status, timelineItem, bestKey) {
         let existing = cardElement.querySelector('.nsl-card-status');
         
-        let iconHtml = '';
-        let textHtml = '';
-        let timeHtml = '';
-        
-        if (status) {
-            iconHtml = `<span class="nsl-card-status__icon" style="color:${status.color}">${status.icon}</span>`;
-            
-            let line1 = status.text;
-            let line2 = '';
-            
-            if (timelineItem && timelineItem.time > 0 && bestKey) {
-                const match = bestKey.match(/_s(\d+)_e(\d+)/);
-                if (match) {
-                    const seriesInfo = getSeriesInfo(extractTmdbId(cardData));
-                    const totalSeasons = seriesInfo.totalSeasons;
-                    const totalEpisodesInSeason = seriesInfo.totalEpisodesInSeason;
-                    const currentSeason = parseInt(match[1]);
-                    const currentEpisode = parseInt(match[2]);
-                    
-                    let seasonStr = totalSeasons > 0 ? `Сезон ${currentSeason} из ${totalSeasons}` : `Сезон ${currentSeason}`;
-                    let episodeStr = totalEpisodesInSeason > 0 ? `Серия ${currentEpisode} из ${totalEpisodesInSeason}` : `Серия ${currentEpisode}`;
-                    let timeStr = formatTimeShort(timelineItem.time);
-                    if (timelineItem.duration > 0) {
-                        timeStr += ` из ${formatTimeShort(timelineItem.duration)}`;
-                    }
-                    
-                    line1 += `: ${seasonStr}; ${episodeStr}`;
-                    line2 = timeStr;
-                }
-            }
-            
-            textHtml = `<span class="nsl-card-status__text">${line1}<br>${line2}</span>`;
-        }
-        
         if (!status) {
             if (existing) existing.remove();
             return;
         }
         
+        let iconHtml = `<span class="nsl-card-status__icon" style="color:${status.color}">${status.icon}</span>`;
+        
+        let line1 = status.text;
+        let line2 = '';
+        
+        if (timelineItem && timelineItem.time > 0 && bestKey) {
+            const match = bestKey.match(/_s(\d+)_e(\d+)/);
+            if (match) {
+                const seriesInfo = getSeriesInfo(extractTmdbId(cardData));
+                const totalSeasons = seriesInfo.totalSeasons;
+                const totalEpisodesInSeason = seriesInfo.totalEpisodesInSeason;
+                const currentSeason = parseInt(match[1]);
+                const currentEpisode = parseInt(match[2]);
+                
+                const seasonStr = totalSeasons > 0 ? `Сезон ${currentSeason} из ${totalSeasons}` : `Сезон ${currentSeason}`;
+                const episodeStr = totalEpisodesInSeason > 0 ? `Серия ${currentEpisode} из ${totalEpisodesInSeason}` : `Серия ${currentEpisode}`;
+                const timeStr = formatTimeShort(timelineItem.time) + (timelineItem.duration > 0 ? ` из ${formatTimeShort(timelineItem.duration)}` : '');
+                
+                line1 += `: ${seasonStr}; ${episodeStr}`;
+                line2 = timeStr;
+            }
+        }
+        
+        const textHtml = `<span class="nsl-card-status__text">${line1}<br>${line2}</span>`;
         const contentHtml = iconHtml + textHtml;
         
         if (existing) {
@@ -2184,13 +2170,12 @@
             const viewEl = cardElement.querySelector('.card__view');
             if (viewEl) {
                 viewEl.appendChild(div);
-                existing = div;
             } else {
                 return;
             }
         }
         
-        updateCardStatusPosition(existing);
+        updateCardStatusPosition(cardElement.querySelector('.nsl-card-status'));
     }
     
     function formatTimeShort(seconds) {
