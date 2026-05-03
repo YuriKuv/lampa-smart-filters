@@ -1024,9 +1024,11 @@
                 saveFavorites(favorites);
                 refreshNewEpisodesBadge();
             }
-            syncTimelineRunning = false;
+                syncTimelineRunning = false;
+            }
         }
-    }
+        
+    } 
     
     function clearAllFavorites() {
         Lampa.Select.show({
