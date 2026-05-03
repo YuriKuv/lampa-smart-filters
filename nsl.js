@@ -818,12 +818,17 @@
         const favorites = getFavorites();
         let changed = false;
         let pendingChecks = 0;
+        let checkCompleted = false;
         
         function checkDone() {
+            if (checkCompleted) return;
             pendingChecks--;
-            if (pendingChecks <= 0 && changed) {
-                saveFavorites(favorites);
-                refreshNewEpisodesBadge();
+            if (pendingChecks <= 0) {
+                checkCompleted = true;
+                if (changed) {
+                    saveFavorites(favorites);
+                    refreshNewEpisodesBadge();
+                }
             }
         }
         
@@ -868,34 +873,64 @@
             if (c.auto_watched && !existingWatched && percent >= c.watched_min_progress) {
                 if (!isSeries) {
                     // Фильмы — сразу в просмотрено
-                    moveToWatched();
+                    if (existingWatching) {
+                        existingWatching.category = 'watched'; existingWatching.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watched', favorites);
+                        logMove('auto_watched', title, 'watching', 'watched'); changed = true;
+                    } else if (existingPlanned) {
+                        existingPlanned.category = 'watched'; existingPlanned.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watched', favorites);
+                        logMove('auto_watched', title, 'planned', 'watched'); changed = true;
+                    } else if (!existingWatched && !existingWatching && !existingPlanned) {
+                        favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watched', data: getCardDataFromActivity(tmdbId), added: Date.now(), updated: Date.now() });
+                        logMove('auto_watched', title, null, 'watched'); changed = true;
+                    }
                 } else {
                     // Сериалы — проверяем через isLastEpisodeOfLastSeason
                     const match = key.match(/_s(\d+)_e(\d+)/);
                     if (match) {
                         pendingChecks++;
+                        
+                        // Захватываем нужные переменные в замыкание
+                        const capturedBaseId = baseId;
+                        const capturedTmdbId = tmdbId;
+                        const capturedTitle = title;
+                        const capturedExistingWatching = existingWatching;
+                        const capturedExistingPlanned = existingPlanned;
+                        const capturedExistingWatched = existingWatched;
+                        const capturedMediaType = mediaType;
+                        
                         isLastEpisodeOfLastSeason(baseId, parseInt(match[1]), parseInt(match[2]), (isLast) => {
+                            // Проверяем, не изменился ли статус за время ожидания
+                            const freshFavorites = getFavorites();
+                            const freshWatched = freshFavorites.find(f => getBaseTmdbId(f.tmdb_id) === capturedBaseId && f.category === 'watched');
+                            
+                            if (freshWatched) {
+                                // Уже в просмотрено — ничего не делаем
+                                checkDone();
+                                return;
+                            }
+                            
                             if (isLast) {
-                                moveToWatched();
+                                const freshWatching = freshFavorites.find(f => getBaseTmdbId(f.tmdb_id) === capturedBaseId && f.category === 'watching');
+                                const freshPlanned = freshFavorites.find(f => getBaseTmdbId(f.tmdb_id) === capturedBaseId && f.category === 'planned');
+                                
+                                if (freshWatching) {
+                                    freshWatching.category = 'watched'; freshWatching.updated = Date.now();
+                                    applyCategoryRules(capturedTmdbId, 'watched', favorites);
+                                    logMove('auto_watched', capturedTitle, 'watching', 'watched'); changed = true;
+                                } else if (freshPlanned) {
+                                    freshPlanned.category = 'watched'; freshPlanned.updated = Date.now();
+                                    applyCategoryRules(capturedTmdbId, 'watched', favorites);
+                                    logMove('auto_watched', capturedTitle, 'planned', 'watched'); changed = true;
+                                } else if (!freshWatched) {
+                                    favorites.push({ id: Date.now(), card_id: capturedBaseId, tmdb_id: capturedBaseId, media_type: capturedMediaType, category: 'watched', data: getCardDataFromActivity(capturedTmdbId), added: Date.now(), updated: Date.now() });
+                                    logMove('auto_watched', capturedTitle, null, 'watched'); changed = true;
+                                }
                             }
                             checkDone();
                         });
                     }
-                }
-            }
-            
-            function moveToWatched() {
-                if (existingWatching) {
-                    existingWatching.category = 'watched'; existingWatching.updated = Date.now();
-                    applyCategoryRules(tmdbId, 'watched', favorites);
-                    logMove('auto_watched', title, 'watching', 'watched'); changed = true;
-                } else if (existingPlanned) {
-                    existingPlanned.category = 'watched'; existingPlanned.updated = Date.now();
-                    applyCategoryRules(tmdbId, 'watched', favorites);
-                    logMove('auto_watched', title, 'planned', 'watched'); changed = true;
-                } else if (!existingWatched && !existingWatching && !existingPlanned) {
-                    favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watched', data: getCardDataFromActivity(tmdbId), added: Date.now(), updated: Date.now() });
-                    logMove('auto_watched', title, null, 'watched'); changed = true;
                 }
             }
         }
