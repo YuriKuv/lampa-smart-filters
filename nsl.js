@@ -703,6 +703,7 @@
         const timeline = getTimeline();
         const favorites = getFavorites();
         let changed = false;
+        
         for (const [key, item] of Object.entries(timeline)) {
             const tmdbId = item.tmdb_id;
             if (!tmdbId) continue;
@@ -710,6 +711,7 @@
             const percent = item.percent || 0;
             const isAbandoned = favorites.some(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'abandoned');
             if (isAbandoned) continue;
+            
             const existingWatching = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watching');
             const existingWatched = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'watched');
             const existingPlanned = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'planned');
@@ -720,7 +722,26 @@
             const isSeries = key.includes('_s') || key.includes('_e');
             const mediaType = isSeries ? 'tv' : 'movie';
             
-            if (c.auto_watched && !existingWatched && percent >= c.watched_min_progress) {
+            // Проверяем, является ли эта серия последней в последнем сезоне
+            let isLastEpisodeOfLastSeason = false;
+            if (isSeries && cardData.number_of_seasons && cardData.number_of_episodes) {
+                const match = key.match(/_s(\d+)_e(\d+)/);
+                if (match) {
+                    const season = parseInt(match[1]);
+                    const episode = parseInt(match[2]);
+                    // Считаем, что это последняя серия если сезон совпадает с number_of_seasons
+                    // и нет информации о количестве эпизодов в сезоне (number_of_episodes общее)
+                    if (season === cardData.number_of_seasons) {
+                        isLastEpisodeOfLastSeason = true;
+                    }
+                }
+            } else if (!isSeries) {
+                // Для фильмов — всегда может перемещаться
+                isLastEpisodeOfLastSeason = true;
+            }
+            
+            // Авто в Просмотрено — только для последней серии последнего сезона
+            if (c.auto_watched && !existingWatched && percent >= c.watched_min_progress && isLastEpisodeOfLastSeason) {
                 if (existingWatching) {
                     existingWatching.category = 'watched'; existingWatching.updated = Date.now();
                     applyCategoryRules(tmdbId, 'watched', favorites);
@@ -740,6 +761,7 @@
                 continue;
             }
             
+            // Авто в Смотрю — любая серия с прогрессом
             if (c.auto_watching && !existingWatching && !existingWatched && percent >= c.watching_min_progress && percent <= c.watching_max_progress) {
                 if (existingPlanned) {
                     existingPlanned.category = 'watching'; existingPlanned.updated = Date.now();
