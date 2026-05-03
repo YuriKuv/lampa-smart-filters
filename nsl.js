@@ -2054,8 +2054,16 @@
                     font-size: 0.7em;
                     line-height: 1.5;
                 }
-                .nsl-card-status__icon { flex-shrink: 0; font-size: 1.2em; line-height: 1; margin-top: 0.1em; }
-                .nsl-card-status__text { color: #fff; font-weight: 500; text-align: left; flex: 1; min-width: 0; }
+                .nsl-card-status__icon { flex-shrink: 0; font-size: 1.2em; line-height: 1.5; }
+                .nsl-card-status__text { 
+                    color: #fff; 
+                    font-weight: 500; 
+                    text-align: left; 
+                    flex: 1; 
+                    min-width: 0; 
+                    display: flex;
+                    flex-direction: column;
+                }
                 .nsl-card-status__time { color: rgba(255,255,255,0.8); font-size: 0.9em; }
                 .nsl-card-status--top { top: 0.5em; bottom: auto; }
                 .nsl-card-status--center { top: 50%; bottom: auto; transform: translateY(-50%); }
@@ -2148,8 +2156,8 @@
                 const currentSeason = parseInt(match[1]);
                 const currentEpisode = parseInt(match[2]);
                 
-                const seasonStr = totalSeasons > 0 ? `Сез. ${currentSeason} из ${totalSeasons}` : `Сез. ${currentSeason}`;
-                const episodeStr = totalEpisodesInSeason > 0 ? `Сер. ${currentEpisode} из ${totalEpisodesInSeason}` : `Сер. ${currentEpisode}`;
+                const seasonStr = totalSeasons > 0 ? `Сезон ${currentSeason} из ${totalSeasons}` : `Сезон ${currentSeason}`;
+                const episodeStr = totalEpisodesInSeason > 0 ? `Серия ${currentEpisode} из ${totalEpisodesInSeason}` : `Серия ${currentEpisode}`;
                 const timeStr = formatTimeShort(timelineItem.time) + (timelineItem.duration > 0 ? ` из ${formatTimeShort(timelineItem.duration)}` : '');
                 
                 line1 += `: ${seasonStr}`;
@@ -2157,7 +2165,7 @@
             }
         }
         
-        const textHtml = `<span class="nsl-card-status__text">${line1}<br>${line2}</span>`;
+        const textHtml = `<span class="nsl-card-status__text"><span>${line1}</span><span>${line2}</span></span>`;
         const contentHtml = iconHtml + textHtml;
         
         if (existing) {
