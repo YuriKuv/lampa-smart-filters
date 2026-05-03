@@ -722,26 +722,31 @@
             const isSeries = key.includes('_s') || key.includes('_e');
             const mediaType = isSeries ? 'tv' : 'movie';
             
-            // Проверяем, является ли эта серия последней в последнем сезоне
-            let isLastEpisodeOfLastSeason = false;
-            if (isSeries && cardData.number_of_seasons && cardData.number_of_episodes) {
-                const match = key.match(/_s(\d+)_e(\d+)/);
-                if (match) {
-                    const season = parseInt(match[1]);
-                    const episode = parseInt(match[2]);
-                    // Считаем, что это последняя серия если сезон совпадает с number_of_seasons
-                    // и нет информации о количестве эпизодов в сезоне (number_of_episodes общее)
-                    if (season === cardData.number_of_seasons) {
-                        isLastEpisodeOfLastSeason = true;
+            // Для сериалов — НИКОГДА не перемещаем в watched автоматически
+            // Только в watching при начале просмотра
+            if (isSeries) {
+                // Авто в Смотрю — любая серия с прогрессом
+                if (c.auto_watching && !existingWatching && !existingWatched && percent >= c.watching_min_progress && percent <= c.watching_max_progress) {
+                    if (existingPlanned) {
+                        existingPlanned.category = 'watching'; existingPlanned.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watching', favorites);
+                        logMove('auto_watching', title, 'planned', 'watching'); changed = true;
+                    } else if (existingFavorite) {
+                        existingFavorite.category = 'watching'; existingFavorite.updated = Date.now();
+                        applyCategoryRules(tmdbId, 'watching', favorites);
+                        logMove('auto_watching', title, 'favorite', 'watching'); changed = true;
+                    } else {
+                        favorites.push({ id: Date.now(), card_id: baseId, tmdb_id: baseId, media_type: mediaType, category: 'watching', data: cardData, added: Date.now(), updated: Date.now() });
+                        logMove('auto_watching', title, null, 'watching'); changed = true;
                     }
                 }
-            } else if (!isSeries) {
-                // Для фильмов — всегда может перемещаться
-                isLastEpisodeOfLastSeason = true;
+                
+                // Для сериалов НЕ перемещаем в watched — это делается только вручную
+                continue;
             }
             
-            // Авто в Просмотрено — только для последней серии последнего сезона
-            if (c.auto_watched && !existingWatched && percent >= c.watched_min_progress && isLastEpisodeOfLastSeason) {
+            // Для фильмов — работаем как раньше
+            if (c.auto_watched && !existingWatched && percent >= c.watched_min_progress) {
                 if (existingWatching) {
                     existingWatching.category = 'watched'; existingWatching.updated = Date.now();
                     applyCategoryRules(tmdbId, 'watched', favorites);
@@ -761,7 +766,6 @@
                 continue;
             }
             
-            // Авто в Смотрю — любая серия с прогрессом
             if (c.auto_watching && !existingWatching && !existingWatched && percent >= c.watching_min_progress && percent <= c.watching_max_progress) {
                 if (existingPlanned) {
                     existingPlanned.category = 'watching'; existingPlanned.updated = Date.now();
