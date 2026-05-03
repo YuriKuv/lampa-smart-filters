@@ -2048,18 +2048,19 @@
                     right: 0.8em;
                     z-index: 5;
                     display: flex;
+                    flex-wrap: wrap;
                     align-items: center;
-                    gap: 0.5em;
+                    gap: 0.3em 0.5em;
                     padding: 0.4em 0.8em;
                     background: rgba(0,0,0,0.75);
                     backdrop-filter: blur(4px);
                     -webkit-backdrop-filter: blur(4px);
                     border-radius: 0.5em;
                     pointer-events: none;
-                    font-size: 0.75em;
-                    line-height: 1.3;
-                    white-space: nowrap;
-                    overflow: hidden;
+                    font-size: 0.7em;
+                    line-height: 1.4;
+                    white-space: normal;
+                    word-break: break-word;
                 }
                 .nsl-card-status__icon { flex-shrink: 0; font-size: 1.2em; line-height: 1; }
                 .nsl-card-status__text { flex-shrink: 0; color: #fff; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
