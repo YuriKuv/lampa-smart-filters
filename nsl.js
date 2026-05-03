@@ -1082,15 +1082,22 @@
                     const currentSeason = parseInt(match[1]);
                     const currentEpisode = parseInt(match[2]);
                     
-                    if (totalSeasons > 0 && totalEpisodesInSeason > 0) {
-                        seasonEpisodeStr = `: сез.${currentSeason} из ${totalSeasons}; сер.${currentEpisode} из ${totalEpisodesInSeason}`;
-                    } else if (totalSeasons > 0) {
-                        seasonEpisodeStr = `: сез.${currentSeason} из ${totalSeasons}; сер.${match[2]}`;
-                    } else if (totalEpisodesInSeason > 0) {
-                        seasonEpisodeStr = `: сез.${match[1]}; сер.${currentEpisode} из ${totalEpisodesInSeason}`;
+                    let seasonStr = '';
+                    let episodeStr = '';
+                    
+                    if (totalSeasons > 0) {
+                        seasonStr = `Сезон ${currentSeason} из ${totalSeasons}`;
                     } else {
-                        seasonEpisodeStr = `: сез.${match[1]}; сер.${match[2]}`;
+                        seasonStr = `Сезон ${currentSeason}`;
                     }
+                    
+                    if (totalEpisodesInSeason > 0) {
+                        episodeStr = `Серия ${currentEpisode} из ${totalEpisodesInSeason}`;
+                    } else {
+                        episodeStr = `Серия ${currentEpisode}`;
+                    }
+                    
+                    seasonEpisodeStr = `: ${seasonStr}; ${episodeStr}`;
                 }
                 
                 if (duration > 0) {
@@ -2050,26 +2057,27 @@
                     display: flex;
                     flex-wrap: wrap;
                     align-items: center;
-                    gap: 0.3em 0.5em;
-                    padding: 0.4em 0.8em;
+                    justify-content: center;
+                    gap: 0.2em 0.5em;
+                    padding: 0.5em 0.8em;
                     background: rgba(0,0,0,0.75);
                     backdrop-filter: blur(4px);
                     -webkit-backdrop-filter: blur(4px);
                     border-radius: 0.5em;
                     pointer-events: none;
                     font-size: 0.7em;
-                    line-height: 1.4;
+                    line-height: 1.5;
                     white-space: normal;
-                    word-break: break-word;
+                    text-align: center;
                 }
                 .nsl-card-status__icon { flex-shrink: 0; font-size: 1.2em; line-height: 1; }
-                .nsl-card-status__text { flex-shrink: 0; color: #fff; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
-                .nsl-card-status__time { margin-left: auto; flex-shrink: 0; color: rgba(255,255,255,0.8); font-size: 0.9em; padding-left: 0.5em; }
+                .nsl-card-status__text { color: #fff; font-weight: 500; text-align: center; width: 100%; }
+                .nsl-card-status__time { color: rgba(255,255,255,0.8); font-size: 0.9em; }
                 .nsl-card-status--top { top: 0.5em; bottom: auto; }
                 .nsl-card-status--center { top: 50%; bottom: auto; transform: translateY(-50%); }
                 .nsl-card-status--bottom { bottom: 2.5em; top: auto; }
                 @media screen and (max-width: 480px) {
-                    .nsl-card-status { left: 0.5em; right: 0.5em; font-size: 0.7em; }
+                    .nsl-card-status { left: 0.5em; right: 0.5em; font-size: 0.65em; }
                 }
             `;
         } else if (c.card_display_mode === 'none') {
@@ -2154,15 +2162,22 @@
                     const currentSeason = parseInt(match[1]);
                     const currentEpisode = parseInt(match[2]);
                     
-                    if (totalSeasons > 0 && totalEpisodesInSeason > 0) {
-                        statusText += `: сез.${currentSeason} из ${totalSeasons}; сер.${currentEpisode} из ${totalEpisodesInSeason}`;
-                    } else if (totalSeasons > 0) {
-                        statusText += `: сез.${currentSeason} из ${totalSeasons}; сер.${match[2]}`;
-                    } else if (totalEpisodesInSeason > 0) {
-                        statusText += `: сез.${match[1]}; сер.${currentEpisode} из ${totalEpisodesInSeason}`;
+                    let seasonStr = '';
+                    let episodeStr = '';
+                    
+                    if (totalSeasons > 0) {
+                        seasonStr = `Сезон ${currentSeason} из ${totalSeasons}`;
                     } else {
-                        statusText += `: сез.${match[1]}; сер.${match[2]}`;
+                        seasonStr = `Сезон ${currentSeason}`;
                     }
+                    
+                    if (totalEpisodesInSeason > 0) {
+                        episodeStr = `Серия ${currentEpisode} из ${totalEpisodesInSeason}`;
+                    } else {
+                        episodeStr = `Серия ${currentEpisode}`;
+                    }
+                    
+                    statusText += `<br>${seasonStr}; ${episodeStr}`;
                 }
             }
             textHtml = `<span class="nsl-card-status__text">${statusText}</span>`;
