@@ -806,28 +806,19 @@
         } catch (e) { return null; }
     }
     
-function getCurrentPlayerTime() {
-    try {
-        // Сначала пробуем получить время из playerdata (штатный плеер)
-        if (Lampa.Player.opened()) {
-            const playerData = Lampa.Player.playdata();
-            if (playerData?.timeline?.time !== undefined && playerData.timeline.time > 0) {
-                return playerData.timeline.time;
+    function getCurrentPlayerTime() {
+        try {
+            if (Lampa.Player.opened()) {
+                const playerData = Lampa.Player.playdata();
+                if (playerData?.timeline?.time !== undefined) return playerData.timeline.time;
             }
-        }
-        // Затем пробуем video элемент (для браузеров и некоторых плееров)
-        const video = document.querySelector('video');
-        if (video && !isNaN(video.currentTime) && video.currentTime > 0) {
-            return video.currentTime;
-        }
-        // Пробуем также audio элемент
-        const audio = document.querySelector('audio');
-        if (audio && !isNaN(audio.currentTime) && audio.currentTime > 0) {
-            return audio.currentTime;
-        }
-    } catch (e) {}
-    return null;
-}
+            const video = document.querySelector('video');
+            if (video && !isNaN(video.currentTime) && video.currentTime > 0) {
+                return video.currentTime;
+            }
+        } catch (e) {}
+        return null;
+    }
     
     function getVideoDuration() {
         try {
@@ -839,95 +830,95 @@ function getCurrentPlayerTime() {
         return 0;
     }
     
-function saveProgress(timeInSeconds, force) {
-    const c = cfg();
-    if (!c.auto_save && !force) return false;
-    const movieKey = getCurrentMovieKey();
-    if (!movieKey) return false;
-    const currentTime = Math.floor(timeInSeconds);
-    const timeline = getTimeline();
-    const savedTime = timeline[movieKey]?.time || 0;
-    if (force || Math.abs(currentTime - savedTime) >= 10) {
-        let duration = getVideoDuration();
-        if (!duration && timeline[movieKey]?.duration) duration = timeline[movieKey].duration;
-        const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
-        const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
-        timeline[movieKey] = { time: currentTime, percent, duration, updated: Date.now(), tmdb_id: tmdbId };
-        saveTimeline(timeline);
-        lastSavedProgress = currentTime;
-        currentMovieTime = currentTime;
-        if (tmdbId && currentTime > 60 && !returnedToWatchingMap[getBaseTmdbId(tmdbId)]) returnToWatching(tmdbId);
-        return true;
-    }
-    return false;
-}
-    
-function initPlayerHandler() {
-    let wasVideoPlaying = false;
-    let lastSyncToGist = 0;
-    let checkCount = 0;
-    
-    if (playerInterval) clearInterval(playerInterval);
-    
-    playerInterval = setInterval(() => {
+    function saveProgress(timeInSeconds, force) {
         const c = cfg();
-        if (!c.enabled) return;
-        
-        const video = document.querySelector('video');
-        const audio = document.querySelector('audio');
-        const isVideoPlaying = (video && !video.paused && video.currentTime > 0) || 
-                               (audio && !audio.paused && audio.currentTime > 0);
-        const isPlayerOpen = Lampa.Player.opened();
-        const isActive = isPlayerOpen || isVideoPlaying;
-        
-        if (!isActive && !wasVideoPlaying) {
-            checkCount++;
-            if (checkCount < 5) return;
-            checkCount = 0;
-        }
-        
-        const currentTime = getCurrentPlayerTime();
-        
-        if (isActive && !wasVideoPlaying) {
-            checkCount = 0;
-            returnedToWatchingMap = {};
-            videoDuration = getVideoDuration();
-        }
-        
-        if (wasVideoPlaying && !isActive) {
-            if (currentMovieTime > 0) {
-                saveProgress(currentMovieTime, true);
-                syncTimelineWithCategories();
-                if (c.auto_sync && c.gist_token && c.gist_id) syncToGist('timeline', false);
-            }
-            currentMovieTime = 0;
-            currentMovieKey = null;
-            lastSavedProgress = 0;
-            videoDuration = 0;
-        }
-        
-        wasVideoPlaying = isActive;
-        
-        if (isActive && currentTime !== null && currentTime > 0) {
+        if (!c.auto_save && !force) return false;
+        const movieKey = getCurrentMovieKey();
+        if (!movieKey) return false;
+        const currentTime = Math.floor(timeInSeconds);
+        const timeline = getTimeline();
+        const savedTime = timeline[movieKey]?.time || 0;
+        if (force || Math.abs(currentTime - savedTime) >= 10) {
+            let duration = getVideoDuration();
+            if (!duration && timeline[movieKey]?.duration) duration = timeline[movieKey].duration;
+            const percent = duration > 0 ? Math.round((currentTime / duration) * 100) : 0;
+            const tmdbId = extractTmdbId(Lampa.Activity.active()?.movie);
+            timeline[movieKey] = { time: currentTime, percent, duration, updated: Date.now(), tmdb_id: tmdbId };
+            saveTimeline(timeline);
+            lastSavedProgress = currentTime;
             currentMovieTime = currentTime;
-            const movieKey = getCurrentMovieKey();
-            if (movieKey && movieKey !== currentMovieKey) {
-                currentMovieKey = movieKey;
+            if (tmdbId && currentTime > 60 && !returnedToWatchingMap[getBaseTmdbId(tmdbId)]) returnToWatching(tmdbId);
+            return true;
+        }
+        return false;
+    }
+    
+    function initPlayerHandler() {
+        let wasPlayerOpen = false;
+        let wasVideoPlaying = false;
+        let lastSyncToGist = 0;
+        let checkCount = 0;
+        
+        if (playerInterval) clearInterval(playerInterval);
+        
+        playerInterval = setInterval(() => {
+            const c = cfg();
+            if (!c.enabled) return;
+            
+            const isPlayerOpen = Lampa.Player.opened();
+            const video = document.querySelector('video');
+            const isVideoPlaying = video && !video.paused && video.currentTime > 0;
+            const isActive = isPlayerOpen || isVideoPlaying;
+            
+            if (!isActive && !wasPlayerOpen && !wasVideoPlaying) {
+                checkCount++;
+                if (checkCount < 5) return;
+                checkCount = 0;
+            }
+            
+            const currentTime = getCurrentPlayerTime();
+            
+            if (isActive && !wasPlayerOpen && !wasVideoPlaying) {
+                checkCount = 0;
+                returnedToWatchingMap = {};
+                videoDuration = getVideoDuration();
+            }
+            
+            if ((wasPlayerOpen || wasVideoPlaying) && !isActive) {
+                if (currentMovieTime > 0) {
+                    saveProgress(currentMovieTime, true);
+                    syncTimelineWithCategories();
+                    if (c.auto_sync && c.gist_token && c.gist_id) syncToGist('timeline', false);
+                }
+                currentMovieTime = 0;
+                currentMovieKey = null;
                 lastSavedProgress = 0;
                 videoDuration = 0;
             }
-            if (c.auto_save && Math.floor(currentTime) - lastSavedProgress >= 10) {
-                if (saveProgress(currentTime, false)) {
-                    const now = Date.now();
-                    if (c.auto_sync && (now - lastSyncToGist) >= c.sync_interval * 1000) {
-                        syncToGist('timeline', false);
-                        lastSyncToGist = now;
+            
+            wasPlayerOpen = isPlayerOpen;
+            wasVideoPlaying = isVideoPlaying;
+            
+            if (isActive && currentTime !== null && currentTime > 0) {
+                currentMovieTime = currentTime;
+                const movieKey = getCurrentMovieKey();
+                if (movieKey && movieKey !== currentMovieKey) {
+                    currentMovieKey = movieKey;
+                    lastSavedProgress = 0;
+                    videoDuration = 0;
+                }
+                if (c.auto_save && Math.floor(currentTime) - lastSavedProgress >= 10) {
+                    if (saveProgress(currentTime, false)) {
+                        const now = Date.now();
+                        if (c.auto_sync && (now - lastSyncToGist) >= c.sync_interval * 1000) {
+                            syncToGist('timeline', false);
+                            lastSyncToGist = now;
+                        }
                     }
                 }
             }
-        }
-    }, 1000);
-}
+        }, 1000);
+    }
     
     function cleanupTimeline() {
         const c = cfg();
