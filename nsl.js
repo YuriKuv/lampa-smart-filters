@@ -926,9 +926,15 @@
         if (!c.auto_save && !force) return false;
         const movieKey = getCurrentMovieKey();
         if (!movieKey) return false;
+        // ДИАГНОСТИКА
+        console.log('[NSL-SAVE] saveProgress called, key:', movieKey, 'time:', timeInSeconds);
+        
         const currentTime = Math.floor(timeInSeconds);
         const timeline = getTimeline();
         const savedTime = timeline[movieKey]?.time || 0;
+        
+        // ДИАГНОСТИКА
+        console.log('[NSL-SAVE] savedTime:', savedTime, 'currentTime:', currentTime, 'diff:', Math.abs(currentTime - savedTime));
         if (force || Math.abs(currentTime - savedTime) >= 10) {
             let duration = getVideoDuration();
             if (!duration && timeline[movieKey]?.duration) duration = timeline[movieKey].duration;
