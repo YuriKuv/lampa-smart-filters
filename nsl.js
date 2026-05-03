@@ -747,10 +747,15 @@
     }
 
     function isLastEpisodeOfLastSeason(baseId, season, episode, callback) {
+        let resolved = false;
+        
         // Пробуем получить эпизоды из кэша IndexedDB
         if (typeof Lampa !== 'undefined' && Lampa.Cache && typeof Lampa.Cache.getData === 'function') {
             Lampa.Cache.getData('timetable', baseId).then(data => {
+                if (resolved) return;
+                
                 if (data && data.episodes && data.episodes.length) {
+                    resolved = true;
                     const episodes = data.episodes;
                     let maxSeason = 0;
                     let lastEpNum = 0;
@@ -767,29 +772,42 @@
                     
                     callback(season >= maxSeason && episode >= lastEpNum);
                 } else {
-                    // Fallback: пробуем через TimeTable.next
+                    // IndexedDB ответил, но данных нет — пробуем fallback
+                    resolved = true;
                     fallbackCheck();
                 }
             }).catch(() => {
-                fallbackCheck();
+                if (!resolved) {
+                    resolved = true;
+                    fallbackCheck();
+                }
             });
+            
+            // Таймаут: если IndexedDB не ответил за 3 секунды — используем fallback
+            setTimeout(() => {
+                if (!resolved) {
+                    resolved = true;
+                    fallbackCheck();
+                }
+            }, 3000);
         } else {
+            resolved = true;
             fallbackCheck();
         }
         
         function fallbackCheck() {
-            const timetableData = Lampa.TimeTable?.all() || [];
+            const timetableData = Lampa.Timetable?.all() || [];
             const showData = timetableData.find(d => d.id == baseId);
             
             if (showData && showData.next) {
                 callback(season >= showData.next.season_number && episode >= showData.next.episode_number);
             } else {
-                // Последняя проверка: через сохранённый last_episode_to_air
                 const seriesCheck = getSeriesCheck();
                 const checkData = seriesCheck[baseId];
                 if (checkData && checkData.last_season_number > 0) {
                     callback(season >= checkData.last_season_number);
                 } else {
+                    // НЕТ ДАННЫХ — считаем что НЕ последняя серия
                     callback(false);
                 }
             }
