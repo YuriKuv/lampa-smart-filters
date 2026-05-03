@@ -1066,28 +1066,28 @@
             const timeline = getTimeline();
             const baseId = getBaseTmdbId(tmdbId);
             
-            // Ищем ВСЕ таймкоды для этого сериала и берём лучший
+            // Ищем ВСЕ таймкоды для этого сериала и берём с максимальным временем
             let bestTimelineItem = null;
             let bestKey = '';
-            let bestTime = 0;
+            let maxTime = 0;
             
             for (const key in timeline) {
                 if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
-                    const t = timeline[key].time || 0;
-                    if (t > bestTime) {
-                        bestTime = t;
+                    const t = timeline[key]?.time || 0;
+                    if (t > maxTime) {
+                        maxTime = t;
                         bestTimelineItem = timeline[key];
                         bestKey = key;
                     }
                 }
             }
             
-            if (bestTimelineItem && bestTimelineItem.time > 0) {
+            if (bestTimelineItem && maxTime > 0) {
                 const time = bestTimelineItem.time || 0;
                 const duration = bestTimelineItem.duration || 0;
                 const percent = bestTimelineItem.percent || 0;
                 
-                // Пытаемся извлечь сезон и серию из ключа
+                // Извлекаем сезон и серию из ключа
                 let seasonEpisodeStr = '';
                 const match = bestKey.match(/_s(\d+)_e(\d+)/);
                 if (match) {
@@ -1102,19 +1102,6 @@
                     extraText = `Прогресс: ${formatTime(time)}`;
                 }
             }
-        }
-        
-        if (category === 'abandoned' && tmdbId) {
-            const favorites = getFavorites();
-            const baseId = getBaseTmdbId(tmdbId);
-            const item = favorites.find(f => getBaseTmdbId(f.tmdb_id) === baseId && f.category === 'abandoned');
-            if (item) {
-                const lastUpdate = item.updated || item.added;
-                const daysAgo = Math.floor((Date.now() - lastUpdate) / (1000 * 60 * 60 * 24));
-                if (daysAgo > 0) { extraInfo = daysAgo === 1 ? ' 1 день' : ` ${daysAgo} дн.`; extraText = `Не смотрели ${daysAgo} ${getDaysWord(daysAgo)}`; }
-            }
-        }
-        return { ...base, displayText: base.text + extraInfo, extraText, category };
     }
 
     function getDaysWord(days) {
