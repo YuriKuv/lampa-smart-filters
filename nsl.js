@@ -123,8 +123,10 @@
     
     function getFavorites() { return Lampa.Storage.get(STORE_FAVORITES, []) || []; }
     function saveFavorites(l) { 
-        Lampa.Storage.set(STORE_FAVORITES, l, true); 
-        setTimeout(() => Lampa.Listener.send('state:changed', { target: 'nsl_favorites', reason: 'update' }), 100);
+        Lampa.Storage.set(STORE_FAVORITES, l, true);
+        if (!syncingFromGist) {
+            setTimeout(() => Lampa.Listener.send('state:changed', { target: 'nsl_favorites', reason: 'update' }), 100);
+        }
     }
     
     function getTimeline() { return Lampa.Storage.get(STORE_TIMELINE, {}) || {}; }
@@ -364,6 +366,8 @@
         return changed;
     }
 
+    let tmdbSeriesDataCache = {};
+    
     function addToFavorites(card, category) {
         if (!card || !card.id) return false;
         const tmdbId = extractTmdbId(card);
@@ -397,6 +401,16 @@
         };
         
         if (needSeriesData && typeof Lampa.TMDB !== 'undefined' && Lampa.TMDB.api) {
+            // Проверяем кеш
+            if (tmdbSeriesDataCache[baseId] && Date.now() - tmdbSeriesDataCache[baseId].time < 60 * 60 * 1000) {
+                const cachedData = tmdbSeriesDataCache[baseId].data;
+                cardData.number_of_seasons = cachedData.number_of_seasons || 0;
+                cardData.number_of_episodes = cachedData.number_of_episodes || 0;
+                cardData.last_air_date = cachedData.last_air_date || '';
+                saveItem(cardData);
+                return true;
+            }
+            
             const url = Lampa.TMDB.api('tv/' + baseId + '?api_key=' + Lampa.TMDB.key());
             $.ajax({
                 url, method: 'GET', timeout: 5000,
@@ -404,6 +418,17 @@
                     cardData.number_of_seasons = data.number_of_seasons || 0;
                     cardData.number_of_episodes = data.number_of_episodes || 0;
                     cardData.last_air_date = data.last_air_date || '';
+                    
+                    // Сохраняем в кеш
+                    tmdbSeriesDataCache[baseId] = {
+                        time: Date.now(),
+                        data: {
+                            number_of_seasons: cardData.number_of_seasons,
+                            number_of_episodes: cardData.number_of_episodes,
+                            last_air_date: cardData.last_air_date
+                        }
+                    };
+                    
                     saveItem(cardData);
                 },
                 error: () => saveItem(cardData)
@@ -501,27 +526,41 @@
         }
     }
         
+    let autoAbandonedRunning = false;
+    
     function checkAutoAbandoned() {
+        if (autoAbandonedRunning) return;
+        
         const c = cfg();
         if (!c.auto_abandoned) return;
-        const now = Date.now();
-        const abandonedAfter = c.abandoned_days * 24 * 60 * 60 * 1000;
-        const favorites = getFavorites();
-        let changed = false;
-        for (const item of favorites.filter(f => f.category === 'watching')) {
-            const lastUpdate = item.updated || item.added;
-            if (lastUpdate > 0 && (now - lastUpdate) > abandonedAfter) {
-                const oldCategory = item.category;
-                const title = item.data?.title || item.data?.name || 'Без названия';
-                item.category = 'abandoned'; item.updated = now;
-                applyCategoryRules(item.tmdb_id, 'abandoned', favorites);
-                logMove('auto_abandoned', title, oldCategory, 'abandoned');
-                changed = true;
+        
+        autoAbandonedRunning = true;
+        
+        try {
+            const now = Date.now();
+            const abandonedAfter = c.abandoned_days * 24 * 60 * 60 * 1000;
+            const favorites = getFavorites();
+            let changed = false;
+            
+            for (const item of favorites.filter(f => f.category === 'watching')) {
+                const lastUpdate = item.updated || item.added;
+                if (lastUpdate > 0 && (now - lastUpdate) > abandonedAfter) {
+                    const oldCategory = item.category;
+                    const title = item.data?.title || item.data?.name || 'Без названия';
+                    item.category = 'abandoned';
+                    item.updated = now;
+                    applyCategoryRules(item.tmdb_id, 'abandoned', favorites);
+                    logMove('auto_abandoned', title, oldCategory, 'abandoned');
+                    changed = true;
+                }
             }
-        }
-        if (changed) {
-            saveFavorites(favorites);
-            if (c.gist_token && c.gist_id) syncToGist('favorites', false);
+            
+            if (changed) {
+                saveFavorites(favorites);
+                if (c.gist_token && c.gist_id) syncToGist('favorites', false);
+            }
+        } finally {
+            autoAbandonedRunning = false;
         }
     }
 
@@ -1234,25 +1273,33 @@
         let bestItem = null;
         let bestEpisode = 0;
         let bestTime = 0;
+        let bestUpdated = 0;
         
         for (const key in timeline) {
             if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
                 const t = timeline[key]?.time || 0;
+                const updated = timeline[key]?.updated || 0;
                 const hasEpisode = key.includes('_s') && key.includes('_e');
                 
                 if (hasEpisode) {
                     const match = key.match(/_s(\d+)_e(\d+)/);
                     const epNum = match ? parseInt(match[2]) : 0;
                     
-                    if (epNum > bestEpisode || (epNum === bestEpisode && t >= bestTime)) {
+                    // Приоритет: больше номер эпизода, при равных — свежее обновление, затем больше время
+                    if (epNum > bestEpisode || 
+                        (epNum === bestEpisode && updated > bestUpdated) ||
+                        (epNum === bestEpisode && updated === bestUpdated && t >= bestTime)) {
                         bestEpisode = epNum;
                         bestTime = t;
+                        bestUpdated = updated;
                         bestItem = timeline[key];
                         bestKey = key;
                     }
-                } else if (!bestItem) {
-                    if (t > bestTime) {
+                } else if (!bestItem || updated > bestUpdated) {
+                    // Для фильмов — самое свежее обновление
+                    if (updated > bestUpdated || (updated === bestUpdated && t > bestTime)) {
                         bestTime = t;
+                        bestUpdated = updated;
                         bestItem = timeline[key];
                         bestKey = key;
                     }
@@ -1262,7 +1309,6 @@
         
         return { key: bestKey, item: bestItem, time: bestTime };
     }
-
     function getSeriesInfo(tmdbId) {
         const baseId = getBaseTmdbId(tmdbId);
         const seriesCheck = getSeriesCheck();
@@ -2409,12 +2455,13 @@
                     .nsl-card-status { left: 0.5em; right: 0.5em; font-size: 0.65em; }
                 }
             `;
-        } else if (c.card_display_mode === 'none') {
+        } else if (c.card_display_mode === 'lampa_default') {
+            // Восстанавливаем штатные стили Lampa
             return `
-                .card .card-watched { display: none !important; }
-                .card-watched__item { display: none !important; }
-                .card .icon--history { display: none !important; }
                 .nsl-card-status { display: none !important; }
+                .card .card-watched { display: block !important; }
+                .card-watched__item { display: block !important; }
+                .card .icon--history { display: inline-block !important; }
             `;
         }
         
@@ -2576,6 +2623,7 @@
             }
             
             const origCreate = cardMap.Watched.onCreate;
+            const origDestroy = cardMap.Watched.onDestroy;
             
             cardMap.Watched.onCreate = function() {
                 if (origCreate) origCreate.call(this);
@@ -2592,12 +2640,22 @@
                 
                 const handler = () => setTimeout(updateCard, 100);
                 
+                // Очищаем предыдущий обработчик
                 if (this._nslUnsubscribe) {
-                    Lampa.Listener.unfollow('state:changed', this._nslUnsubscribe);
+                    Lampa.Listener.remove('state:changed', this._nslUnsubscribe);
                 }
                 
                 Lampa.Listener.follow('state:changed', handler);
                 this._nslUnsubscribe = handler;
+            };
+            
+            // Добавляем очистку при разрушении карточки
+            cardMap.Watched.onDestroy = function() {
+                if (this._nslUnsubscribe) {
+                    Lampa.Listener.remove('state:changed', this._nslUnsubscribe);
+                    this._nslUnsubscribe = null;
+                }
+                if (origDestroy) origDestroy.call(this);
             };
             
             cardDisplayPatched = true;
@@ -2671,13 +2729,17 @@
         });
     }
 
+    let syncingFromGist = false;
+    
     function syncFromGist(showNotify) {
         const gist = getGistData();
         if (!gist) { 
             if (showNotify) notify('⚠️ GitHub Gist не настроен'); 
             return; 
         }
-    
+        
+        syncingFromGist = true;
+        
         $.ajax({
             url: `https://api.github.com/gists/${gist.id}`,
             method: 'GET',
@@ -2690,27 +2752,48 @@
             success: (data) => {
                 try {
                     let changed = false;
+                    
                     const favContent = data.files['nsl_favorites.json']?.content;
                     if (favContent) {
                         const favData = JSON.parse(favContent);
-                        if (favData.favorites) { saveFavorites(favData.favorites); changed = true; }
-                        if (favData.bookmarks) { saveBookmarks(favData.bookmarks); changed = true; }
+                        if (favData.favorites) { 
+                            saveFavorites(favData.favorites); 
+                            changed = true; 
+                        }
+                        if (favData.bookmarks) { 
+                            saveBookmarks(favData.bookmarks); 
+                            changed = true; 
+                        }
                     }
+                    
                     const timeContent = data.files['nsl_timeline.json']?.content;
                     if (timeContent) {
                         const timeData = JSON.parse(timeContent);
-                        if (timeData.timeline) { saveTimeline(timeData.timeline); changed = true; }
+                        if (timeData.timeline) { 
+                            saveTimeline(timeData.timeline); 
+                            changed = true; 
+                        }
                     }
+                    
                     const bookContent = data.files['nsl_bookmarks.json']?.content;
                     if (bookContent) {
                         const bookData = JSON.parse(bookContent);
-                        if (bookData.bookmarks) { saveBookmarks(bookData.bookmarks); changed = true; }
+                        if (bookData.bookmarks) { 
+                            saveBookmarks(bookData.bookmarks); 
+                            changed = true; 
+                        }
                     }
+                    
                     const hisContent = data.files['nsl_history.json']?.content;
                     if (hisContent) {
                         const hisData = JSON.parse(hisContent);
-                        if (hisData.history) { saveHistory(hisData.history); changed = true; }
+                        if (hisData.history) { 
+                            saveHistory(hisData.history); 
+                            changed = true; 
+                        }
                     }
+                    
+                    // Старый формат (единый файл)
                     if (!favContent && !timeContent) {
                         const oldContent = data.files['nsl_sync.json']?.content;
                         if (oldContent) {
@@ -2722,20 +2805,31 @@
                         }
                     }
                     
+                    syncingFromGist = false;
+                    
                     if (changed) {
                         cleanupDuplicateCategories();
                         syncTimelineWithCategories();
                         checkNewEpisodes(false);
                     }
+                    
                     Lampa.Storage.set(GIST_CACHE + '_last_sync', Date.now());
                     setTimeout(() => renderBookmarks(), 500);
+                    
+                    // Единое обновление UI после всех изменений
+                    refreshCardStatus();
+                    refreshFavoriteButton();
+                    refreshNewEpisodesBadge();
+                    
                     if (showNotify) notify(changed ? '📥 Данные загружены с Gist' : '✅ Актуально');
                 } catch(e) {
+                    syncingFromGist = false;
                     console.error('[NSL] Parse error:', e);
                     if (showNotify) notify('❌ Ошибка чтения данных');
                 }
             },
             error: (xhr) => {
+                syncingFromGist = false;
                 console.error('[NSL] Load error:', xhr.status, xhr.statusText);
                 if (showNotify) notify('❌ Ошибка загрузки с Gist');
             },
