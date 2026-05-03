@@ -1066,7 +1066,7 @@
             const timeline = getTimeline();
             const baseId = getBaseTmdbId(tmdbId);
             
-            // Ищем ВСЕ таймкоды для этого сериала и берём с максимальным временем
+            // Ищем лучший таймкод: приоритет ключам с _s_ и _e_
             let bestTimelineItem = null;
             let bestKey = '';
             let maxTime = 0;
@@ -1074,10 +1074,20 @@
             for (const key in timeline) {
                 if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
                     const t = timeline[key]?.time || 0;
-                    if (t > maxTime) {
+                    const isEpisodeKey = key.includes('_s') && key.includes('_e');
+                    
+                    // Ключи с _s_ и _e_ всегда приоритетнее
+                    if (isEpisodeKey && t >= maxTime) {
                         maxTime = t;
                         bestTimelineItem = timeline[key];
                         bestKey = key;
+                    } else if (!isEpisodeKey && !bestTimelineItem) {
+                        // Ключ без _s_ и _e_ только если нет ни одного эпизодного ключа
+                        if (t > maxTime) {
+                            maxTime = t;
+                            bestTimelineItem = timeline[key];
+                            bestKey = key;
+                        }
                     }
                 }
             }
@@ -1087,7 +1097,6 @@
                 const duration = bestTimelineItem.duration || 0;
                 const percent = bestTimelineItem.percent || 0;
                 
-                // Извлекаем сезон и серию из ключа
                 let seasonEpisodeStr = '';
                 const match = bestKey.match(/_s(\d+)_e(\d+)/);
                 if (match) {
@@ -1116,7 +1125,6 @@
         }
         return { ...base, displayText: base.text + extraInfo, extraText, category };
     }
-
     function getDaysWord(days) {
         if (days % 10 === 1 && days % 100 !== 11) return 'день';
         if (days % 10 >= 2 && days % 10 <= 4 && (days % 100 < 10 || days % 100 >= 20)) return 'дня';
@@ -2116,15 +2124,22 @@
         const favorites = getFavorites();
         const timeline = getTimeline();
         
-        // Ищем лучший таймкод (с максимальным временем)
+        // Ищем лучший таймкод: приоритет ключам с _s_ и _e_
         let bestTimelineItem = null;
         let maxTime = 0;
         for (const key in timeline) {
             if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
                 const t = timeline[key]?.time || 0;
-                if (t > maxTime) {
+                const isEpisodeKey = key.includes('_s') && key.includes('_e');
+                
+                if (isEpisodeKey && t >= maxTime) {
                     maxTime = t;
                     bestTimelineItem = timeline[key];
+                } else if (!isEpisodeKey && !bestTimelineItem) {
+                    if (t > maxTime) {
+                        maxTime = t;
+                        bestTimelineItem = timeline[key];
+                    }
                 }
             }
         }
@@ -2158,7 +2173,6 @@
             
             let statusText = status.text;
             if (timelineItem && timelineItem.time > 0) {
-                // Ищем ключ в timeline по базовому ID и извлекаем сезон/серию
                 const baseId = getBaseTmdbId(extractTmdbId(cardData));
                 for (const key in timeline) {
                     if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId && timeline[key] === timelineItem) {
