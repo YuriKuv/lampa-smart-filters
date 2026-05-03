@@ -798,7 +798,7 @@
         }
         
         function fallbackCheck() {
-            const timetableData = Lampa.Timetable?.all() || [];
+            const timetableData = Lampa.TimeTable?.all() || [];
             const showData = timetableData.find(d => d.id == baseId);
             
             if (showData && showData.next) {
