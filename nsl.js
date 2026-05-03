@@ -1017,18 +1017,6 @@
             }, 5000);
         }
     }
-        
-        // Если нет сериалов для проверки — сохраняем сразу
-        if (pendingChecks === 0) {
-            if (changed) {
-                saveFavorites(favorites);
-                refreshNewEpisodesBadge();
-            }
-                syncTimelineRunning = false;
-            }
-        }
-        
-    } 
     
     function clearAllFavorites() {
         Lampa.Select.show({
