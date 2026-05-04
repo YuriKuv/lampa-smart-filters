@@ -3732,13 +3732,17 @@
             }
         });
         
-        // Периодическая синхронизация из file_view
-        setInterval(() => {
-            syncFromFileView();
-        }, 15000);
+        // Слушаем обновления штатного timeline Lampa (срабатывает при timeCall из внешнего плеера)
+        Lampa.Listener.follow('state:changed', function(e) {
+            if (e.target === 'timeline' && e.reason === 'update') {
+                console.log('[NSL] Lampa timeline updated by external player, syncing from file_view');
+                setTimeout(() => syncFromFileView(), 1000);
+            }
+        });
         
-        Lampa.Listener.follow('state:changed', (e) => {
-            if (e.target === 'nsl_favorites' || e.target === 'timeline') {
+        // Обновление UI при изменениях наших данных
+        Lampa.Listener.follow('state:changed', function(e) {
+            if (e.target === 'nsl_favorites' || e.target === 'nsl_timeline') {
                 setTimeout(() => { refreshCardStatus(); refreshFavoriteButton(); refreshNewEpisodesBadge(); }, 100);
             }
         });
