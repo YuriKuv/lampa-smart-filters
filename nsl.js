@@ -1462,51 +1462,6 @@
             }
         }
     }
-        
-        function updateNSLKey(nslKey, fvItem, tmdbId) {
-            const existingNSL = timeline[nslKey];
-            const fvTime = fvItem.time || 0;
-            const fvPercent = fvItem.percent || 0;
-            const fvDuration = fvItem.duration || 0;
-            
-            if (!existingNSL || existingNSL.time < fvTime || 
-                (existingNSL.time === fvTime && existingNSL.percent < fvPercent)) {
-                timeline[nslKey] = {
-                    time: fvTime,
-                    duration: fvDuration,
-                    percent: fvPercent,
-                    updated: Date.now(),
-                    tmdb_id: tmdbId
-                };
-                changed = true;
-                console.log('[NSL] Updated from file_view:', nslKey, 'time:', fvTime, 'percent:', fvPercent);
-            }
-        }
-        
-        // Сохраняем новый снапшот
-        const newSnapshot = {};
-        for (const hash in fileView) {
-            newSnapshot[hash] = fileView[hash]?.time || 0;
-        }
-        saveFileViewSnapshot(newSnapshot);
-        
-        if (changed) {
-            saveTimeline(timeline);
-            
-            // Обновляем статус если есть открытая карточка
-            setTimeout(() => {
-                refreshCardStatus();
-                refreshFavoriteButton();
-                refreshAllCardStatuses();
-            }, 300);
-            
-            syncTimelineWithCategories();
-            
-            if (c.auto_sync && c.gist_token && c.gist_id) {
-                syncToGist('timeline', false);
-            }
-        }
-    }
     
     // ======================
     // СТАТУС НА КАРТОЧКЕ
