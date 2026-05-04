@@ -1396,18 +1396,15 @@
     function syncFromFileView() {
         const fileName = 'file_view' + (PROFILE_ID !== 'default' ? '_' + PROFILE_ID : '');
         const fileView = Lampa.Storage.get(fileName, {});
+        const hashMapping = Lampa.Storage.get('nsl_hash_mapping_' + PROFILE_ID, {});
         const timeline = getTimeline();
         const c = cfg();
         let changed = false;
         
         const lastSnapshot = getFileViewSnapshot();
         
-        console.log('[NSL] syncFromFileView: checking', fileName, 'keys:', Object.keys(fileView).length);
+        console.log('[NSL] syncFromFileView:', fileName, 'keys:', Object.keys(fileView).length, 'mapping:', Object.keys(hashMapping).length);
         
-        // Собираем все карточки из избранного для сопоставления
-        const favorites = getFavorites();
-        
-        // Перебираем ВСЕ ключи file_view
         for (const hash in fileView) {
             const fvItem = fileView[hash];
             if (!fvItem || !fvItem.time || fvItem.time <= 0) continue;
@@ -1416,44 +1413,55 @@
             const prevTime = lastSnapshot[hash] || 0;
             if (fvItem.time === prevTime) continue;
             
-            // Пытаемся найти tmdb_id и season/episode по хешу
-            let foundMatch = false;
+            // Ищем в маппинге
+            const nslKey = hashMapping[hash];
+            if (!nslKey) continue;
             
-            for (const fav of favorites) {
-                const cardData = fav.data || {};
-                const favTmdbId = fav.tmdb_id || extractTmdbId(cardData);
-                if (!favTmdbId) continue;
+            const existingNSL = timeline[nslKey];
+            const fvTime = fvItem.time || 0;
+            const fvPercent = fvItem.percent || 0;
+            const fvDuration = fvItem.duration || 0;
+            
+            if (!existingNSL || existingNSL.time < fvTime || 
+                (existingNSL.time === fvTime && existingNSL.percent < fvPercent)) {
                 
-                const favBaseId = getBaseTmdbId(favTmdbId);
-                const isSeries = !!(cardData.original_name || fav.media_type === 'tv');
+                const baseId = getBaseTmdbId(nslKey);
                 
-                if (isSeries) {
-                    const name = cardData.original_name || cardData.original_title || cardData.title || cardData.name || '';
-                    for (let s = 1; s <= 30; s++) {
-                        for (let e = 1; e <= 50; e++) {
-                            const rawKey = [s, s > 10 ? ':' : '', e, name].join('');
-                            const testHash = Lampa.Utils.hash(rawKey);
-                            if (testHash === parseInt(hash)) {
-                                const nslKey = `${favBaseId}_s${s}_e${e}`;
-                                updateNSLKey(nslKey, fvItem, favTmdbId);
-                                foundMatch = true;
-                                break;
-                            }
-                        }
-                        if (foundMatch) break;
-                    }
-                } else {
-                    const name = cardData.original_title || cardData.title || cardData.name || '';
-                    const testHash = Lampa.Utils.hash(name);
-                    if (testHash === parseInt(hash)) {
-                        updateNSLKey(favBaseId, fvItem, favTmdbId);
-                        foundMatch = true;
-                    }
-                }
-                
-                if (foundMatch) break;
+                timeline[nslKey] = {
+                    time: fvTime,
+                    duration: fvDuration,
+                    percent: fvPercent,
+                    updated: Date.now(),
+                    tmdb_id: baseId
+                };
+                changed = true;
+                console.log('[NSL] Updated from file_view via mapping:', nslKey, 'time:', fvTime, 'percent:', fvPercent);
             }
         }
+        
+        // Сохраняем новый снапшот
+        const newSnapshot = {};
+        for (const hash in fileView) {
+            newSnapshot[hash] = fileView[hash]?.time || 0;
+        }
+        saveFileViewSnapshot(newSnapshot);
+        
+        if (changed) {
+            saveTimeline(timeline);
+            
+            setTimeout(() => {
+                refreshCardStatus();
+                refreshFavoriteButton();
+                refreshAllCardStatuses();
+            }, 300);
+            
+            syncTimelineWithCategories();
+            
+            if (c.auto_sync && c.gist_token && c.gist_id) {
+                syncToGist('timeline', false);
+            }
+        }
+    }
         
         function updateNSLKey(nslKey, fvItem, tmdbId) {
             const existingNSL = timeline[nslKey];
@@ -1764,22 +1772,98 @@
                             }, 100);
                         }
                         
+                        // ===== СИНХРОНИЗАЦИЯ ТАЙМКОДОВ: NSL → FILE_VIEW =====
                         const timeline = getTimeline();
+                        const tmdbId = extractTmdbId(movie);
+                        const baseId = getBaseTmdbId(tmdbId);
+                        
+                        // Собираем лучший таймкод
+                        let bestKey = null;
                         let bestTime = 0;
+                        let bestDuration = 0;
+                        let bestPercent = 0;
+                        let bestUpdated = 0;
+                        
                         for (const key in timeline) {
-                            if (getBaseTmdbId(timeline[key]?.tmdb_id) === getBaseTmdbId(String(movie.id))) {
-                                bestTime = Math.max(bestTime, timeline[key]?.time || 0);
-                            }
-                        }
-                        if (bestTime > 60) {
-                            setTimeout(() => {
-                                if (Lampa.Player.opened() && Lampa.Player.playdata) {
-                                    const pd = Lampa.Player.playdata();
-                                    if (pd?.timeline) {
-                                        pd.timeline.time = bestTime;
+                            if (getBaseTmdbId(timeline[key]?.tmdb_id) === baseId) {
+                                const t = timeline[key];
+                                const updated = t.updated || 0;
+                                
+                                if (movie.original_name) {
+                                    const hasEpisode = key.includes('_s') && key.includes('_e');
+                                    if (hasEpisode) {
+                                        const match = key.match(/_s(\d+)_e(\d+)/);
+                                        const epNum = match ? parseInt(match[2]) : 0;
+                                        const oldMatch = bestKey?.match(/_s(\d+)_e(\d+)/);
+                                        const oldEpNum = oldMatch ? parseInt(oldMatch[2]) : 0;
+                                        
+                                        if (epNum > oldEpNum || 
+                                            (epNum === oldEpNum && updated > bestUpdated) ||
+                                            (epNum === oldEpNum && updated === bestUpdated && (t.time || 0) > bestTime)) {
+                                            bestKey = key;
+                                            bestTime = t.time || 0;
+                                            bestDuration = t.duration || 0;
+                                            bestPercent = t.percent || 0;
+                                            bestUpdated = updated;
+                                        }
+                                    }
+                                } else {
+                                    if (!bestKey || updated > bestUpdated || 
+                                        (updated === bestUpdated && (t.time || 0) > bestTime)) {
+                                        bestKey = key;
+                                        bestTime = t.time || 0;
+                                        bestDuration = t.duration || 0;
+                                        bestPercent = t.percent || 0;
+                                        bestUpdated = updated;
                                     }
                                 }
-                            }, 2000);
+                            }
+                        }
+                        
+                        if (bestKey && bestTime > 0) {
+                            // Формируем хеш для file_view по формату Lampa
+                            let fileViewHash;
+                            if (bestKey.includes('_s') && bestKey.includes('_e')) {
+                                const match = bestKey.match(/_s(\d+)_e(\d+)/);
+                                const season = match[1];
+                                const episode = match[2];
+                                const name = movie.original_name || movie.original_title || movie.title || movie.name || '';
+                                const rawKey = [season, season > 10 ? ':' : '', episode, name].join('');
+                                fileViewHash = Lampa.Utils.hash(rawKey);
+                            } else {
+                                const name = movie.original_title || movie.title || movie.original_name || movie.name || '';
+                                fileViewHash = Lampa.Utils.hash(name);
+                            }
+                            
+                            // Обновляем file_view
+                            const fileName = 'file_view' + (PROFILE_ID !== 'default' ? '_' + PROFILE_ID : '');
+                            const fileView = Lampa.Storage.get(fileName, {});
+                            fileView[fileViewHash] = {
+                                time: bestTime,
+                                duration: bestDuration,
+                                percent: bestPercent,
+                                profile: getProfileId()
+                            };
+                            Lampa.Storage.set(fileName, fileView, true);
+                            
+                            // Сохраняем маппинг хеш → nsl_key
+                            const hashMapping = Lampa.Storage.get('nsl_hash_mapping_' + PROFILE_ID, {});
+                            hashMapping[String(fileViewHash)] = bestKey;
+                            Lampa.Storage.set('nsl_hash_mapping_' + PROFILE_ID, hashMapping, true);
+                            
+                            console.log('[NSL] Synced to file_view:', bestKey, '→ hash:', fileViewHash, 'time:', bestTime);
+                            
+                            // Для штатного плеера — устанавливаем время продолжения
+                            if (bestTime > 60) {
+                                setTimeout(() => {
+                                    if (Lampa.Player.opened() && Lampa.Player.playdata) {
+                                        const pd = Lampa.Player.playdata();
+                                        if (pd?.timeline) {
+                                            pd.timeline.time = bestTime;
+                                        }
+                                    }
+                                }, 2000);
+                            }
                         }
                         
                     } catch (err) { console.error('[NSL] Error:', err.message); }
