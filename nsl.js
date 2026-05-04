@@ -1386,7 +1386,10 @@
     let lastFileViewSnapshot = {};
     
     function syncFromFileView() {
-        const fileView = Lampa.Storage.get('file_view', {});
+        // Получаем правильное имя хранилища как в штатном Timeline Lampa
+        const fileName = 'file_view' + (PROFILE_ID !== 'default' ? '_' + PROFILE_ID : '');
+        const fileView = Lampa.Storage.get(fileName, {});
+        console.log('[NSL] syncFromFileView using:', fileName, 'keys:', Object.keys(fileView).length);
         const timeline = getTimeline();
         let changed = false;
         const c = cfg();
