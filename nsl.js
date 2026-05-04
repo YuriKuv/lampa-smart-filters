@@ -1386,109 +1386,107 @@
     let lastFileViewSnapshot = {};
     
     function syncFromFileView() {
-        // Получаем правильное имя хранилища как в штатном Timeline Lampa
         const fileName = 'file_view' + (PROFILE_ID !== 'default' ? '_' + PROFILE_ID : '');
         const fileView = Lampa.Storage.get(fileName, {});
-        console.log('[NSL] syncFromFileView using:', fileName, 'keys:', Object.keys(fileView).length);
         const timeline = getTimeline();
         let changed = false;
         const c = cfg();
         
-        // Ищем только те ключи, которые изменились
+        // Получаем текущую карточку из активности
+        const activity = Lampa.Activity.active();
+        const movie = activity?.movie || activity?.card;
+        
+        if (!movie) return;
+        
+        const tmdbId = extractTmdbId(movie);
+        if (!tmdbId) return;
+        
+        const baseId = getBaseTmdbId(tmdbId);
+        const isSeries = !!(movie.original_name);
+        
+        console.log('[NSL] syncFromFileView for:', movie.title || movie.name, 'tmdb:', baseId, 'isSeries:', isSeries);
+        
+        // Перебираем все ключи file_view
         for (const hash in fileView) {
             const fvItem = fileView[hash];
             if (!fvItem || !fvItem.time || fvItem.time <= 0) continue;
             
-            // Проверяем, не обработали ли уже этот хеш
-            if (lastFileViewSnapshot[hash] && 
-                lastFileViewSnapshot[hash].time === fvItem.time && 
-                lastFileViewSnapshot[hash].percent === fvItem.percent) {
-                continue;
-            }
+            // Проверяем, изменился ли этот хеш с прошлой проверки
+            const prevTime = lastFileViewSnapshot[hash]?.time || 0;
+            if (fvItem.time === prevTime) continue;
             
-            // Пытаемся найти tmdb_id по хешу
-            // Ищем во всех активностях и избранном
-            let tmdbId = null;
-            let season = null;
-            let episode = null;
+            let matchedSeason = null;
+            let matchedEpisode = null;
             
-            // Пробуем найти карточку в активности
-            try {
-                const activity = Lampa.Activity.active();
-                const movie = activity?.movie || activity?.card;
-                if (movie) {
-                    const extractedId = extractTmdbId(movie);
-                    if (extractedId) {
-                        // Проверяем, соответствует ли хеш этой карточке
-                        if (movie.original_name) {
-                            // Для сериалов — ищем совпадение по хешу эпизода
-                            for (let s = 1; s <= 30; s++) {
-                                for (let e = 1; e <= 50; e++) {
-                                    const rawKey = [s, s > 10 ? ':' : '', e, movie.original_name || movie.original_title || ''].join('');
-                                    const testHash = Lampa.Utils.hash(rawKey);
-                                    if (testHash === parseInt(hash)) {
-                                        tmdbId = extractedId;
-                                        season = s;
-                                        episode = e;
-                                        break;
-                                    }
-                                }
-                                if (tmdbId) break;
-                            }
-                        } else {
-                            // Для фильмов
-                            const rawKey = movie.original_title || movie.title || '';
-                            const testHash = Lampa.Utils.hash(rawKey);
-                            if (testHash === parseInt(hash)) {
-                                tmdbId = extractedId;
-                            }
+            if (isSeries) {
+                // Для сериалов — перебираем возможные сезоны/эпизоды
+                const name = movie.original_name || movie.original_title || '';
+                let found = false;
+                
+                for (let s = 1; s <= 30 && !found; s++) {
+                    for (let e = 1; e <= 50 && !found; e++) {
+                        const rawKey = [s, s > 10 ? ':' : '', e, name].join('');
+                        const testHash = Lampa.Utils.hash(rawKey);
+                        if (testHash === parseInt(hash)) {
+                            matchedSeason = s;
+                            matchedEpisode = e;
+                            found = true;
                         }
                     }
                 }
-            } catch(e) {}
+            } else {
+                // Для фильмов
+                const name = movie.original_title || movie.title || '';
+                const testHash = Lampa.Utils.hash(name);
+                if (testHash === parseInt(hash)) {
+                    matchedSeason = null;
+                    matchedEpisode = null;
+                } else {
+                    continue;
+                }
+            }
             
-            if (tmdbId) {
-                const baseId = getBaseTmdbId(tmdbId);
+            // Если нашли соответствие — обновляем NSL
+            if (isSeries ? (matchedSeason && matchedEpisode) : true) {
                 let nslKey;
-                
-                if (season && episode) {
-                    nslKey = `${baseId}_s${season}_e${episode}`;
-                } else if (season) {
-                    nslKey = `${baseId}_s${season}_e1`;
+                if (matchedSeason && matchedEpisode) {
+                    nslKey = `${baseId}_s${matchedSeason}_e${matchedEpisode}`;
                 } else {
                     nslKey = baseId;
                 }
                 
-                // Проверяем, нужно ли обновить
                 const existingNSL = timeline[nslKey];
-                const fvUpdated = Date.now();
+                const fvTime = fvItem.time || 0;
+                const fvPercent = fvItem.percent || 0;
                 
-                if (!existingNSL || existingNSL.time < fvItem.time || 
-                    (existingNSL.time === fvItem.time && existingNSL.percent < fvItem.percent)) {
+                if (!existingNSL || existingNSL.time < fvTime || existingNSL.percent < fvPercent) {
                     timeline[nslKey] = {
-                        time: fvItem.time || 0,
+                        time: fvTime,
                         duration: fvItem.duration || 0,
-                        percent: fvItem.percent || 0,
-                        updated: fvUpdated,
+                        percent: fvPercent,
+                        updated: Date.now(),
                         tmdb_id: tmdbId
                     };
                     changed = true;
-                    console.log('[NSL] Synced from file_view:', nslKey, 'time:', fvItem.time, 'percent:', fvItem.percent);
+                    console.log('[NSL] Updated from file_view:', nslKey, 'time:', fvTime, 'percent:', fvPercent);
                 }
             }
         }
         
         // Сохраняем снапшот
+        lastFileViewSnapshot = JSON.parse(JSON.stringify(fileView));
+        
         if (changed) {
             saveTimeline(timeline);
-            syncTimelineWithCategories();
             
-            // Принудительно обновляем статус на открытой карточке
+            // Обновляем статус
             setTimeout(() => {
                 refreshCardStatus();
                 refreshFavoriteButton();
                 refreshAllCardStatuses();
-            }, 500);
+            }, 300);
+            
+            syncTimelineWithCategories();
             
             if (c.auto_sync && c.gist_token && c.gist_id) {
                 syncToGist('timeline', false);
