@@ -1476,11 +1476,17 @@
         }
         
         // Сохраняем снапшот
-        lastFileViewSnapshot = JSON.parse(JSON.stringify(fileView));
-        
         if (changed) {
             saveTimeline(timeline);
             syncTimelineWithCategories();
+            
+            // Принудительно обновляем статус на открытой карточке
+            setTimeout(() => {
+                refreshCardStatus();
+                refreshFavoriteButton();
+                refreshAllCardStatuses();
+            }, 500);
+            
             if (c.auto_sync && c.gist_token && c.gist_id) {
                 syncToGist('timeline', false);
             }
